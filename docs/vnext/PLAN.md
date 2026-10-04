@@ -1,38 +1,35 @@
 # Implementation plan
 
-Sole roadmap; CURRENT.md holds status and next action. Advance one verified slice.
+Sole roadmap; CURRENT.md holds status/next action. Advance verified slices.
 
 ## M1 - Prove the native loadout and runtime seam
 
-**Outcome/exit:** a headless probe reuses OpenMW loading, winning records and
-plain/scripted/enchanted inventories, exporting bounded diagnostics atomically.
-Narrow checks prove real-loadout operations and stock calculation parity under
-changed skills/settings. Keep startup/RSS, dependencies, player assumptions,
-broad-link removal conditions and missing TR evidence in ignored `build/`.
-Loading alone is insufficient; refactor unresolved coupling.
+**Outcome/exit:** headless OpenMW loading, winning records and plain/scripted/
+enchanted inventories; atomic bounded diagnostics, real-loadout operations and
+stock calculation parity under changed skills/settings. Keep startup/RSS,
+dependencies, player assumptions, broad-link removal conditions and TR gaps in
+ignored `build/`. Refactor unresolved coupling; loading alone is insufficient.
 
-**Retire:** replaced baker semantics after consumer coverage; retain hash/pack and
-malformed-input checks.
+**Retire:** baker semantics after consumer coverage; retain hash/pack/malformed-input checks.
 
 ## M2 - Make engine mutations safe for two player contexts
 
 **Outcome/exit:** two explicit players share native take/split/drop/equip and
-enchanted/scripted mechanics. Preserve identity, locals, soul, condition, charge,
-equipment and dynamic records; separate presentation. Narrow checks prove actor
-isolation, coherent save/restore and durable acknowledgments. Stale input,
-contention and failed writes leak no mutation, script effects or success;
-object copies alone are insufficient.
+enchanted/scripted mechanics, preserving identity, locals, soul, condition,
+charge, equipment and dynamic records; separate presentation. Prove actor
+isolation, coherent recovery and durable acknowledgments; stale input,
+contention and failed writes leak no mutation, script effects or success.
 
 **Retire:** independent inventory writers/client rebuilds after cutover; retain
-identity, validation and failure tests. M6 generalizes persistence.
+identity/validation/failure tests. M6 generalizes persistence.
 
 ## M3 - Connect two clients to a shared modded world
 
-**Outcome/exit:** two authenticated desktops share native references, actors,
-containers, doors and time/weather with bounded interest, identities/revisions,
-baselines, commits and unload semantics. Named TR graphical evidence covers
-containers/doors/weather, late join/reconnect, contact expiry, reversal, disconnect
-and latency before M4. M4 adds server physics/NPC obstruction.
+**Outcome/exit:** two authenticated desktops share references/actors/containers/
+doors/time/weather with bounded interest, identities/revisions, baselines,
+commits and unload. Named TR graphical evidence covers containers/doors/weather,
+late join/reconnect, contact expiry/reversal, disconnect/latency before M4's
+server physics/NPC obstruction.
 
 **Retire:** hand-enumerated cells/references and fixture-only production bootstrap;
 retain small fixtures.
@@ -41,6 +38,15 @@ retain small fixtures.
 
 **Outcome:** players and actors use general OpenMW combat mechanics for the
 declared gameplay loadout, with server-owned AI, hits, effects, wear, death and loot.
+
+**Before M5:** verify bounded exploration: expand exterior
+discovery/streaming; prove adjacent-cell movement/combat/visibility;
+two players separate and regroup through unload, reconnect and restart under
+delay/jitter/loss. Preserve reference/life identity, state and access across areas,
+without duplicate simulation/outcomes. Require two-desktop travel evidence;
+synthetic crossings are insufficient. Then begin M5 context work without
+waiting for every remaining M4 combat feature; full M4 sign-off still requires
+its exit criteria.
 
 Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
 
@@ -119,14 +125,14 @@ Meet shared collision and movement smoothness budgets. Persist respawn
 generations, deadlines and attributed deaths for M5; authored corpses and
 summons never become permanent spawns.
 
-**Retire:** replaced independent combat/AI/effect resolvers, hardcoded respawn
-policy, duplicate settings and client gameplay writers. Retain shared
-calculations and one canonical writer.
+**Retire:** independent combat/AI/effect resolvers, hardcoded respawn policy,
+duplicate settings and client gameplay writers; retain shared calculations/one canonical writer.
 
 ## M5 - Complete scripted quests independently and together
 
 **Outcome:** personal progression over shared NPC lifecycles using unchanged engine
-scripts, without quest-specific handlers. Follow DECISIONS.md and these ordered slices.
+scripts, without quest-specific handlers. Start after the verified exploration
+slice above; it enables meaningful stock/TR quest testing. Follow DECISIONS.md:
 
 1. **Context first:** refactor InterpreterContext, dialogue filters and Journal/
    AddTopic around explicit character/story identity. First bounded slice: execute
@@ -154,7 +160,7 @@ scripts, without quest-specific handlers. Follow DECISIONS.md and these ordered 
    rewards, shared encounters, respawn, concurrent dialogue and reconnect. Broader
    compatibility follows exercised API coverage, not this single quest.
 
-**Acceptance:** narrow fixtures use arbitrary script/reference names. Exercise
+**Acceptance:** fixtures use arbitrary script/reference names. Exercise
 OnDeath and polling; write a local/grant an item before an unavailable read and
 prove zero partial effects. Cover indirect cross-script dependencies, foreign
 versus own kills, pre-quest/party credit, Disable, stale generations, late joins,
@@ -162,35 +168,31 @@ duplicate callbacks, legitimate repeats, interrupted writes and restart while
 waiting. No duplicate public spawns or authored-corpse resurrection. Reuse the stock
 script-test harness and filtered native tests; one relevant check at a time.
 
-**Retire:** migrated bespoke quest catalogs, duplicate logic, old module ABI and
-unscoped production callers only after replacement/failure evidence. Keep engine
-serialization and explicit unsupported-API diagnostics.
+**Retire:** bespoke quests, duplicate logic, old ABI and unscoped callers after
+replacement/failure evidence; retain engine serialization and unsupported-API diagnostics.
 
 ## M6 - Restore the world and personal progression
 
-**Outcome:** restart resumes the shared world, NPC lifecycles and personal progression.
+**Outcome:** restart restores shared world/NPC lives/personal progression.
 
-Extend M2 persistence across dynamic definitions, references, actor/AI/effect
-state, inventories, personal quest/journal/faction state, reward receipts, story
-scopes, respawn deadlines/generations, script state, time/weather, and RNG. Bind saves
-to content, progression policy and runtime versions; never serialize process pointers
-or live network sessions. Reuse engine field serializers behind a coherent
-server save boundary. Restore off to the side and install only after validation.
+Persist dynamic definitions, references, actor/AI/effects, inventories, personal
+quest/journal/faction state, reward receipts, story scopes, respawn deadlines/generations,
+scripts, time/weather and RNG. Bind saves to content/policy/runtime versions;
+exclude pointers/sessions. Reuse engine serializers; stage and validate before
+installing coherent recovery.
 
 **Exit:** save/restart after the M4 encounter and M5 quest restores both clients'
 views. Interrupted writes, mismatched content, and duplicate reconnect requests
 preserve a complete prior/new state and never duplicate rewards or items.
 
-**Retire:** replaced canonical-domain serializers and parallel persistence paths.
-Development save/protocol compatibility is not a reason to maintain two worlds;
-make any required reset explicit rather than silently discarding progress.
+**Retire:** replaced serializers and parallel persistence. Require explicit resets;
+development compatibility cannot justify two worlds or silent progress loss.
 
 ## M7 - Establish the supported modded release
 
-**Outcome/exit:** repeatable TR exploration/quests/combat with graphical mods,
-including restart. Finish gameplay/visual resource classification. Test cell
-transitions, separate regions, late joins, mismatched loadouts and save continuation.
-Measure content size, active-cell work, memory, queues and long-session stability
-on affected platforms; agree performance/player limits. Publish evidenced
-compatibility/exceptions. Remove unused old code, switches, content, schemas and
-tests after checking callers; retain compact documentation.
+**Outcome/exit:** repeatable TR exploration/quests/combat with graphical mods and
+restart; gameplay/visual resource classification. Test transitions, separate
+regions, late joins, loadout mismatch and save continuation. Measure content size,
+active-cell work, memory, queues and long-session stability across affected
+platforms; agree performance/player limits. Publish evidenced compatibility;
+retire unused code/switches/content/schemas/tests after checking callers.

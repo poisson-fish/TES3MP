@@ -149,6 +149,7 @@ namespace TES3MP::Native
         struct Body
         {
             uint64_t mId = 0;
+            ESM::RefId mCell;
             btCollisionWorld& mWorld;
             osg::ref_ptr<Resource::BulletShapeInstance> mResource;
             std::unique_ptr<btConvexShape> mHull;
@@ -177,6 +178,7 @@ namespace TES3MP::Native
         struct Terrain
         {
             btCollisionWorld& world;
+            uint64_t identity = 0;
             osg::Vec2i cell;
             std::array<float, ESM::Land::LAND_NUM_VERTS> heights;
             std::vector<btScalar> collisionHeights;
@@ -188,6 +190,7 @@ namespace TES3MP::Native
         };
         std::vector<std::unique_ptr<Terrain>> mTerrain;
         std::vector<ESM::RefId> mCells;
+        std::map<ESM::RefId, float> mCellWater;
         bool mMultipleDomains = false;
         bool mExpandedExterior = false;
         std::vector<ActorSceneDoor> localDoors(std::span<const ActorSceneDoor> doors) const
@@ -255,8 +258,8 @@ namespace TES3MP::Native
             if (mInteriorWater) return *mInteriorWater;
             const int x = int(std::floor(double(position.x()) / ESM::Land::REAL_SIZE));
             const int y = int(std::floor(double(position.y()) / ESM::Land::REAL_SIZE));
-            for (const auto& terrain : mTerrain)
-                if (terrain->cell.x() == x && terrain->cell.y() == y) return terrain->water;
+            const auto cell = mCellWater.find(ESM::RefId::esm3ExteriorCell(x, y));
+            if (cell != mCellWater.end()) return cell->second;
             return -std::numeric_limits<float>::max();
         }
 
@@ -466,6 +469,7 @@ namespace TES3MP::Native
             std::set<std::string> meshes;
             std::set<uint64_t> identities;
             size_t references = 0;
+            ESM::RefId bodyCell;
             const auto addBody = [&](const MWWorld::Ptr& ptr, uint64_t id) {
                 if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()
                     || Misc::ResourceHelpers::isHiddenMarker(ptr.getCellRef().getRefId())) return true;
@@ -508,6 +512,7 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Animated collision requires CPU evaluation: " + model.value());
                 auto body = std::make_unique<Body>(mWorld);
                 body->mId = id;
+                body->mCell = bodyCell;
                 body->mResource = shape;
                 const auto rotation = Misc::Convert::makeOsgQuat(position);
                 if (actorBody)
@@ -567,7 +572,9 @@ namespace TES3MP::Native
             };
             for (auto cellId : cells)
             {
+            bodyCell = cellId;
             auto& cell = mReferences.getCell(cellId);
+            mCellWater.emplace(cellId, cell.getWaterLevel());
             if (!cell.isExterior() && cell.getCell()->hasWater())
             {
                 const float level = cell.getWaterLevel();
@@ -606,7 +613,8 @@ namespace TES3MP::Native
                 terrain->object = BulletHelpers::makeCollisionObject(terrain->shape.get(),
                     BulletHelpers::getHeightfieldShift(exterior->getX(), exterior->getY(), ESM::Land::REAL_SIZE, *lo, *hi),
                     btQuaternion::getIdentity());
-                mIdentities.emplace(terrain->object.get(), mTerrain.size() + 1);
+                terrain->identity = mTerrain.size() + 1;
+                mIdentities.emplace(terrain->object.get(), terrain->identity);
                 if (!mSharedParent)
                     mWorld.addCollisionObject(terrain->object.get(), MWPhysics::CollisionType_HeightMap, MWPhysics::CollisionType_Actor);
                 mTerrain.push_back(std::move(terrain));
@@ -615,6 +623,7 @@ namespace TES3MP::Native
             if (dynamic.size() > 32) throw std::invalid_argument("Dynamic collision capacity exceeded");
             for (const auto& value : dynamic)
             {
+                bodyCell = value.cell;
                 MWWorld::ManualRef reference(mStore, value.record);
                 auto ptr = reference.getPtr();
                 ESM::Position position{};
@@ -923,6 +932,7 @@ namespace TES3MP::Native
         mImpl.swap(candidate.mImpl);
         mNeighbor.swap(candidate.mNeighbor);
         mScenery.swap(candidate.mScenery);
+        mGeometryDemand.swap(candidate.mGeometryDemand);
         mDormant.swap(candidate.mDormant);
     }
     void InteriorActorScene::replaceWorld(const ActorSceneWorld& world)
@@ -965,6 +975,7 @@ namespace TES3MP::Native
             if (shape->isAnimated()) throw std::invalid_argument("Animated ground collision requires CPU evaluation");
             auto body = std::make_unique<Impl::Body>(scene.mWorld);
             body->mId = id;
+            body->mCell = scene.mMultipleDomains ? world.cells.at(id) : scene.mCells.front();
             body->mResource = shape;
             shape->setLocalScaling(btVector3(state.mRef.mScale, state.mRef.mScale, state.mRef.mScale));
             body->mObject = BulletHelpers::makeCollisionObject(shape->mCollisionShape.get(),
@@ -989,6 +1000,81 @@ namespace TES3MP::Native
         if (mNeighbor) mNeighbor->replaceWorld(world);
         for (const auto& scene : mScenery) scene->replaceWorld(world);
     }
+    size_t InteriorActorScene::terrainCount() const noexcept
+    {
+        size_t count = 0;
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+            if (scene->mImpl && !scene->mImpl->mSharedParent) count += scene->mImpl->mTerrain.size();
+        for (const auto& scene : mScenery) count += scene->terrainCount();
+        return count;
+    }
+
+    void InteriorActorScene::retainGeometry(std::span<const ESM::RefId> demanded)
+    {
+        if (!mImpl || demanded.size() > MaxActorProcessingCells)
+            throw std::invalid_argument("Geometry demand capacity exceeded");
+        std::vector<Impl*> scenes;
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get()) scenes.push_back(scene->mImpl.get());
+        for (const auto& scene : mScenery) scenes.push_back(scene->mImpl.get());
+        std::set<ESM::RefId> unique;
+        for (auto cell : demanded)
+            if (!unique.insert(cell).second || !std::ranges::any_of(scenes, [&](const auto* scene) {
+                return std::ranges::find(scene->mCells, cell) != scene->mCells.end();
+            })) throw std::invalid_argument("Geometry demand identity outside bound domain");
+        // A frozen actor still owns its exact support/contact/avoidance image.
+        // Keep those witnesses alive until stock movement replaces them.
+        std::map<const Impl::Collision*, std::set<uint64_t>> witnesses;
+        for (const auto* scene : scenes) if (scene->mActor)
+        {
+            auto& pinned = witnesses[scene->mCollision.get()];
+            pinned.insert(scene->mContacts.begin(), scene->mContacts.end());
+            if (scene->mTravel.door) pinned.insert(scene->mTravel.door);
+            if (scene->mActor->mStandingOn)
+                pinned.insert(scene->mIdentities.at(scene->mActor->mStandingOn));
+        }
+        for (auto* scene : scenes)
+        {
+            const auto& pinned = witnesses[scene->mCollision.get()];
+            for (size_t i = scene->mBodies.size(); i-- > 0;)
+            {
+                const auto& body = *scene->mBodies[i];
+                if (body.mHull || unique.contains(body.mCell) || pinned.contains(body.mId)) continue;
+                auto* object = body.mObject.get();
+                if (scene->mNavigator) scene->mNavigator->removeObject(DetourNavigator::ObjectId(object), nullptr);
+                scene->mOrdinaryDoors.erase(body.mId);
+                std::erase_if(scene->mDoors, [&](const auto& door) { return door.mId == body.mId; });
+                scene->mIdentities.erase(object);
+                scene->mBodies.erase(scene->mBodies.begin() + i);
+                scene->mTransforms.erase(scene->mTransforms.begin() + i);
+                for (auto& [id, index] : scene->mOrdinaryDoors) if (index > i) --index;
+            }
+            std::erase_if(scene->mTerrain, [&](const auto& terrain) {
+                if (unique.contains(ESM::RefId::esm3ExteriorCell(terrain->cell.x(), terrain->cell.y()))
+                    || pinned.contains(terrain->identity)) return false;
+                if (scene->mNavigator)
+                {
+                    scene->mNavigator->removeHeightfield(terrain->cell, nullptr);
+                    if (scene->mWaterNavigation) scene->mNavigator->removeWater(terrain->cell, nullptr);
+                }
+                scene->mIdentities.erase(terrain->object.get());
+                return true;
+            });
+            scene->mNavigationValid = false;
+            scene->mNavigationDoors.clear();
+            if (scene->mNavigator)
+            {
+                scene->mNavigator->update(scene->mActor->mPosition, nullptr);
+                scene->mNavigator->wait(DetourNavigator::WaitConditionType::allJobsDone, nullptr);
+            }
+            scene->mReferences.clear();
+            scene->mShapes->clearCache();
+            scene->mResources.clearCache();
+        }
+        for (auto* scene : scenes) if (scene->mSharedParent)
+            scene->mIdentities = scene->mSharedParent->mIdentities;
+        mGeometryDemand.assign(demanded.begin(), demanded.end());
+    }
+
     void InteriorActorScene::rebuildTravel()
     {
         if (mImpl && mImpl->mTravel.hasDestination)
@@ -1694,12 +1780,13 @@ namespace TES3MP::Native
     bool InteriorActorScene::contains(const std::array<float, 3>& position) const
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
-        if (mImpl->mTerrain.empty()) return true;
+        if (!mImpl->mCells.front().is<ESM::ESM3ExteriorCellRefId>()) return true;
         const auto x = std::floor(double(position[0]) / ESM::Land::REAL_SIZE);
         const auto y = std::floor(double(position[1]) / ESM::Land::REAL_SIZE);
-        return std::ranges::any_of(mImpl->mTerrain, [&](const auto& terrain) {
-            return x == terrain->cell.x() && y == terrain->cell.y()
-                && (mImpl->mWaterNavigation || position[2] >= terrain->water);
+        return std::ranges::any_of(mImpl->mCells, [&](const auto& cell) {
+            const auto* exterior = cell.template getIf<ESM::ESM3ExteriorCellRefId>();
+            return x == exterior->getX() && y == exterior->getY()
+                && (mImpl->mWaterNavigation || position[2] >= mImpl->mCellWater.at(cell));
         });
     }
     bool InteriorActorScene::pathUnavailable() const

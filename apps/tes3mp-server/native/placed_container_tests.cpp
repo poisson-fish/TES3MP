@@ -166,6 +166,14 @@ namespace TES3MP::Native::Testing
         const auto cells = loadout.playerAreas(start, 1, 256);
         require(cells.size() == 11 && cells.front() == start && std::is_sorted(cells.begin() + 1, cells.end())
             && std::ranges::find(cells, exterior) != cells.end(), "Automatic area graph lost its bounded neighborhood/cycle/order");
+        const auto expanded = loadout.playerAreas(start, 2, 256);
+        require(expanded.size() == 27 && std::ranges::find(expanded,
+            ESM::RefId::esm3ExteriorCell(0, -3)) != expanded.end(),
+            "Expanded exterior discovery retained the 3x3 restriction");
+        bool exhausted = false;
+        try { loadout.playerAreas(start, 2, 26); } catch (const std::invalid_argument&) { exhausted = true; }
+        require(exhausted && loadout.playerAreas(start, 2, 256) == expanded,
+            "Expanded discovery exhaustion changed retry state");
         require(loadout.playerSpawn(start, cells).pos[0] == 77 && loadout.playerSpawn(start, std::array{start}).pos[0] == 77,
             "Bootstrap did not infer the winning incoming door spawn");
         const auto doors = loadout.ordinaryDoors(exterior, 128);
@@ -191,6 +199,26 @@ namespace TES3MP::Native::Testing
         std::ofstream config(scratch / "openmw.cfg");
         config << "replace=data\nreplace=content\nreplace=fallback-archive\ndata=" << std::quoted(scratch.string())
             << "\ncontent=Base.esm\ncontent=empty.omwscripts\ncontent=Patch.esp\nencoding=win1252\n";
+        // A distant exterior exit must get a separate bounded neighborhood;
+        // walking through the returned cells must never recursively expand it.
+        {
+            std::ofstream stream(scratch / "Remote.esp", std::ios::binary);
+            ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
+            out.addMaster("Base.esm", 0); out.save(stream);
+            ESM::Cell cell; cell.blank(); cell.mName = "Travel room"; cell.mData.mFlags = ESM::Cell::Interior; cell.updateId();
+            out.startRecord(ESM::REC_CELL, 0); cell.save(out);
+            ESM::CellRef exit; exit.blank(); exit.mRefNum = {901, 0}; exit.mRefID = ESM::RefId::stringRefId("door");
+            exit.mTeleport = true; exit.mDoorDest.pos[0] = 20*8192+100; exit.mDoorDest.pos[1] = 20*8192+100;
+            exit.save(out); out.endRecord(ESM::REC_CELL); out.close();
+        }
+        options.mContent.push_back("Remote.esp"); Loadout remote(options);
+        const auto separated = remote.playerAreas(start, 1, 256);
+        require(separated.size() == 20 && std::ranges::find(separated, ESM::RefId::esm3ExteriorCell(21, 21)) != separated.end(),
+            "Distant exit was omitted or discovery expanded without a door anchor");
+        exhausted = false;
+        try { remote.playerAreas(start, 1, 19); } catch (const std::invalid_argument&) { exhausted = true; }
+        require(exhausted && remote.playerAreas(start, 1, 256) == separated,
+            "Distant exit budget exhaustion leaked a partial discovery");
     }
 
     void checkExteriorReferences(const std::filesystem::path& scratch)

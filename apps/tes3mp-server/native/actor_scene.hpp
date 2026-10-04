@@ -99,6 +99,7 @@ namespace TES3MP::Native
         std::unique_ptr<Dormant> mDormant;
         std::unique_ptr<InteriorActorScene> mNeighbor;
         std::vector<std::unique_ptr<InteriorActorScene>> mScenery;
+        std::vector<ESM::RefId> mGeometryDemand;
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
             std::span<const uint64_t> neighbors, Impl* sharedParent,
@@ -135,6 +136,12 @@ namespace TES3MP::Native
         // Replace the ground-reference domain on a detached scene, before publication.
         // Physics, contact queries and every neighbor's navigator use this image.
         void replaceWorld(const ActorSceneWorld& world);
+        // Detached resource preparation only. Retain canonical actor images and
+        // their support/contact witnesses; release unused geometry and caches.
+        void retainGeometry(std::span<const ESM::RefId> demanded);
+        size_t terrainCount() const noexcept;
+        bool geometryMatches(std::span<const ESM::RefId> demanded) const noexcept
+        { return std::ranges::equal(mGeometryDemand, demanded); }
         void rebuildTravel();
         bool contains(const std::array<float, 3>& position) const;
         bool pathUnavailable() const;

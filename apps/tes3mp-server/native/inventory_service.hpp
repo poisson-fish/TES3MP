@@ -186,6 +186,8 @@ namespace TES3MP::Native
         size_t mTravelerCellBudget = 9;
         size_t mTravelerStepBudget = 2;
         std::function<void(bool, const DynamicActorSet&, const ActorSceneWorld&)> mNavigationActivity;
+        std::function<void(const std::vector<bool>&, const DynamicActorSet&,
+            const ActorSceneWorld&, std::span<const ActorSceneDoor>)> mGeometryActivity;
         bool mCharacterCreation = false;
         std::array<std::optional<CharacterProfile>, 2> mCharacters;
         std::array<std::string, 2> mCharacterResources;
@@ -298,6 +300,7 @@ namespace TES3MP::Native
             const InventoryServiceBinding* characterBinding = nullptr) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
+        bool sharesGameplayArea(CellId first, CellId second) const noexcept;
         const InteriorActorScene& collisionScene(CellId cell) const;
         float meleeReach() const;
         uint64_t meleeContact(const CanonicalServerState& players, const ActorSceneSnapshot& actor,
@@ -544,7 +547,8 @@ namespace TES3MP::Native
             const ActorCampaignCombat* stagedCombat = nullptr,
             const EquipmentRuntime::PreparedRespawn* respawn = nullptr,
             const EquipmentRuntime::PreparedProjectileLoot* loot = nullptr,
-            const InventoryServiceBinding* stagedBinding = nullptr) const;
+            const InventoryServiceBinding* stagedBinding = nullptr,
+            std::span<const ActorSceneSnapshot> actorFrames = {}) const;
     };
 }
 #endif

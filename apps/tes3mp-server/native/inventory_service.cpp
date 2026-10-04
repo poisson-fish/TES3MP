@@ -1927,7 +1927,18 @@ namespace TES3MP::Native
                 // Union admission happens once below, never once per cell.
                 if (navigationActive) std::fill(active.begin(), active.end(), true);
             }
-            if (mBinding.mNavigationActivity) mBinding.mNavigationActivity(navigationActive, mBinding.mDynamicActors, collisionWorld());
+            if (mBinding.mGeometryActivity)
+            {
+                auto geometry = active;
+                // Active actors and flights need the same adjacent-cell hulls as
+                // players. This resource union does not add simulation writers.
+                for (size_t i = 0; i < domains.size(); ++i) if (active[i] && domains[i]->mCell.asExterior())
+                    for (size_t j = 0; j < domains.size(); ++j)
+                        if (sharesCellNeighborhood(domains[i]->mCell, domains[j]->mCell)) geometry[j] = true;
+                const auto doors = actorDoorFrames();
+                mBinding.mGeometryActivity(geometry, mBinding.mDynamicActors, collisionWorld(), doors);
+            }
+            else if (mBinding.mNavigationActivity) mBinding.mNavigationActivity(navigationActive, mBinding.mDynamicActors, collisionWorld());
         }
         if (mBinding.mAreaActivity) mBinding.mAreaActivity(active);
         const std::array legacy{bool(active[0]), active.size() > 1 && active[1]};
@@ -2777,7 +2788,7 @@ namespace TES3MP::Native
                             || std::ranges::none_of(mBinding.mPlayers, [&](PlayerId id) {
                                 const auto* target = players.findPlayer(id);
                                 return id.value() == use.targetId && target
-                                    && target->transform().cell() == player->transform().cell()
+                                    && sharesGameplayArea(target->transform().cell(), player->transform().cell())
                                     && std::ranges::any_of(players.activeSessions(), [&](const auto& active) {
                                         return active.playerId() == id;
                                     }) && mCombat->actors[actor(id)][8][2] > 0;
@@ -2981,9 +2992,9 @@ namespace TES3MP::Native
             || (mBinding.mKnockoutRules && mCombat->knockedDown[owner]))
             return {};
         const auto held = mRuntime.equippedWeaponCondition(owner);
-        if (player->transform().cell() != actorCell(targetIndex <= 2
+        if (!sharesGameplayArea(player->transform().cell(), actorCell(targetIndex <= 2
                 ? mBinding.mNavigatingActor->snapshot()
-                : mBinding.mNavigatingActor->neighborSnapshots().at(targetIndex - 3)))
+                : mBinding.mNavigatingActor->neighborSnapshots().at(targetIndex - 3))))
             return {};
         const ESM::Weapon* weapon = nullptr;
         if (held)
@@ -4782,6 +4793,9 @@ namespace TES3MP::Native
         for (const auto& neighbor : mBinding.mNavigatingActor->neighborSnapshots()) install(neighbor);
     }
 
+    bool InventoryService::sharesGameplayArea(CellId first, CellId second) const noexcept
+    { return mBinding.mCellActors ? sharesCellNeighborhood(first, second) : first == second; }
+
     CellId InventoryService::actorCell(const ActorSceneSnapshot& state) const
     {
         const auto owner = std::ranges::find_if(mBinding.mContainers,
@@ -4839,7 +4853,7 @@ namespace TES3MP::Native
             const auto* player = players.findPlayer(session.playerId());
             if (!player || std::ranges::find(mBinding.mPlayers, player->playerId()) == mBinding.mPlayers.end()
                 || (requested && player->playerId().value() != requested)
-                || player->transform().cell() != cell) continue;
+                || !sharesGameplayArea(player->transform().cell(), cell)) continue;
             const auto position = player->transform().position();
             const osg::Vec3f target(float(double(position.x()) / 1024),
                 float(double(position.y()) / 1024), float(double(position.z()) / 1024));
@@ -5640,7 +5654,7 @@ namespace TES3MP::Native
                 const auto* caster = casterId ? players.findPlayer(*casterId) : nullptr;
                 const auto casterBinding = casterId
                     ? std::ranges::find(mBinding.mPlayers, *casterId) : mBinding.mPlayers.end();
-                if (!caster || caster->transform().cell() != actorCell(source)
+                if (!caster || !sharesGameplayArea(caster->transform().cell(), actorCell(source))
                     || casterBinding == mBinding.mPlayers.end()
                     || combat->actors[size_t(casterBinding - mBinding.mPlayers.begin())][8][2] <= 0
                     || controlling->casterLife != combat->playerLives[size_t(casterBinding - mBinding.mPlayers.begin())].generation
@@ -5661,7 +5675,7 @@ namespace TES3MP::Native
                 if (casterLife.respawnTick || controlling->casterLife != casterLife.generation) return {};
                 const auto casterBody = casterIndex == 2 ? mBinding.mNavigatingActor->snapshot()
                     : mBinding.mNavigatingActor->neighborSnapshots().at(casterIndex - 3);
-                if (actorCell(casterBody) != actorCell(source)) return {};
+                if (!sharesGameplayArea(actorCell(casterBody), actorCell(source))) return {};
                 follow = casterBody.mPosition;
             }
             if (!follow) return {};
@@ -5686,7 +5700,7 @@ namespace TES3MP::Native
             {
                 const auto fleeingFrom = PlayerId::fromValue(combat->fleeTarget);
                 const auto* player = fleeingFrom ? players.findPlayer(*fleeingFrom) : nullptr;
-                if (player && player->transform().cell() == actorCell(before))
+                if (player && sharesGameplayArea(player->transform().cell(), actorCell(before)))
                 {
                     if (combat->fleeDestination == std::array<float, 3>{})
                     {
@@ -5945,7 +5959,7 @@ namespace TES3MP::Native
                 return false;
             const auto id = PlayerId::fromValue(combat->fleeTarget);
             const auto* enemy = id ? players.findPlayer(*id) : nullptr;
-            if (!enemy || enemy->transform().cell() != actorCell(before)) return false;
+            if (!enemy || !sharesGameplayArea(enemy->transform().cell(), actorCell(before))) return false;
             const auto place = enemy->transform().position();
             const std::array<float, 3> from{before.mPosition[0], before.mPosition[1], before.mPosition[2] + 110.f};
             const std::array<float, 3> to{float(double(place.x()) / 1024),
@@ -7125,7 +7139,7 @@ namespace TES3MP::Native
                         if (index < 2)
                         {
                             const auto* player = players.findPlayer(mBinding.mPlayers[index]);
-                            if (!player || player->transform().cell() != combatCell(victimIndex)
+                            if (!player || !sharesGameplayArea(player->transform().cell(), combatCell(victimIndex))
                                 || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                                     return session.playerId() == player->playerId();
                                 })) continue;
@@ -7135,7 +7149,7 @@ namespace TES3MP::Native
                         }
                         else
                         {
-                            if (victimLife(index).respawnTick || combatCell(index) != combatCell(victimIndex)) continue;
+                            if (victimLife(index).respawnTick || !sharesGameplayArea(combatCell(index), combatCell(victimIndex))) continue;
                             const auto scene = victimScene(index);
                             position = {scene.mPosition[0], scene.mPosition[1], scene.mPosition[2] + 55.f};
                         }
@@ -7629,7 +7643,7 @@ namespace TES3MP::Native
                 const bool recoveryActive = victim && swing.state.mHit && combat->actors[victim][8][2] <= 0
                     && std::ranges::any_of(players.activeSessions(), [&](const auto& session) {
                         const auto* peer = players.findPlayer(session.playerId());
-                        return peer && peer->transform().cell() == actorCell(targetScene);
+                        return peer && sharesGameplayArea(peer->transform().cell(), actorCell(targetScene));
                     });
                 if (!(victim ? npcAreaActive(victim) : anyNpcAreaActive) && !recoveryActive) continue;
                 if (std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
@@ -7638,7 +7652,7 @@ namespace TES3MP::Native
                 const auto* player = players.findPlayer(mBinding.mPlayers[owner]);
                 if (!swing.state.mHit)
                 {
-                    if (!player || player->transform().cell() != actorCell(targetScene)
+                    if (!player || !sharesGameplayArea(player->transform().cell(), actorCell(targetScene))
                         || (victim && (victimLife(victim).generation != swing.targetLife
                             || combat->actors[victim][8][2] <= 0)))
                     { swing.interruption = PlayerSwing::TargetLost; continue; }
@@ -7768,7 +7782,7 @@ namespace TES3MP::Native
                             for (size_t index = 0; index < mBinding.mPlayers.size(); ++index)
                             {
                                 const auto* player = players.findPlayer(mBinding.mPlayers[index]);
-                                if (!player || player->transform().cell() != arrow.cell.value_or(actorCell(before))
+                                if (!player || !sharesGameplayArea(player->transform().cell(), arrow.cell.value_or(actorCell(before)))
                                     || combat->actors[index][8][2] <= 0
                                     || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                                         return session.playerId() == player->playerId();
@@ -8186,7 +8200,7 @@ namespace TES3MP::Native
                 if (!victim || state.targetLife != victimLife(victim).generation
                     || victimLife(victim).respawnTick || combat->actors[victim][8][2] <= 0) return false;
                 const auto scene = victim == 2 ? before : victimScene(victim);
-                if (combatCell(victim) != combatCell(actor(PlayerId::fromValue(state.actor).value()))) return false;
+                if (!sharesGameplayArea(combatCell(victim), combatCell(actor(PlayerId::fromValue(state.actor).value())))) return false;
                 endpoint = {scene.mPosition[0], scene.mPosition[1], scene.mPosition[2] + 55.f};
             }
             else if (state.targetKind == uint64_t(MagicUseTargetKind::Door))
@@ -8214,7 +8228,7 @@ namespace TES3MP::Native
             {
                 const auto index = actor(PlayerId::fromValue(state.target).value());
                 if (combat->actors[index][8][2] <= 0 || state.targetLife != combat->playerLives[index].generation) return false;
-                if (combatCell(index) != combatCell(actor(PlayerId::fromValue(state.actor).value()))) return false;
+                if (!sharesGameplayArea(combatCell(index), combatCell(actor(PlayerId::fromValue(state.actor).value())))) return false;
                 endpoint = playerPosition(index);
             }
             if (!endpoint || !(state.targetKind == uint64_t(MagicUseTargetKind::Door)
@@ -8302,7 +8316,7 @@ namespace TES3MP::Native
             {
                 const auto playerId = PlayerId::fromValue(use.targetId);
                 const auto* victim = playerId ? players.findPlayer(*playerId) : nullptr;
-                if (!victim || victim->transform().cell() != actorCell(frame)
+                if (!victim || !sharesGameplayArea(victim->transform().cell(), actorCell(frame))
                     || combat->actors[actor(*playerId)][8][2] <= 0
                     || std::ranges::none_of(players.activeSessions(), [&](const auto& session) { return session.playerId() == *playerId; })) return {};
                 const auto position = victim->transform().position();
@@ -8316,7 +8330,7 @@ namespace TES3MP::Native
             {
                 const auto victim = npcVictim(use.targetId);
                 if (!victim || victim == index || victimLife(victim).respawnTick || combat->actors[victim][8][2] <= 0) return {};
-                if (actorCell(victimScene(victim)) != actorCell(frame)) return {};
+                if (!sharesGameplayArea(actorCell(victimScene(victim)), actorCell(frame))) return {};
                 targetPosition = victimScene(victim).mPosition;
                 if (!sceneForIndex(index).lineOfSight(
                     {frame.mPosition[0], frame.mPosition[1], frame.mPosition[2] + 55.f},
@@ -8628,7 +8642,7 @@ namespace TES3MP::Native
                         for (const auto& session : players.activeSessions())
                         {
                             const auto* player = players.findPlayer(session.playerId());
-                            if (!player || player->transform().cell() != actorCell(frame)
+                            if (!player || !sharesGameplayArea(player->transform().cell(), actorCell(frame))
                                 || std::ranges::find(mBinding.mPlayers, player->playerId()) == mBinding.mPlayers.end()
                                 || combat->actors[actor(player->playerId())][8][2] <= 0) continue;
                             const auto& p = player->transform().position();
@@ -8815,7 +8829,7 @@ namespace TES3MP::Native
             for (const auto& playerId : mBinding.mPlayers)
             {
                 const auto* player = players.findPlayer(playerId);
-                if (!player || player->transform().cell() != actorCell(before)
+                if (!player || !sharesGameplayArea(player->transform().cell(), actorCell(before))
                     || combat->actors[actor(playerId)][8][2] <= 0
                     || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                         return session.playerId() == playerId;
@@ -9505,7 +9519,7 @@ namespace TES3MP::Native
                     for (size_t index = 0; index < (mBinding.mNeighborCombat ? combat->actors.size() : 3); ++index)
                     {
                         if (index == owner || combat->actors[index][8][2] <= 0
-                            || combatCell(index) != combatCell(owner)) continue;
+                            || !sharesGameplayArea(combatCell(index), combatCell(owner))) continue;
                         const auto position = combatPosition(index);
                         if (!position) continue;
                         PreparedInstantEffects selected;
@@ -9550,7 +9564,7 @@ namespace TES3MP::Native
                 if (cast.targetKind == MagicUseTargetKind::Player)
                 {
                     const auto* victim = players.findPlayer(PlayerId::fromValue(cast.targetId).value());
-                    if (!victim || victim->transform().cell() != combatCell(owner)
+                    if (!victim || !sharesGameplayArea(victim->transform().cell(), combatCell(owner))
                         || combat->actors[actor(victim->playerId())][8][2] <= 0
                         || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                             return session.playerId() == victim->playerId();
@@ -9637,7 +9651,7 @@ namespace TES3MP::Native
                         const auto id = mBinding.mPlayers[index];
                         const auto* player = players.findPlayer(id);
                         if ((pending.casterKind != 2 && id.value() == pending.caster) || !player
-                            || player->transform().cell() != pending.cell.value_or(actorCell(before))
+                            || !sharesGameplayArea(player->transform().cell(), pending.cell.value_or(actorCell(before)))
                             || combat->actors[index][8][2] <= 0
                             || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                                 return session.playerId() == id;
@@ -9751,7 +9765,7 @@ namespace TES3MP::Native
                                 const auto playerId = mBinding.mPlayers[index];
                                 const auto* player = players.findPlayer(playerId);
                                 if ((pending.casterKind != 2 && playerId.value() == pending.caster) || (directHit && index == hitIndex) || !player
-                                    || player->transform().cell() != pending.cell.value_or(actorCell(before))
+                                    || !sharesGameplayArea(player->transform().cell(), pending.cell.value_or(actorCell(before)))
                                     || !recipientCurrent(index)
                                     || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                                         return session.playerId() == playerId;
@@ -9766,7 +9780,7 @@ namespace TES3MP::Native
                                 if ((pending.casterKind == 2 && pending.caster == (index == 2
                                         ? before.mActor : combat->npcPlacements.at(index - 2)))
                                     || (directHit && hitIndex == index)
-                                    || !recipientCurrent(index) || (pending.cell && combatCell(index) != *pending.cell)) continue;
+                                    || !recipientCurrent(index) || (pending.cell && !sharesGameplayArea(combatCell(index), *pending.cell))) continue;
                                 if (nearby(victimScene(index).mPosition)) select(index);
                             }
                         }
@@ -9867,7 +9881,7 @@ namespace TES3MP::Native
                         float(double(position.z()) / 1024) + 110.f}) && npcDetects(index, 2, after);
             };
             if (combat->actors[2][8][2] <= 0 || combat->knockedDown[2] || hasParalysis(timedEffects, 2) || combat->hitRecoveryTicks[2]
-                || combat->actors[index][8][2] <= 0 || !victim || victim->transform().cell() != actorCell(after)
+                || combat->actors[index][8][2] <= 0 || !victim || !sharesGameplayArea(victim->transform().cell(), actorCell(after))
                 || !visible()
                 // A retained target blocks the next AI selection. Give up a
                 // fully wound, unreleased swing when that target leaves reach;
@@ -10281,7 +10295,7 @@ namespace TES3MP::Native
                             {
                                 const auto& p = player->transform().position();
                                 endpoint = {float(double(p.x()) / 1024), float(double(p.y()) / 1024), float(double(p.z()) / 1024)};
-                                available = player->transform().cell() == actorCell(neighbor);
+                                available = sharesGameplayArea(player->transform().cell(), actorCell(neighbor));
                             }
                             // Retain the owner's combat identity while navigating
                             // around an obstruction. Contact still requires sight.
@@ -10307,7 +10321,7 @@ namespace TES3MP::Native
                             }))
                             {
                                 const auto* player = players.findPlayer(mBinding.mPlayers[leader]);
-                                if (player && player->transform().cell() == actorCell(neighbor))
+                                if (player && sharesGameplayArea(player->transform().cell(), actorCell(neighbor)))
                                 {
                                     const auto& p = player->transform().position();
                                     endpoint = std::array{float(double(p.x()) / 1024), float(double(p.y()) / 1024), float(double(p.z()) / 1024)};
@@ -10333,7 +10347,7 @@ namespace TES3MP::Native
                 if (!summon) for (const auto playerId : mBinding.mPlayers)
                 {
                     const auto* player = players.findPlayer(playerId);
-                    if (!player || player->transform().cell() != actorCell(neighbor)
+                    if (!player || !sharesGameplayArea(player->transform().cell(), actorCell(neighbor))
                         || combat->actors[actor(playerId)][8][2] <= 0
                         || std::ranges::none_of(players.activeSessions(), [&](const auto& session) {
                             return session.playerId() == playerId;
@@ -10607,7 +10621,7 @@ namespace TES3MP::Native
                 }
                 if (victim < 2) return meleeContact(players, *adjacent, requested, reach);
                 const auto frame = actorFrame(victim);
-                if (actorCell(frame) != actorCell(*adjacent)) return uint64_t(0);
+                if (!sharesGameplayArea(actorCell(frame), actorCell(*adjacent))) return uint64_t(0);
                 const auto& p = frame.mPosition;
                 const auto& from = adjacent->mPosition;
                 if (!MWMechanics::isInMeleeReach(osg::Vec3f(from[0], from[1], from[2]),
@@ -11355,13 +11369,16 @@ namespace TES3MP::Native
                 || (equipment && &equipment->service != this))) return std::nullopt;
         const auto actorState = mBinding.mNavigatingActor ? std::optional(moving && moving->actor
             ? moving->actor->snapshot() : mBinding.mNavigatingActor->snapshot()) : std::nullopt;
+        auto actorFrames = moving ? moving->neighborSnapshots() : mBinding.mNavigatingActor
+            ? mBinding.mNavigatingActor->neighborSnapshots() : std::vector<ActorSceneSnapshot>{};
+        if (actorState) actorFrames.push_back(*actorState);
         auto result = project(players, target, tick, revision, transaction ? &transaction->prepared : nullptr,
             equipment ? &equipment->prepared : nullptr, world ? &world->prepared : nullptr, door ? &door->prepared : nullptr,
             {}, actorState ? &*actorState : nullptr, moving ? std::span<const WeaponWear>(moving->wear) : std::span<const WeaponWear>{},
             moving ? std::span<const ItemCharge>(moving->charges) : std::span<const ItemCharge>{},
             moving && moving->combat ? &*moving->combat : nullptr,
             moving ? moving->respawn.get() : nullptr, moving ? moving->loot.get() : nullptr,
-            moving && moving->membership ? moving->membership.get() : nullptr);
+            moving && moving->membership ? moving->membership.get() : nullptr, actorFrames);
         if (result)
         {
             for (auto& baseline : result->containers)
@@ -11445,7 +11462,7 @@ namespace TES3MP::Native
             if (index != selfIndex)
             {
                 const auto* other = players.findPlayer(binding.mPlayers[index]);
-                if (other && other->transform().cell() == player->transform().cell())
+                if (other && sharesGameplayArea(other->transform().cell(), player->transform().cell()))
                     others.push_back(snapshot(loadCombatStats(mRuntime.mStore, combat.actors[index],
                         effects, index, mBinding.mCharacterCreation), other->playerId()));
             }
@@ -11478,7 +11495,7 @@ namespace TES3MP::Native
         const auto scene = moving ? moving->snapshot() : binding.mNavigatingActor->snapshot();
         if (binding.mCellActors || actorCell(scene) == player->transform().cell())
         {
-            if (actorCell(scene) == player->transform().cell())
+            if (sharesGameplayArea(actorCell(scene), player->transform().cell()))
             {
             const auto npc = loadCombatStats(mRuntime.mStore, combat.actors[2], effects, 2, mBinding.mCharacterCreation);
             visible.push_back({ActorId::fromValue(scene.mActor).value(), combatRevision,
@@ -11506,7 +11523,7 @@ namespace TES3MP::Native
                 {
                     if (combat.npcPlacements[i + 1] != neighbors[i].mActor)
                         throw std::invalid_argument("Native projected neighbor placement changed");
-                    if (actorCell(neighbors[i]) != player->transform().cell()) continue;
+                    if (!sharesGameplayArea(actorCell(neighbors[i]), player->transform().cell())) continue;
                     const auto stats = loadCombatStats(mRuntime.mStore, combat.actors[i + 3], effects, i + 3, mBinding.mCharacterCreation);
                     visible.push_back({ActorId::fromValue(neighbors[i].mActor).value(), combatRevision,
                         stats.getHealth().getCurrent(), stats.getHealth().getModified(),
@@ -11667,7 +11684,7 @@ namespace TES3MP::Native
         {
             projectiles.reserve(combat.arrows.size());
             for (const auto& arrow : combat.arrows)
-                if (!binding.mCellActors || arrow.cell == player->transform().cell())
+                if (!binding.mCellActors || (arrow.cell && sharesGameplayArea(*arrow.cell, player->transform().cell())))
                 projectiles.push_back({uint8_t(arrow.casterKind), uint8_t(arrow.terminal),
                     arrow.caster, arrow.casterLife, arrow.command, arrow.releaseTick, arrow.ammoRecord,
                     arrow.position, arrow.velocity});
@@ -11681,7 +11698,7 @@ namespace TES3MP::Native
             const auto& flights = moving ? moving->projectiles : mProjectiles;
             magicProjectiles.reserve(flights.size());
             for (const auto& flight : flights)
-                if (!binding.mCellActors || flight.cell == player->transform().cell())
+                if (!binding.mCellActors || (flight.cell && sharesGameplayArea(*flight.cell, player->transform().cell())))
                 magicProjectiles.push_back({uint8_t(flight.casterKind == 2 ? 2 : 1), uint8_t(flight.sourceKind),
                     flight.caster, std::max<uint64_t>(1, flight.casterLife), flight.commandId,
                     magicVisualRecord(flight.sourceKind, flight.effectSource),
@@ -11716,21 +11733,21 @@ namespace TES3MP::Native
         const auto* observer = players.findPlayer(session->playerId());
         const auto scene = staged->actor ? staged->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
         if (!observer) return {};
-        const bool actorVisible = observer->transform().cell() == actorCell(scene);
+        const bool actorVisible = sharesGameplayArea(observer->transform().cell(), actorCell(scene));
         if (!actorVisible && !mBinding.mPlayerTravel) return {};
         const auto playerVisible = [&](uint64_t id) {
             const auto player = PlayerId::fromValue(id);
             const auto* caster = player ? players.findPlayer(*player) : nullptr;
             return caster && (caster->playerId() == observer->playerId()
-                || caster->transform().cell() == observer->transform().cell());
+                || sharesGameplayArea(caster->transform().cell(), observer->transform().cell()));
         };
         const auto npcVisible = [&](uint64_t id) {
             if (!mBinding.mCellActors) return actorVisible;
-            if (id == scene.mActor) return observer->transform().cell() == actorCell(scene);
+            if (id == scene.mActor) return sharesGameplayArea(observer->transform().cell(), actorCell(scene));
             const auto frames = staged->actor ? staged->actor->neighborSnapshots()
                 : mBinding.mNavigatingActor->neighborSnapshots();
             const auto frame = std::ranges::find(frames, id, &ActorSceneSnapshot::mActor);
-            return frame != frames.end() && observer->transform().cell() == actorCell(*frame);
+            return frame != frames.end() && sharesGameplayArea(observer->transform().cell(), actorCell(*frame));
         };
         auto actorEvents = staged->actorHits;
         auto playerHits = staged->playerHits;
@@ -11758,7 +11775,7 @@ namespace TES3MP::Native
                             std::span<const ActorCampaignProjectile>(staged->projectiles)})
                         for (const auto& flight : flights)
                             if (flight.caster == cue.caster && flight.commandId == cue.command && flight.cell)
-                                return *flight.cell != observer->transform().cell();
+                                return !sharesGameplayArea(*flight.cell, observer->transform().cell());
                 }
                 return cue.casterKind == 2 ? !npcVisible(cue.caster) : !playerVisible(cue.caster);
             });
@@ -11779,7 +11796,8 @@ namespace TES3MP::Native
         std::span<const ItemCharge> charges,
         const ActorCampaignCombat* stagedCombat,
         const EquipmentRuntime::PreparedRespawn* respawn,
-        const EquipmentRuntime::PreparedProjectileLoot* loot, const InventoryServiceBinding* stagedBinding) const
+        const EquipmentRuntime::PreparedProjectileLoot* loot, const InventoryServiceBinding* stagedBinding,
+        std::span<const ActorSceneSnapshot> actorFrames) const
     try
     {
         const auto& binding = stagedBinding ? *stagedBinding : mBinding;
@@ -11851,14 +11869,25 @@ namespace TES3MP::Native
             return slots;
         };
         std::vector<PublicActorEquipmentMember> actors;
+        std::vector<ActorSceneSnapshot> installedFrames;
+        if (actorFrames.empty() && binding.mNavigatingActor)
+        {
+            installedFrames = binding.mNavigatingActor->neighborSnapshots();
+            installedFrames.push_back(binding.mNavigatingActor->snapshot());
+            actorFrames = installedFrames;
+        }
         for (size_t i = 0; i < binding.mContainers.size(); ++i)
         {
             const auto& shared = binding.mContainers[i];
             const auto* life = stagedCombat ? stagedCombat : mCombat ? &*mCombat : nullptr;
             const bool selectedCorpse = life && i + 2 == mCombatNpcOwner && life->actors[2][8][2] <= 0;
-            const auto selectedPosition = selectedCorpse
-                ? std::optional(moving ? *moving : binding.mNavigatingActor->snapshot()) : std::nullopt;
-            const auto sharedCell = selectedPosition ? actorCell(*selectedPosition) : shared.mCell;
+            const auto frame = std::ranges::find(actorFrames, shared.mId.value(), &ActorSceneSnapshot::mActor);
+            const auto selectedPosition = frame != actorFrames.end() ? std::optional(*frame)
+                : selectedCorpse ? std::optional(moving ? *moving : binding.mNavigatingActor->snapshot()) : std::nullopt;
+            const auto sharedCell = selectedPosition && shared.mCell.asExterior()
+                ? CellId::exterior(shared.mCell.asExterior()->worldspace(),
+                    int32_t(std::floor(double(selectedPosition->mPosition[0])/8192)),
+                    int32_t(std::floor(double(selectedPosition->mPosition[1])/8192))) : shared.mCell;
             const auto sharedPosition = selectedPosition
                 ? Position3(int64_t(std::llround(double(selectedPosition->mPosition[0]) * 1024)),
                     int64_t(std::llround(double(selectedPosition->mPosition[1]) * 1024)),
@@ -11866,12 +11895,11 @@ namespace TES3MP::Native
             // Keep the authored placement controlled while its origin is visible,
             // too: otherwise a late observer could render its local frozen copy.
             // V20's fixed neighborhood always retains that origin cell.
-            if (visibleCell != sharedCell
-                && !(moving && shared.mId.value() == moving->mActor && visibleCell == actorCell(*moving))) continue;
             const bool ownerActor = mRuntime.mStore.find(shared.mBase) == ESM::NPC::sRecordId
                 || mRuntime.mStore.find(shared.mBase) == ESM::Creature::sRecordId;
             const bool corpse = i + 2 < mRuntime.ownerCount() && initialCorpse(mRuntime.ownerPtr(i + 2));
             const auto sharedValues = values(i + 2);
+            if (visibleCell != sharedCell && !(ownerActor && !corpse && !selectedCorpse && visibleCell == shared.mCell)) continue;
             if (selectedCorpse)
                 actors.push_back({shared.mId, publicSlots(sharedValues)});
             if (ownerActor && !corpse && !selectedCorpse)
@@ -11960,7 +11988,7 @@ namespace TES3MP::Native
                     || std::abs(int64_t(exterior->gridX()) - visibleCell.asExterior()->gridX()) > 1
                     || std::abs(int64_t(exterior->gridY()) - visibleCell.asExterior()->gridY()) > 1) continue;
                 auto neighbor = project(players, target, tick, revision, candidate, equipped, world, door,
-                    domain->mCell, moving, wear, charges, stagedCombat, respawn, loot, stagedBinding);
+                    domain->mCell, moving, wear, charges, stagedCombat, respawn, loot, stagedBinding, actorFrames);
                 if (!neighbor || neighbor->groundItems.size() != 1 || !neighbor->equipment) return std::nullopt;
                 result.groundItems.front().neighbors.push_back(std::move(neighbor->groundItems.front()));
                 actors.insert(actors.end(), neighbor->equipment->actors.begin(), neighbor->equipment->actors.end());

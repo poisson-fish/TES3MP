@@ -195,7 +195,7 @@ try
             "server/client content settings, without fixture plugins or reference recipes.\n"
             "Spawn uses a discovered incoming door destination, or explicit OpenMW coordinates.\n"
             "NAV_SETTINGS enables native-inventory-77 shared NPC simulation: at most 37 placed actors,\n"
-            "one exterior 3x3 and connected interiors; scripted/leveled actors require later services.\n"
+            "up to 256 cells in bounded exterior areas/connected interiors; scripted/leveled actors require later services.\n"
             "The final chargen option enables V78 discovered choices and empty fresh inventories.\n"
             "Set the two registered player IDs in native.txt; their registrations must bind manifest.txt.\n"
             "Add connection/password/player_identity_file settings to server-content.cfg before launch.\n";
@@ -234,8 +234,8 @@ try
     const auto version = characterCreation ? "native-inventory-78" : cellActors ? "native-inventory-77" : "native-inventory-15";
     const auto navigationSettings = cellActors ? std::filesystem::absolute(std::filesystem::u8path(argv[8]))
         : std::filesystem::path{};
-    if (cellActors && (!std::filesystem::is_regular_file(navigationSettings) || radius > 1))
-        throw std::invalid_argument("NPC simulation requires existing NAV_SETTINGS and radius at most one");
+    if (cellActors && !std::filesystem::is_regular_file(navigationSettings))
+        throw std::invalid_argument("NPC simulation requires existing NAV_SETTINGS");
     material << version << '\n' << loadout.contentFingerprint() << '\n' << actorA << '\n' << actorB << '\n';
     if (cellActors) material << navigationSettings.string() << '\n';
     for (const auto& cell : cells) material << selector(cell) << '\n';

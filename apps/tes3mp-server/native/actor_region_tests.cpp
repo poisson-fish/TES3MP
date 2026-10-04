@@ -5,6 +5,7 @@
 #include <components/esm3/loadcell.hpp>
 #include <components/esm3/loadland.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadregn.hpp>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -58,6 +59,11 @@ namespace
             Loadout base(readLoadoutOptions(3, args));
             auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
             npc.mId = record; npc.mScript = {}; npc.mInventory.mList.clear();
+            npc.mNpdtType = ESM::NPC::NPC_DEFAULT;
+            npc.mNpdt.mHealth = npc.mNpdt.mMana = npc.mNpdt.mFatigue = 1000;
+            npc.mNpdt.mAttributes.fill(100); npc.mNpdt.mSkills.fill(100);
+            npc.mAiData.mFight = 0; npc.mSpells.mList.clear();
+            npc.mInventory.mList = {{1, ESM::RefId::stringRefId("iron shortsword")}};
             std::ofstream stream(scratch / "Regions.esp", std::ios::binary);
             ESM::ESMWriter out; out.setVersion(); out.setFormatVersion(ESM::DefaultFormatVersion); out.setType(0);
             out.addMaster("Morrowind.esm", 0); out.save(stream);
@@ -65,6 +71,7 @@ namespace
             for (auto id : cells)
             {
                 ESM::Cell value; value.blank();
+                value.mRegion = base.store().get<ESM::Region>().begin()->mId;
                 const auto* exterior = id.getIf<ESM::ESM3ExteriorCellRefId>();
                 if (exterior) { value.mData.mX = exterior->getX(); value.mData.mY = exterior->getY(); }
                 else { value.mName = "Region Interior"; value.mData.mFlags = ESM::Cell::Interior; }
@@ -182,6 +189,15 @@ namespace
         require(fresh->fingerprint() == scene->fingerprint(), "Region reconstruction changed binding");
         auto restored = fresh->prepareRestore(committed); fresh->install(*restored);
         require(fresh->image() == committed, "Region restart changed frames");
+        const auto fullTerrain = fresh->terrainCount();
+        rejects([&] { fresh->retainGeometry(std::vector{cell(200)}); });
+        rejects([&] { fresh->retainGeometry(std::vector{cell(6), cell(6)}); });
+        require(fresh->image() == committed && fresh->terrainCount() == fullTerrain,
+            "Invalid demand released resources or changed canonical actors");
+        fresh->retainGeometry(std::vector{cell(2), cell(3), cell(5), cell(6), cell(7)});
+        require(fresh->image() == committed && fresh->terrainCount() < fullTerrain
+            && fresh->forActor(b).bodyCount() == 2 && fresh->sharesCollisionWorld(fresh->forActor(b)),
+            "Streaming failed to release terrain or changed actor identity/ownership");
         const std::array<std::optional<std::array<float, 3>>, 2> resumedTargets{
             std::array{destination + 200, y, 257.f}, std::nullopt};
         const std::array resumedMovements{ActorMovement{.walkSpeed = 120}, ActorMovement{.walkSpeed = 0}};
@@ -196,7 +212,8 @@ namespace
             "Recovered region navigation diverged or leaked a candidate");
         scene->unload();
         require(!scene->loaded(), "Region collision resources did not unload");
-        scene->reload(*fresh);
+        auto complete = create(); complete->enableNavigation(settings.string());
+        scene->reload(*complete);
         require(scene->image() == committed && scene->bodyCount() == 2
             && scene->sharesCollisionWorld(scene->forActor(b)), "Region reentry changed frames or duplicated bodies");
         auto reset = scene->prepareRestore(initial); scene->install(*reset);

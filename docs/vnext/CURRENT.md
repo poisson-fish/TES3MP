@@ -3,14 +3,30 @@
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door substeps, 30 Hz commits.
 
-**V77:** discovered actors, shared interior/exterior simulation, empty-cell freeze,
-filtered unload/reentry. Bounds: 37 actors/summons, 256 bound cells.
-Connected exterior regions share collision; interiors/disconnected regions stay separate.
-Navigation follows actors. `build/logs/actor-regions-07.log`: synthetic 12-cell crossing/contact,
-overlap/freeze/retry/restart/reentry. Startup geometry remains bound; discovery anchors one 3x3.
+**V77 bounded exploration accepted:** radius 0–7 start/door-exit discovery shares
+256 cells; remote exits add bounded anchors. Startup caps 37 actors/summons,
+8,192 collision references/region and 256 cached navigation tiles/actor.
+Connected exteriors share collision; interiors/disconnected regions stay separate.
+Demand streams geometry with an adjacent margin; unused terrain/objects/caches
+release. Canonical frames/destinations/inventories/lives survive unload/reentry.
+Frozen actor hulls/support/contact witnesses remain; resource changes stage the
+full bounded domain before trimming/swap, so peak work still scales with startup bounds.
+Adjacent movement/combat/visibility follows current actor cells with one simulation writer.
+Synthetic `build/logs/exploration-{bootstrap-radius2,discovery-03,regions-03,host-07}.log`:
+27-cell export, remote-anchor exhaustion/retry, 12-cell navigation/contact,
+geometry rejection/release, overlapping demand, split/regroup, rollback/retry/recovery.
+`build/logs/exploration-{cell-actors-02,placed-actors-01,boundary}.log`:
+collision/combat/flight regression, unsupported actor rejection, engine independence.
 Scripts/leveled/corpses reject; full AI packages remain M5.
-`build/logs/cell-actors-regions-02.log`: synthetic collision/rollback/restart/combat/flight.
-Impaired desktop acceptance remains pending.
+
+**Rendered exploration, synthetic content:**
+`build/exploration-desktop-{06,restart-01}/result.json`: two desktop clients cross
+3→6→3 through inherited AutoMove, separate/regroup, unload/reentry and reconnect;
+restart preserves item identities/counts and committed adjacent-cell damage.
+100ms delay, ±25ms jitter, 10% loss/reorder. Same-cell poses set up edges;
+crossings use desktop movement. `build/exploration-desktop-presentation-02/result.json`:
+recovered shared actors/peer; screenshots inspected. This establishes bounded
+fixture acceptance, not arbitrary modded-world coverage.
 
 **V74–V76:** 143 selectors/141 lifecycles; capability 34/35 presentation.
 `build/logs/{target-recipients-08,source-limits-02,spell-presentation-transaction-04,spell-passive-self-18,spell-passive-stats-08,world-collision-09}.log`.
@@ -52,6 +68,7 @@ Resume lifetime now bounds inactivity, retaining expiry/generation/replay reject
 Single-cell preview disables travel. Excluded scripts/scripted inventory require M5;
 restore only proven content.
 
-**Next:** expand bounded exterior discovery/streaming and cross-boundary gameplay/visibility;
-accept impaired two-client crossings. Retain body, stock-door exclusion,
-NPC movement/death-menu acceptance before player physics cutover.
+**Next:** begin PLAN's M5 player/story-context slice using the accepted exploration
+base; M5 has not started. Remaining M4 combat does not gate that start.
+Retain body, stock-door exclusion and NPC movement/death-menu acceptance before
+player physics cutover. Exploration remains finite and startup-bound.

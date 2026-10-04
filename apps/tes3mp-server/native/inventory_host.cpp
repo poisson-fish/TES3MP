@@ -954,6 +954,32 @@ namespace TES3MP::Native
                         else if (!active) scene->unload();
                     };
                 }
+                if (start.binding.mCellActors)
+                    start.binding.mGeometryActivity = [scene, createScene, names,
+                        retained = std::vector<bool>{}](const std::vector<bool>& active,
+                        const DynamicActorSet& actors, const ActorSceneWorld& world,
+                        std::span<const ActorSceneDoor> doors) mutable {
+                        std::vector<ESM::RefId> demanded;
+                        for (size_t i = 0; i < active.size(); ++i) if (active[i]) demanded.push_back(names.at(i));
+                        if (active == retained && (!scene->loaded() || scene->geometryMatches(demanded))) return;
+                        if (demanded.empty())
+                            scene->unload();
+                        else
+                        {
+                            std::vector<DynamicActorBody> bodies;
+                            for (const auto& body : actors.bodies) bodies.push_back(body.collision);
+                            auto fresh = createScene(bodies);
+                            if (fresh->fingerprint() != scene->fingerprint()
+                                || (!bodies.empty() && DynamicActorSet::resources(*fresh) != actors.collisionResources))
+                                throw std::invalid_argument("Streamed collision resources changed after binding");
+                            fresh->replaceWorld(world);
+                            auto restored = fresh->prepareRestore(scene->image(), doors);
+                            fresh->install(*restored);
+                            fresh->retainGeometry(demanded);
+                            scene->installActorSet(*fresh);
+                        }
+                        retained = active;
+                    };
                 placement << scene->fingerprint();
                 start.binding.mNavigationSpeed = start.navigation->speed;
                 start.binding.mNavigatingActor = std::move(scene);

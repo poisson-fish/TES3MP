@@ -60,11 +60,16 @@ namespace TES3MP::Native
             if (result.size() == limit) throw std::invalid_argument("Native player-area discovery exhausted its cell budget");
             result.push_back(cell);
         };
-        std::optional<ESM::ESM3ExteriorCellRefId> anchor;
+        std::vector<ESM::ESM3ExteriorCellRefId> anchors;
         const auto addExteriorArea = [&](ESM::RefId cell) {
             const auto* ext = cell.getIf<ESM::ESM3ExteriorCellRefId>();
-            if (!ext || anchor) return;
-            anchor = *ext;
+            if (!ext || std::ranges::any_of(anchors, [&](const auto& anchor) {
+                return std::abs(int64_t(ext->getX()) - anchor.getX()) <= exteriorRadius
+                    && std::abs(int64_t(ext->getY()) - anchor.getY()) <= exteriorRadius;
+            })) return;
+            // Only start/door destinations anchor neighborhoods, never every
+            // discovered exterior cell. Distant exits consume the same budget.
+            anchors.push_back(*ext);
             for (int y = -int(exteriorRadius); y <= int(exteriorRadius); ++y)
                 for (int x = -int(exteriorRadius); x <= int(exteriorRadius); ++x)
                 {
@@ -78,12 +83,7 @@ namespace TES3MP::Native
         for (size_t i = 0; i < result.size(); ++i)
             for (const auto& door : teleportDoors(result[i], std::span<const ESM::RefId>{}))
             {
-                // An interior start anchors its exterior neighborhood at the
-                // first reachable exit. Distant travel doors stay out of bounds.
                 addExteriorArea(door.mDestination);
-                if (const auto* ext = door.mDestination.getIf<ESM::ESM3ExteriorCellRefId>(); ext
-                    && (std::abs(ext->getX() - anchor->getX()) > int(exteriorRadius)
-                        || std::abs(ext->getY() - anchor->getY()) > int(exteriorRadius))) continue;
                 add(door.mDestination);
             }
         if (interventionDestinations)

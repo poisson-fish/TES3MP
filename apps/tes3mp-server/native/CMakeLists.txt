@@ -101,6 +101,15 @@ tes3mp_verify_target_includes(tes3mp_native_actor_region_tests
     FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
 set_target_properties(tes3mp_native_actor_region_tests PROPERTIES FOLDER "TES3MP/NativeProbe")
 
+add_executable(tes3mp_native_exploration_tests exploration_tests.cpp)
+target_compile_features(tes3mp_native_exploration_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_native_exploration_tests PRIVATE tes3mp_native_inventory_host tes3mp_native_inventory_service)
+tes3mp_verify_target_dependencies(tes3mp_native_exploration_tests ALLOWED tes3mp_native_inventory_host tes3mp_native_inventory_service)
+set_target_properties(tes3mp_native_exploration_tests PROPERTIES FOLDER "TES3MP/NativeProbe")
+if(MSVC)
+    target_link_options(tes3mp_native_exploration_tests PRIVATE /STACK:8388608)
+endif()
+
 add_executable(tes3mp_native_dynamic_actor_tests dynamic_actor_tests.cpp dynamic_actor_ownership.hpp)
 target_compile_features(tes3mp_native_dynamic_actor_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_native_dynamic_actor_tests PRIVATE openmw-lib)
