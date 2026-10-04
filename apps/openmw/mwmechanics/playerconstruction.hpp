@@ -5,11 +5,20 @@
 #include <components/esm/refid.hpp>
 #include <map>
 
-namespace ESM { struct NPC; struct Race; struct Class; }
+namespace ESM { struct NPC; struct Race; struct Class; struct BodyPart; }
 namespace MWWorld { class ESMStore; }
 
 namespace MWMechanics
 {
+    bool isPlayablePlayerAppearance(const ESM::Race* race, const ESM::BodyPart* head,
+        const ESM::BodyPart* hair, bool male);
+    // Stock race selection preserves unrelated NPC flags and record fields.
+    void setPlayerAppearance(ESM::NPC& body, const ESM::RefId& race, bool male,
+        const ESM::RefId& head, const ESM::RefId& hair);
+    // Detached multiplayer bodies inherit geometry, never template gameplay.
+    ESM::NPC buildPlayerBody(const ESM::NPC& base, const ESM::RefId& race, bool male,
+        const ESM::RefId& head, const ESM::RefId& hair);
+
     struct PlayerConstructionStats
     {
         std::map<ESM::RefId, AttributeValue> mAttributes;

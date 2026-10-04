@@ -216,6 +216,16 @@ namespace TES3MP
             || races.size() > MaximumCharacterSelections || classes.size() > MaximumCharacterSelections
             || birthsigns.size() > MaximumCharacterSelections || startingInventory.size() > MaximumStartingItems)
             return std::nullopt;
+        size_t appearances = 0;
+        for (const auto& race : races)
+        {
+            if (race.appearances.empty() || race.appearances.size() > MaximumRaceAppearances
+                || race.appearances.size() > MaximumCharacterAppearances - appearances
+                || race.spells.size() > MaximumStartingSpells) return std::nullopt;
+            appearances += race.appearances.size();
+        }
+        for (const auto& sign : birthsigns)
+            if (sign.spells.size() > MaximumStartingSpells) return std::nullopt;
         auto raceValues = std::vector<CharacterRaceDefinition>(races.begin(), races.end());
         auto classValues = std::vector<CharacterClassDefinition>(classes.begin(), classes.end());
         auto birthValues = std::vector<CharacterBirthsignDefinition>(birthsigns.begin(), birthsigns.end());

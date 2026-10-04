@@ -220,6 +220,9 @@ namespace TES3MP::OpenMWAdapter
         std::vector<NativeActorMotion> nativeActorPresentation() const;
         std::optional<std::array<float, 3>> renderedPlayerPosition(PlayerId player) const;
         std::vector<PublicPlayerAppearance> renderedPlayerAppearances() const;
+        std::vector<std::pair<PlayerId, std::vector<std::uint64_t>>> renderedPlayerEquipment() const;
+        struct LocomotionEvidence { std::uint8_t kind; std::uint64_t id; std::string group; float clipTime; };
+        std::vector<LocomotionEvidence> renderedLocomotion() const;
 
     private:
         class Impl;

@@ -143,6 +143,35 @@ namespace
     void construction()
     {
         Content content; const auto catalog = content.catalog();
+        ESM::NPC templateBody; templateBody.blank();
+        templateBody.mFlags = ESM::NPC::Essential | ESM::NPC::Respawn;
+        templateBody.mClass = ref("template_class"); templateBody.mFaction = ref("template_faction");
+        templateBody.mScript = ref("template_script"); templateBody.mModel = "template_model";
+        templateBody.mInventory.mList.push_back({2, ref("template_item")});
+        templateBody.mSpells.mList.push_back(ref("template_spell"));
+        const auto original = templateBody;
+        for (const bool male : {false, true})
+        {
+            const auto head = ref(male ? "male_head" : "female_head");
+            const auto hair = ref(male ? "male_hair" : "female_hair");
+            require(MWMechanics::isPlayablePlayerAppearance(&content.race,
+                content.store.get<ESM::BodyPart>().find(head), content.store.get<ESM::BodyPart>().find(hair), male),
+                "shared appearance rejected valid selected parts");
+            auto stock = templateBody;
+            MWMechanics::setPlayerAppearance(stock, content.race.mId, male, head, hair);
+            require(stock.isMale() == male && (stock.mFlags & ESM::NPC::Essential)
+                && stock.mInventory.mList.size() == 1 && stock.mScript == original.mScript,
+                "stock appearance selection discarded gameplay fields");
+            const auto detached = MWMechanics::buildPlayerBody(templateBody, content.race.mId, male, head, hair);
+            require(detached.isMale() == male && detached.mRace == stock.mRace
+                && detached.mHead == stock.mHead && detached.mHair == stock.mHair
+                && detached.mFlags == (male ? 0 : ESM::NPC::Female) && detached.mClass.empty()
+                && detached.mFaction.empty() && detached.mScript.empty() && detached.mModel.empty()
+                && detached.mInventory.mList.empty() && detached.mSpells.mList.empty(),
+                "detached appearance inherited template gameplay or changed selected parts");
+        }
+        require(templateBody.mFlags == original.mFlags && templateBody.mInventory.mList.size() == 1,
+            "shared body assembly mutated winning template");
         const auto female = review(content, catalog);
         const auto male = review(content, catalog, true);
         require(female.derived().attributes[0] == 40 && male.derived().attributes[0] == 50,

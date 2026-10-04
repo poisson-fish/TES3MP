@@ -231,14 +231,14 @@ namespace MWGui
         auto mechanics = MWBase::Environment::get().getMechanicsManager();
         auto windows = MWBase::Environment::get().getWindowManager();
         const auto& store = MWBase::Environment::get().getWorld()->getStore();
-        if (mNameDialog && phase != TES3MP::CharacterCreationPhase::AwaitingName)
+        if (mNameDialog && mNameDialog->isVisible() && phase != TES3MP::CharacterCreationPhase::AwaitingName)
         {
             mPlayerName = confirmation->profile.name();
             mechanics->setPlayerName(mPlayerName);
             windows->removeDialog(std::move(mNameDialog));
             handleDialogDone(CSE_NameChosen, GM_Race);
         }
-        else if (mRaceDialog && phase >= TES3MP::CharacterCreationPhase::AwaitingClass
+        else if (mRaceDialog && mRaceDialog->isVisible() && phase >= TES3MP::CharacterCreationPhase::AwaitingClass
             && confirmation->profile.appearance())
         {
             const auto& appearance = *confirmation->profile.appearance();
@@ -253,7 +253,9 @@ namespace MWGui
             windows->removeDialog(std::move(mRaceDialog));
             handleDialogDone(CSE_RaceChosen, GM_Class);
         }
-        else if ((mPickClassDialog || mGenerateClassResultDialog || mCreateClassDialog)
+        else if (((mPickClassDialog && mPickClassDialog->isVisible())
+                     || (mGenerateClassResultDialog && mGenerateClassResultDialog->isVisible())
+                     || (mCreateClassDialog && mCreateClassDialog->isVisible()))
             && phase >= TES3MP::CharacterCreationPhase::AwaitingBirthsign
             && confirmation->profile.characterClass())
         {
@@ -276,7 +278,8 @@ namespace MWGui
             if (mCreateClassDialog) mCreateClassDialog->setVisible(false);
             handleDialogDone(CSE_ClassChosen, GM_Birth);
         }
-        else if (mBirthSignDialog && phase >= TES3MP::CharacterCreationPhase::AwaitingReview
+        else if (mBirthSignDialog && mBirthSignDialog->isVisible()
+            && phase >= TES3MP::CharacterCreationPhase::AwaitingReview
             && confirmation->profile.birthsign())
         {
             mPlayerBirthSignId = findMultiplayerRecord<ESM::BirthSign>(store, *confirmation->profile.birthsign());
@@ -375,6 +378,31 @@ namespace MWGui
 
     void CharacterCreation::spawnDialog(const GuiMode id)
     {
+        // Chargen windows are not in WindowManager's mode-owned window list.
+        // Visibility refreshes must retain the active dialog, its input and modal
+        // registration, while mode changes must hide every previous chargen modal.
+        bool visible = false;
+        const auto retain = [&](WindowBase* dialog, GuiMode mode) {
+            if (!dialog) return;
+            if (mode == id) visible = visible || dialog->isVisible();
+            else dialog->setVisible(false);
+        };
+        retain(mNameDialog.get(), GM_Name);
+        retain(mRaceDialog.get(), GM_Race);
+        retain(mClassChoiceDialog.get(), GM_Class);
+        retain(mPickClassDialog.get(), GM_ClassPick);
+        retain(mCreateClassDialog.get(), GM_ClassCreate);
+        retain(mGenerateClassQuestionDialog.get(), GM_ClassGenerate);
+        retain(mGenerateClassResultDialog.get(), GM_ClassGenerate);
+        retain(mBirthSignDialog.get(), GM_Birth);
+        retain(mReviewDialog.get(), GM_Review);
+        const bool waiting = (id == GM_Name && mPendingCharacterChoice == PendingCharacterChoice::Name)
+            || (id == GM_Race && mPendingCharacterChoice == PendingCharacterChoice::Race)
+            || ((id == GM_ClassPick || id == GM_ClassCreate || id == GM_ClassGenerate)
+                && mPendingCharacterChoice == PendingCharacterChoice::Class)
+            || (id == GM_Birth && mPendingCharacterChoice == PendingCharacterChoice::Birthsign);
+        if (visible || waiting) return;
+
         try
         {
             switch (id)

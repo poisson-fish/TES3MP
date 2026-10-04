@@ -346,6 +346,10 @@ namespace TES3MP::OpenMWAdapter
                 }
 
                 const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                // The advertised lifetime bounds inactivity, not total playtime.
+                // Only validated live snapshots renew the client's resume window.
+                if (advanced.snapshotApplied && mResumeToken && !mResuming)
+                    mTokenDeadline = sessionDeadline(now, mRuntime->resumeLifetimeMilliseconds() * 1'000'000);
                 // A server teleport also marks the engine scene as changed.
                 // Do not echo that correction as a new client cell request.
                 if (captured.transition && snapshot && selfEntry(*snapshot)
@@ -506,6 +510,12 @@ namespace TES3MP::OpenMWAdapter
                 if (mRuntime->characterLifecycle() != CharacterLifecycle::EstablishedCharacter
                     || mMinimumEstablishedSnapshotRevision)
                 {
+                    if (mReady && mGameRunning && mControl
+                        && mControl->advanceCharacterCreation(now) != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(ProviderResult::PresentationFailed);
+                        return;
+                    }
                     if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
                         handleRuntimeFailure(
                             ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionClosed, now);

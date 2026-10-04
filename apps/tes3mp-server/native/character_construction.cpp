@@ -64,14 +64,7 @@ namespace TES3MP::Native
                 const auto* hair = resolve<ESM::BodyPart>(mStore, appearance.hair);
                 const auto* sign = resolve<ESM::BirthSign>(mStore, birthsign);
                 const bool female = appearance.sex == CharacterSex::Female;
-                const auto validPart = [&](const ESM::BodyPart* part, int type) {
-                    return part && part->mRace == race->mId && part->mData.mPart == type
-                        && part->mData.mType == ESM::BodyPart::MT_Skin && !ESM::isFirstPersonBodyPart(*part)
-                        && !(part->mData.mFlags & ESM::BodyPart::BPF_NotPlayable)
-                        && bool(part->mData.mFlags & ESM::BodyPart::BPF_Female) == female;
-                };
-                if (!race || !(race->mData.mFlags & ESM::Race::Playable) || !sign
-                    || !validPart(head, ESM::BodyPart::MP_Head) || !validPart(hair, ESM::BodyPart::MP_Hair))
+                if (!sign || !MWMechanics::isPlayablePlayerAppearance(race, head, hair, !female))
                     return {};
                 if (race->mPowers.mList.size() > MaximumStartingSpells
                     || sign->mPowers.mList.size() > MaximumStartingSpells) return {};
@@ -180,17 +173,12 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native character derivation differs from winning content");
         ConstructedCharacter result{base, MWMechanics::NpcStats(store)};
         auto& body = result.body;
+        body = MWMechanics::buildPlayerBody(base,
+            resolve<ESM::Race>(store, profile.appearance()->race)->mId,
+            profile.appearance()->sex == CharacterSex::Male,
+            resolve<ESM::BodyPart>(store, profile.appearance()->head)->mId,
+            resolve<ESM::BodyPart>(store, profile.appearance()->hair)->mId);
         body.mName = profile.name();
-        body.mRace = resolve<ESM::Race>(store, profile.appearance()->race)->mId;
-        body.mHead = resolve<ESM::BodyPart>(store, profile.appearance()->head)->mId;
-        body.mHair = resolve<ESM::BodyPart>(store, profile.appearance()->hair)->mId;
-        body.mFlags = profile.appearance()->sex == CharacterSex::Female ? ESM::NPC::Female : 0;
-        body.mNpdtType = ESM::NPC::NPC_DEFAULT;
-        body.mNpdt.mLevel = 1;
-        body.mModel.clear();
-        body.mFaction = {};
-        body.mInventory.mList.clear();
-        body.mSpells.mList.clear();
         if (const auto* cls = std::get_if<ClassRecordId>(&*profile.characterClass()))
             body.mClass = resolve<ESM::Class>(store, *cls)->mId;
         else
@@ -316,15 +304,23 @@ namespace TES3MP::Native
             if (ids.size() == MaximumRaceAppearances) return {};
             ids.push_back(*raw);
         }
+        size_t totalAppearances = 0;
         for (size_t i = 0; i < races.size(); ++i)
             for (size_t sex = 0; sex < 2; ++sex)
             {
                 auto& heads = parts[i].heads[sex];
                 auto& hair = parts[i].hair[sex];
                 // Check the Cartesian product before constructing appearances.
-                const auto remaining = MaximumRaceAppearances - races[i].appearances.size();
-                if (!hair.empty() && heads.size() > remaining / hair.size()) return {};
+                const auto remaining = std::min(MaximumRaceAppearances - races[i].appearances.size(),
+                    MaximumCharacterAppearances - totalAppearances);
+                if (!hair.empty() && heads.size() > remaining / hair.size())
+                {
+                    std::fprintf(stderr, "Native character appearance budget exceeded: race=%llu sex=%zu heads=%zu hair=%zu limit=%zu\n",
+                        static_cast<unsigned long long>(races[i].id.value()), sex, heads.size(), hair.size(), remaining);
+                    return {};
+                }
                 std::ranges::sort(heads); std::ranges::sort(hair);
+                totalAppearances += heads.size() * hair.size();
                 for (const auto head : heads) for (const auto style : hair)
                     races[i].appearances.push_back({races[i].id, HeadRecordId::fromValue(head).value(),
                         HairRecordId::fromValue(style).value(), static_cast<CharacterSex>(sex)});

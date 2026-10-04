@@ -374,10 +374,7 @@ namespace MWMechanics
 
         if (player.mRace != race || player.mHead != head || player.mHair != hair || player.isMale() != male)
         {
-            player.mRace = race;
-            player.mHead = head;
-            player.mHair = hair;
-            player.setIsMale(male);
+            setPlayerAppearance(player, race, male, head, hair);
 
             world->getStore().insert(player);
             world->renderPlayer();

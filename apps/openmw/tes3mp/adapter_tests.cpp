@@ -749,6 +749,9 @@ namespace
             return TES3MP::ResyncReason::LocalFeedGap;
         }
         void resyncCompleted() noexcept override { ++resyncCompletions; }
+        TES3MP::OpenMWAdapter::ProviderResult advanceCharacterCreation(TES3MP::MonotonicInstant) noexcept override
+        { ++characterControlCalls; return TES3MP::OpenMWAdapter::ProviderResult::Accepted; }
+        unsigned characterControlCalls = 0;
         bool pending = true;
         bool resyncPending = false;
         unsigned resyncCompletions = 0;
@@ -1123,7 +1126,8 @@ void chargenInstallation()
         if (order == 1) { inventory(completion); equipment(completion); }
         if (order != 2) profile(completion);
         spatial(20,1); coordinator->frame(.01f);
-        require(input.calls == 0 && presentation.inventories == 0 && presentation.localItems == 2);
+        require(input.calls == 0 && presentation.inventories == 0 && presentation.localItems == 2
+            && control.characterControlCalls > 0);
         require(coordinator->characterLifecycle() == (order == 2
             ? CharacterLifecycle::NewCharacter : CharacterLifecycle::CreatingCharacter));
         if (order == 2) profile(completion);

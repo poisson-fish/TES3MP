@@ -41,8 +41,33 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "catalog-bounds")
+    {
+        const auto base = catalog();
+        const auto create = [&](const auto& races) {
+            return CharacterContentCatalog::create(base.manifest(), base.creationSpawn(), base.completionSpawn(), races,
+                std::span(base.find(id<ClassRecordId>(1)), 1), std::span(base.find(id<BirthsignRecordId>(1)), 1), {});
+        };
+        std::vector<CharacterRaceDefinition> races;
+        for (size_t i = 0; i < MaximumCharacterAppearances / MaximumRaceAppearances; ++i)
+        {
+            CharacterRaceDefinition race{id<RaceRecordId>(i + 1), {}};
+            for (size_t j = 0; j < MaximumRaceAppearances; ++j)
+                race.appearances.push_back({race.id, id<HeadRecordId>(j + 1), id<HairRecordId>(1), CharacterSex::Male});
+            races.push_back(std::move(race));
+        }
+        require(bool(create(races)));
+        races.front().appearances.push_back(races.front().appearances.front());
+        require(!create(races)); // Per-race overflow.
+        races.front().appearances.pop_back();
+        races.push_back({id<RaceRecordId>(99), {{id<RaceRecordId>(99), id<HeadRecordId>(1), id<HairRecordId>(1), CharacterSex::Female}}});
+        require(!create(races)); // Total overflow with every race individually bounded.
+        std::cout << "PASS catalog-bounds: per-race and total preallocation limits\n";
+        return 0;
+    }
+    if (argc != 1) return 2;
     auto profile = CharacterProfile::fresh();
     require(profile.lifecycle() == CharacterLifecycle::NewCharacter
         && profile.phase() == CharacterCreationPhase::AwaitingName);

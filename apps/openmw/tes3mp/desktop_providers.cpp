@@ -23,6 +23,7 @@
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/meleestate.hpp"
 #include "../mwmechanics/npcstats.hpp"
+#include "../mwmechanics/playerconstruction.hpp"
 #include "../mwmechanics/security.hpp"
 #include "../mwmechanics/spellcasting.hpp"
 #include "../mwrender/replicatedactor.hpp"
@@ -1268,20 +1269,9 @@ namespace TES3MP::OpenMWAdapter
                 const auto* head = characterRecord<ESM::BodyPart>(appearance.head);
                 const auto* hair = characterRecord<ESM::BodyPart>(appearance.hair);
                 const bool female = appearance.sex == CharacterSex::Female;
-                const auto valid = [&](const ESM::BodyPart* part, int type) {
-                    return race && part && part->mRace == race->mId && part->mData.mPart == type
-                        && part->mData.mType == ESM::BodyPart::MT_Skin && !ESM::isFirstPersonBodyPart(*part)
-                        && !(part->mData.mFlags & ESM::BodyPart::BPF_NotPlayable)
-                        && bool(part->mData.mFlags & ESM::BodyPart::BPF_Female) == female;
-                };
-                if (!race || !(race->mData.mFlags & ESM::Race::Playable)
-                    || !valid(head, ESM::BodyPart::MP_Head) || !valid(hair, ESM::BodyPart::MP_Hair))
+                if (!MWMechanics::isPlayablePlayerAppearance(race, head, hair, !female))
                     return ProviderResult::ContentMappingFailed;
-                auto body = *base;
-                body.mRace = race->mId; body.mHead = head->mId; body.mHair = hair->mId;
-                body.mFlags = female ? ESM::NPC::Female : 0;
-                body.mModel.clear(); body.mInventory.mList.clear(); body.mSpells.mList.clear();
-                body.mClass = {}; body.mFaction = {}; body.mScript = {};
+                auto body = MWMechanics::buildPlayerBody(*base, race->mId, !female, head->mId, hair->mId);
                 bodies.emplace(selected.player, std::move(body));
             }
             std::vector<PublicPlayerAppearance> staged(appearances.begin(), appearances.end());
@@ -4234,6 +4224,41 @@ namespace TES3MP::OpenMWAdapter
                 body->isMale() ? CharacterSex::Male : CharacterSex::Female}});
         }
         std::ranges::sort(result, {}, &PublicPlayerAppearance::player);
+        return result;
+    }
+
+    std::vector<std::pair<PlayerId, std::vector<std::uint64_t>>> DesktopPresentation::renderedPlayerEquipment() const
+    {
+        std::vector<std::pair<PlayerId, std::vector<std::uint64_t>>> result;
+        for (const auto& [entity, remote] : mImpl->remotes)
+        {
+            if (!remote.lastObserved) continue;
+            std::vector<std::uint64_t> equipped;
+            // Replicated actors assemble meshes directly, without a gameplay
+            // InventoryStore. These slots update only after successful assembly.
+            if (remote.authoritativeEquipment)
+                for (const auto& slot : remote.equipment)
+                    if (slot) equipped.push_back(slot->value());
+            std::ranges::sort(equipped);
+            result.emplace_back(remote.lastObserved->playerId(), std::move(equipped));
+        }
+        std::ranges::sort(result, {}, &decltype(result)::value_type::first);
+        return result;
+    }
+
+    std::vector<DesktopPresentation::LocomotionEvidence> DesktopPresentation::renderedLocomotion() const
+    {
+        std::vector<LocomotionEvidence> result;
+        const auto sample = [&](uint8_t kind, uint64_t id, const auto& actor) {
+            const auto* animation = actor ? actor->animation() : nullptr;
+            if (!animation) return;
+            for (const auto group : {"idle", "sneakidle", "walkforward", "walkback", "walkleft", "walkright",
+                    "runforward", "runback", "runleft", "runright", "sneakforward", "sneakback", "sneakleft", "sneakright", "jump"})
+                if (animation->getInfo(group)) result.push_back({kind, id, group, animation->getCurrentTime(group)});
+        };
+        for (const auto& [entity, remote] : mImpl->remotes)
+            if (remote.lastObserved) sample(1, remote.lastObserved->playerId().value(), remote.actor);
+        for (const auto& [id, remote] : mImpl->nativeRemotes) sample(2, id, remote.actor);
         return result;
     }
 

@@ -70,6 +70,9 @@ namespace TES3MP::OpenMWAdapter
         virtual std::uint64_t reconnectDelayNanoseconds() noexcept { return 0; }
         virtual std::optional<ResyncReason> resyncRequested() noexcept { return std::nullopt; }
         virtual void resyncCompleted() noexcept {}
+        // Non-gameplay UI/test control while ordinary input and presentation
+        // wait for the established character's coherent installation.
+        virtual ProviderResult advanceCharacterCreation(MonotonicInstant) noexcept { return ProviderResult::Accepted; }
     };
 
     struct ObjectInteractionCapture

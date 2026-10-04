@@ -1,6 +1,9 @@
 #include "desktop_automation.hpp"
+#include "engine_coordinator.hpp"
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/inputmanager.hpp"
+#include "../mwinput/actions.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
@@ -16,6 +19,7 @@
 #include "../mwworld/inventoryrecordid.hpp"
 #include "../mwworld/player.hpp"
 #include "../mwworld/manualref.hpp"
+#include "../mwworld/containerstore.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/spellcasting.hpp"
 #include "../mwphysics/raycasting.hpp"
@@ -30,6 +34,10 @@
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadspel.hpp>
 #include <osgDB/WriteFile>
+#include <MyGUI_Button.h>
+#include <MyGUI_EditBox.h>
+#include <MyGUI_Gui.h>
+#include <MyGUI_InputManager.h>
 
 #include <stdexcept>
 
@@ -88,6 +96,12 @@ namespace TES3MP::OpenMWAdapter
                 std::bit_cast<uint32_t>(ref.getEnchantmentCharge()),
                 ref.getSoul().empty() ? 0 : MWWorld::inventoryRecordId(ref.getSoul())};
         }
+        uint64_t characterId(std::string_view record)
+        {
+            const auto id = characterRecordId(record);
+            if (!id) throw std::runtime_error("Traversal character record invalid");
+            return *id;
+        }
         bool matches(MWGui::ItemView& view, const std::vector<CanonicalItemStack>& expected)
         {
             view.update();
@@ -142,6 +156,18 @@ namespace TES3MP::OpenMWAdapter
         return mRole == DesktopAutomationRole::NativePut || mRole == DesktopAutomationRole::NativeTake
             || mRole == DesktopAutomationRole::NativeTraversal
             || mRole == DesktopAutomationRole::NativeRecoverOne || mRole == DesktopAutomationRole::NativeRecoverTwo;
+    }
+
+    ProviderResult DesktopAutomation::advanceCharacterCreation(MonotonicInstant now) noexcept
+    {
+        if (mRole != DesktopAutomationRole::NativeTraversal || mFinished) return ProviderResult::Accepted;
+        try { advanceNativeTraversal(now); }
+        catch (const std::exception& error)
+        {
+            Log(Debug::Error) << "Native character evidence failed: " << error.what();
+            finish(false);
+        }
+        return ProviderResult::Accepted;
     }
 
     std::optional<InventoryTransactionCapture> DesktopAutomation::captureInventoryTransaction() noexcept
@@ -253,8 +279,7 @@ namespace TES3MP::OpenMWAdapter
 
     void DesktopAutomation::writeNativeTraversal(std::string_view event)
     {
-        if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents || !mTraversalGround
-            || !mTraversalGround->cell.asInterior())
+        if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents || !mTraversalGround)
             throw std::runtime_error("Traversal evidence unavailable or exhausted");
         auto world = MWBase::Environment::get().getWorld();
         const auto player = world->getPlayerPtr();
@@ -290,12 +315,24 @@ namespace TES3MP::OpenMWAdapter
         }
         const auto& pos = player.getRefData().getPosition();
         const auto& stats = player.getClass().getCreatureStats(player);
+        std::map<ItemKey, uint64_t> installedInventory, expectedInventory;
+        for (const auto& item : player.getClass().getContainerStore(player))
+            installedInventory[key(item)] += item.getCellRef().getCount();
+        for (const auto& item : mNativePlayerStacks) expectedInventory[key(item)] += item.count;
+        const auto* body = player.get<ESM::NPC>()->mBase;
+        const auto cellSpace = [](const CellId& id) {
+            return id.asInterior() ? id.asInterior()->cellSpace().value() : id.asExterior()->worldspace().value();
+        };
         mOutput << "{\"event\":\"traversal_" << event << "\",\"sequence\":" << mTraversalSequence
                 << ",\"cell\":" << std::quoted(cell->getCell()->getId().toString())
-                << ",\"authority_cell\":" << (mSelfCell && mSelfCell->asInterior()
-                    ? mSelfCell->asInterior()->cellSpace().value() : 0)
-                << ",\"baseline_cell\":" << mTraversalGround->cell.asInterior()->cellSpace().value()
+                << ",\"authority_cell\":" << (mSelfCell ? cellSpace(*mSelfCell) : 0)
+                << ",\"baseline_cell\":" << cellSpace(mTraversalGround->cell)
                 << ",\"resumes\":" << mResumes
+                << ",\"inventory_matches\":" << (installedInventory == expectedInventory ? "true" : "false")
+                << ",\"local_race\":" << std::quoted(body->mRace.toString())
+                << ",\"local_head\":" << std::quoted(body->mHead.toString())
+                << ",\"local_hair\":" << std::quoted(body->mHair.toString())
+                << ",\"local_male\":" << (body->isMale() ? "true" : "false")
                 << ",\"local_ai_active\":" << (MWBase::Environment::get().getMechanicsManager()->isAIActive() ? "true" : "false")
                 << ",\"player_health\":" << stats.getHealth().getCurrent()
                 << ",\"player_dead\":" << (stats.isDead() ? "true" : "false")
@@ -329,7 +366,24 @@ namespace TES3MP::OpenMWAdapter
             comma = true;
             mOutput << "{\"item\":" << id << ",\"count\":" << count << '}';
         }
-        mOutput << "],\"teleports\":" << mTraversalGround->teleportDoors.size();
+        mOutput << "],\"teleports\":" << mTraversalGround->teleportDoors.size()
+                << ",\"player_count\":" << mNativePlayerCount.value_or(0)
+                << ",\"ground_count\":" << mTraversalGround->items.size()
+                << ",\"peer_equipment\":[";
+        bool peerComma = false;
+        for (const auto& [peer, equipment] : mPresentation.renderedPlayerEquipment())
+        {
+            if (peerComma) mOutput << ',';
+            peerComma = true;
+            mOutput << "{\"player\":" << peer.value() << ",\"items\":[";
+            for (size_t i = 0; i < equipment.size(); ++i)
+            {
+                if (i) mOutput << ',';
+                mOutput << equipment[i];
+            }
+            mOutput << "]}";
+        }
+        mOutput << ']';
         mOutput << ",\"active_cells\":[";
         comma = false;
         for (const auto* active : MWBase::Environment::get().getWorldScene()->getActiveCells())
@@ -359,6 +413,8 @@ namespace TES3MP::OpenMWAdapter
         writeNativeInventory("traversal_inventory");
         if (event == "observe" && (visible != expected || originals != 0))
             throw std::runtime_error("Traversal rendered ground differs from committed baseline");
+        if (event == "observe" && installedInventory != expectedInventory)
+            throw std::runtime_error("Traversal installed inventory differs from committed baseline");
     }
 
     void DesktopAutomation::advanceNativeTraversal(MonotonicInstant now)
@@ -366,7 +422,23 @@ namespace TES3MP::OpenMWAdapter
         // Test-build-only, bounded local control. Gameplay actions use the same
         // Player activation and GUI delegates as a desktop user. Pose is explicit
         // same-cell test setup; it never changes cell or mutates server state.
-        if (!mTraversalGround || !mNativePlayerCount || !mSnapshots || !mDesktopInput) return;
+        if (!mDesktopInput || !mCoordinator) return;
+        if (const auto* confirmation = mCoordinator->confirmedCharacterProfile())
+        {
+            const auto observed = std::pair{confirmation->profile.revision().value(), confirmation->result};
+            if (mObservedCharacterConfirmation != observed)
+            {
+                mOutput << "{\"event\":\"character_profile_confirmed\",\"revision\":" << observed.first
+                    << ",\"result\":" << unsigned(observed.second)
+                    << ",\"lifecycle\":" << unsigned(confirmation->profile.lifecycle())
+                    << ",\"phase\":" << unsigned(confirmation->profile.phase())
+                    << ",\"canonical_revision\":" << (confirmation->canonicalRevision ? confirmation->canonicalRevision->value() : 0)
+                    << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+                mObservedCharacterConfirmation = observed;
+            }
+        }
         std::error_code error;
         const auto size = std::filesystem::file_size(mTraversalControl, error);
         if (error) return;
@@ -384,6 +456,45 @@ namespace TES3MP::OpenMWAdapter
         unsigned targetKind = 2;
         uint64_t targetId = 0;
         std::string record, trailing;
+        std::optional<CharacterCreationChoice> characterChoice;
+        if (action == "name" || action == "class" || action == "sign")
+        {
+            if (!(file >> std::quoted(record)) || record.empty() || record.size() > 64)
+                throw std::runtime_error("Traversal character choice invalid");
+            if (action == "name") characterChoice = SetCharacterName{record};
+            else if (action == "class") characterChoice = SetCharacterClass{ClassRecordId::fromValue(characterId(record)).value()};
+            else characterChoice = SetCharacterBirthsign{BirthsignRecordId::fromValue(characterId(record)).value()};
+        }
+        else if (action == "race")
+        {
+            std::string head, hair;
+            unsigned male;
+            if (!(file >> std::quoted(record) >> male >> std::quoted(head) >> std::quoted(hair))
+                || record.empty() || head.empty() || hair.empty() || record.size() > 64 || head.size() > 64
+                || hair.size() > 64 || male > 1)
+                throw std::runtime_error("Traversal character appearance invalid");
+            characterChoice = SetCharacterAppearance{{RaceRecordId::fromValue(characterId(record)).value(),
+                HeadRecordId::fromValue(characterId(head)).value(), HairRecordId::fromValue(characterId(hair)).value(),
+                male ? CharacterSex::Male : CharacterSex::Female}};
+        }
+        else if (action == "complete") characterChoice = CompleteCharacterCreation{};
+        if (action == "uiclick")
+        {
+            if (!(file >> x >> y) || !std::isfinite(x) || !std::isfinite(y)
+                || x < 0 || y < 0 || x > 8192 || y > 8192)
+                throw std::runtime_error("Traversal UI coordinates invalid");
+        }
+        else if (action == "uimode")
+        {
+            if (!(file >> record) || (record != "class" && record != "review"))
+                throw std::runtime_error("Traversal UI mode invalid");
+        }
+        else if (action == "uitext")
+        {
+            if (!(file >> std::quoted(record)) || record.empty() || record.size() > 64
+                || !std::ranges::all_of(record, [](unsigned char c) { return c >= 32 && c < 127; }))
+                throw std::runtime_error("Traversal UI text invalid");
+        }
         if (action == "pose")
         {
             if (!(file >> x >> y >> z >> pitch >> yaw) || !std::isfinite(x) || !std::isfinite(y)
@@ -413,7 +524,7 @@ namespace TES3MP::OpenMWAdapter
                 if (!std::isfinite(value) || std::abs(value) > 1048576)
                     throw std::runtime_error("Traversal probe coordinates invalid");
         }
-        else if (action == "activate" || action == "put" || action == "drop" || action == "cast" || action == "castactor"
+        else if (action == "activate" || action == "put" || action == "drop" || action == "equip" || action == "cast" || action == "castactor"
             || action == "castdoor" || action == "castcontainer" || action == "castat" || action == "castpredict"
             || action == "dialogue" || action == "dialoguestart")
         {
@@ -423,6 +534,69 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal spell target invalid");
         }
         if (file >> trailing) throw std::runtime_error("Trailing traversal control input");
+        if (action == "uistate" || action == "uiclick" || action == "uirefresh" || action == "uimode"
+            || action == "uitext")
+        {
+            auto windows = MWBase::Environment::get().getWindowManager();
+            if (action == "uimode") windows->pushGuiMode(record == "class" ? MWGui::GM_Class : MWGui::GM_Review);
+            if (action == "uirefresh") windows->allow(MWGui::GW_Magic);
+            if (action == "uiclick")
+            {
+                auto& input = MyGUI::InputManager::getInstance();
+                input.injectMouseMove(int(x), int(y), 0);
+                input.injectMousePress(int(x), int(y), MyGUI::MouseButton::Left);
+                input.injectMouseRelease(int(x), int(y), MyGUI::MouseButton::Left);
+            }
+            if (action == "uitext")
+            {
+                auto& input = MyGUI::InputManager::getInstance();
+                auto* focus = input.getKeyFocusWidget();
+                if (!focus || !focus->castType<MyGUI::EditBox>(false) || !focus->getVisible())
+                    throw std::runtime_error("Traversal UI text requires focused edit box");
+                for (unsigned char c : record)
+                {
+                    input.injectKeyPress(MyGUI::KeyCode::None, c);
+                    input.injectKeyRelease(MyGUI::KeyCode::None);
+                }
+            }
+            mTraversalSequence = sequence;
+            mOutput << "{\"event\":\"traversal_ui\",\"sequence\":" << sequence
+                << ",\"mode\":" << unsigned(windows->getMode()) << ",\"buttons\":[";
+            unsigned visited = 0, buttons = 0;
+            const auto inspect = [&](const auto& self, MyGUI::Widget* widget, unsigned depth) -> void {
+                if (++visited > 4096 || depth > 32) throw std::runtime_error("Traversal UI exceeds widget bounds");
+                if (!widget->getVisible()) return;
+                if (auto* button = widget->castType<MyGUI::Button>(false); button && button->getEnabled())
+                {
+                    if (++buttons > 128) throw std::runtime_error("Traversal UI exceeds button bounds");
+                    auto caption = button->getCaption().asUTF8();
+                    for (char& c : caption) if (static_cast<unsigned char>(c) < 32) c = ' ';
+                    const auto coord = button->getAbsoluteCoord();
+                    mOutput << (buttons > 1 ? "," : "") << "{\"caption\":" << std::quoted(caption)
+                        << ",\"x\":" << coord.left + coord.width / 2 << ",\"y\":" << coord.top + coord.height / 2 << "}";
+                }
+                for (size_t i = 0; i < widget->getChildCount(); ++i) self(self, widget->getChildAt(i), depth + 1);
+            };
+            auto roots = MyGUI::Gui::getInstance().getEnumerator();
+            while (roots.next()) inspect(inspect, roots.current(), 0);
+            mOutput << "]}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
+            return;
+        }
+        if (characterChoice)
+        {
+            const auto revision = mCoordinator->characterProfileRevision().value();
+            if (!mCoordinator->submitCharacterCreation(std::move(*characterChoice)))
+                throw std::runtime_error("Traversal character submission unavailable");
+            mTraversalSequence = sequence;
+            mOutput << "{\"event\":\"character_choice_submitted\",\"sequence\":" << sequence
+                << ",\"revision\":" << revision << ",\"action\":" << std::quoted(action) << "}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
+            return;
+        }
+        if (!mTraversalGround || !mNativePlayerCount || !mSnapshots) return;
         auto world = MWBase::Environment::get().getWorld();
         auto wm = MWBase::Environment::get().getWindowManager();
         if (action == "pose")
@@ -430,6 +604,11 @@ namespace TES3MP::OpenMWAdapter
             world->toggleVanityMode(false);
             world->moveObject(world->getPlayerPtr(), osg::Vec3f(x,y,z));
             world->rotateObject(world->getPlayerPtr(), osg::Vec3f(pitch,0,yaw));
+        }
+        else if (action == "autowalk")
+        {
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal movement requires game focus");
+            MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_AutoMove);
         }
         else if (action == "thirdperson")
         {
@@ -467,7 +646,7 @@ namespace TES3MP::OpenMWAdapter
             mOutput.flush();
             ++mEvidenceEvents;
         }
-        else if (action == "drop")
+        else if (action == "drop" || action == "equip")
         {
             if (wm->isGuiMode()) throw std::runtime_error("Traversal drop requires game focus");
             const auto id = MWWorld::inventoryRecordId(ESM::RefId::stringRefId(record));
@@ -480,7 +659,12 @@ namespace TES3MP::OpenMWAdapter
             MWGui::ItemView* view = nullptr;
             wm->getInventoryWindow()->getWidget(view, "ItemView");
             clickItem(*view, stack);
-            wm->getHud()->dropDraggedItem(.5f, .5f);
+            if (action == "drop") wm->getHud()->dropDraggedItem(.5f, .5f);
+            else
+            {
+                auto* avatar = wm->getInventoryWindow()->getWidget("AvatarImage");
+                avatar->eventMouseButtonClick(avatar);
+            }
             wm->removeGuiMode(MWGui::GM_Inventory);
         }
         else if (action == "activate")

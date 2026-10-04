@@ -53,7 +53,9 @@ namespace TES3MP::OpenMWAdapter
     {
         CellId firstCell(const ContentManifest& manifest, CellId::Kind kind)
         {
-            return *std::ranges::find_if(manifest.cells(), [&](const CellId& cell) { return cell.kind() == kind; });
+            const auto found = std::ranges::find_if(manifest.cells(), [&](const CellId& cell) { return cell.kind() == kind; });
+            // Native traversal can bind only interiors or only exteriors.
+            return found == manifest.cells().end() ? manifest.cells().front() : *found;
         }
     }
     namespace
@@ -607,6 +609,13 @@ namespace TES3MP::OpenMWAdapter
                             << ",\"x\":" << actor.position[0] << ",\"y\":" << actor.position[1] << ",\"z\":" << actor.position[2] << "}\n";
                         ++mEvidenceEvents;
                     }
+                for (const auto& pose : mPresentation.renderedLocomotion())
+                {
+                    mOutput << "{\"event\":\"locomotion_frame\",\"time_ns\":" << now.nanoseconds()
+                        << ",\"kind\":" << unsigned(pose.kind) << ",\"id\":" << pose.id
+                        << ",\"group\":" << std::quoted(pose.group) << ",\"clip_time\":" << pose.clipTime << "}\n";
+                    ++mEvidenceEvents;
+                }
                 mOutput.flush();
             }
             catch (...) { return ProviderResult::PresentationFailed; }

@@ -2,6 +2,7 @@
 #define OPENMW_TES3MP_DESKTOP_AUTOMATION_HPP
 
 #include "desktop_providers.hpp"
+#include <tes3mp/character_creation_protocol.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -73,6 +74,10 @@ namespace TES3MP::OpenMWAdapter
         void setCoordinator(EngineCoordinator* coordinator) noexcept { mCoordinator = coordinator; }
         ProviderResult setPlayerAppearances(bool characterBodies,
             std::span<const PublicPlayerAppearance> appearances) noexcept override;
+        ProviderResult applyCharacterProfile(const CharacterProfile& profile, MonotonicInstant receivedAt) noexcept override
+        { return mPresentation.applyCharacterProfile(profile, receivedAt); }
+        ProviderResult applyPublicEquipment(const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt) noexcept override
+        { return mPresentation.applyPublicEquipment(equipment, receivedAt); }
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept override;
@@ -102,6 +107,7 @@ namespace TES3MP::OpenMWAdapter
         std::uint64_t reconnectDelayNanoseconds() noexcept override;
         std::optional<ResyncReason> resyncRequested() noexcept override;
         void resyncCompleted() noexcept override;
+        ProviderResult advanceCharacterCreation(MonotonicInstant now) noexcept override;
 
     private:
         const char* roleName() const noexcept;
@@ -248,6 +254,7 @@ namespace TES3MP::OpenMWAdapter
         bool mMagicEffectActiveAfterResume = false;
         bool mFinished = false;
         std::optional<std::vector<PublicPlayerAppearance>> mRenderedPlayerAppearances;
+        std::optional<std::pair<uint64_t, CharacterConfirmationResult>> mObservedCharacterConfirmation;
     };
 }
 

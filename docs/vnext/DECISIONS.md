@@ -327,3 +327,9 @@ V78 requires capabilities 6 and 36; older peers reject during negotiation.
 **Character installation:** committed profile revisions bind coherent installation;
 newer motion cannot raise inventory floors. Delayed lanes resync; public equipment
 presents independently of private delivery.
+
+**Resume inactivity:** live authenticated bindings renew bounded token expiry;
+validated snapshots renew client deadlines. Disconnect stops renewal. Expired tokens
+and old generations reject; rotation/replay rules remain unchanged.
+
+**Modded chargen:** allow 8,192 pairs/race and 65,536 total; validate sizes before allocation.

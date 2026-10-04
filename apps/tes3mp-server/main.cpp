@@ -824,7 +824,7 @@ int main(int argc, char** argv)
     }
     std::signal(SIGINT, requestStop);
     std::signal(SIGTERM, requestStop);
-    std::cout << "server started\n";
+    std::cout << "server started\n" << std::flush;
     while (stopRequested == 0)
     {
         if (!application.pump(intake.nextTick()))

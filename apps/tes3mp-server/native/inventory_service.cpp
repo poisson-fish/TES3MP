@@ -2582,7 +2582,15 @@ namespace TES3MP::Native
             }
             return std::make_unique<Transaction>(*this, players, prepare(players, *binding));
         }
-        catch (const std::invalid_argument&) { return {}; }
+        catch (const std::invalid_argument& error)
+        {
+            // Bound diagnostics; no credentials or complete input/source dumps.
+            std::fprintf(stderr, "Native inventory rejected: player=%llu kind=%u stack=%llu revision=%llu reason=%.200s\n",
+                static_cast<unsigned long long>(binding->player().value()), unsigned(binding->transaction().kind),
+                static_cast<unsigned long long>(binding->transaction().stackId ? binding->transaction().stackId->value() : 0),
+                static_cast<unsigned long long>(binding->transaction().expectedInventoryRevision.value()), error.what());
+            return {};
+        }
     }
 
     class InventoryService::AttackTransaction final : public PreparedNativeInventory

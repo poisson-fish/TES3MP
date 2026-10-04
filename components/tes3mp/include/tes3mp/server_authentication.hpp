@@ -237,6 +237,8 @@ namespace TES3MP
         bool finalizeConsume(std::uint64_t preparationId) noexcept;
         bool rollbackConsume(std::uint64_t preparationId) noexcept;
         bool cancelConsume(std::uint64_t preparationId) noexcept;
+        // Only the owner of a live authenticated binding may renew inactivity.
+        bool keepAlive(SessionId session, SessionGeneration generation, MonotonicInstant now) noexcept;
 
         std::size_t size() const noexcept;
 
@@ -299,6 +301,7 @@ namespace TES3MP
         virtual bool finalizeResume(std::uint64_t) noexcept { return false; }
         virtual bool rollbackResume(std::uint64_t) noexcept { return false; }
         virtual bool cancelResume(std::uint64_t) noexcept { return false; }
+        virtual void keepAlive(SessionId, SessionGeneration) noexcept {}
 
     protected:
         static std::span<const std::byte> materialBytes(const AuthenticationMaterial& material) noexcept
@@ -329,6 +332,7 @@ namespace TES3MP
         bool finalizeResume(std::uint64_t preparationId) noexcept override;
         bool rollbackResume(std::uint64_t preparationId) noexcept override;
         bool cancelResume(std::uint64_t preparationId) noexcept override;
+        void keepAlive(SessionId session, SessionGeneration generation) noexcept override;
 
     private:
         AuthenticationRateLimiter& mLimiter;

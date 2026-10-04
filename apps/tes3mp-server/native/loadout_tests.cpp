@@ -1,4 +1,5 @@
 #include "loadout.hpp"
+#include "character_construction.hpp"
 #include "environment_tests.hpp"
 #include "door_tests.hpp"
 #include "equipment_tests.hpp"
@@ -26,6 +27,7 @@ namespace TES3MP::Native::Testing { void checkCastPresentation(const std::filesy
 
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwmechanics/spellutil.hpp>
+#include <apps/openmw/mwmechanics/playerconstruction.hpp>
 #include <apps/openmw/mwscript/compilercontext.hpp>
 #include <apps/openmw/mwscript/scriptmanagerimp.hpp>
 #include <apps/openmw/mwworld/cellstore.hpp>
@@ -6548,6 +6550,62 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 3 && std::string_view(argv[1]) == "character-appearances")
+        {
+            using namespace TES3MP;
+            const char* options[]{argv[0], "--config", argv[2]};
+            Native::Loadout loadout(Native::readLoadoutOptions(3, options));
+            const auto zero = Turn32::fromValue(0);
+            const Transform spawn{CellId::interior(CellSpaceId::fromValue(1).value()), Position3(0, 0, 0), {zero, zero, zero}};
+            std::array<std::byte, ContentManifestIdBytes> testBinding;
+            testBinding.fill(std::byte{1}); // Read-only construction; no network admission.
+            const auto catalog = Native::discoverNativeCharacterContent(
+                ContentManifestId::fromBytes(testBinding).value(), spawn, spawn, {}, loadout.store());
+            require(bool(catalog), "Winning character catalog rejected");
+            std::optional<ClassRecordId> cls;
+            std::optional<BirthsignRecordId> sign;
+            for (const auto& record : loadout.store().get<ESM::Class>())
+                if (auto id = ClassRecordId::fromValue(*characterRecordId(record.mId.getRefIdString())); catalog->find(*id))
+                { cls = id; break; }
+            for (const auto& record : loadout.store().get<ESM::BirthSign>())
+                if (auto id = BirthsignRecordId::fromValue(*characterRecordId(record.mId.getRefIdString())); catalog->find(*id))
+                { sign = id; break; }
+            require(cls && sign, "Winning class/birthsign unavailable");
+            ESM::NPC base; base.blank();
+            size_t races = 0, cases = 0;
+            for (const auto& record : loadout.store().get<ESM::Race>())
+            {
+                const auto* race = catalog->find(RaceRecordId::fromValue(*characterRecordId(record.mId.getRefIdString())).value());
+                if (!race) continue;
+                ++races;
+                for (const auto sex : {CharacterSex::Female, CharacterSex::Male})
+                {
+                    std::vector<CharacterAppearance> choices;
+                    for (const auto& appearance : race->appearances) if (appearance.sex == sex) choices.push_back(appearance);
+                    if (choices.empty()) continue;
+                    for (const auto appearance : {choices.front(), choices.back()})
+                    {
+                        auto profile = CharacterProfile::fresh();
+                        for (CharacterCreationChoice choice : {CharacterCreationChoice{SetCharacterName{"Appearance check"}},
+                                 CharacterCreationChoice{SetCharacterAppearance{appearance}}, CharacterCreationChoice{SetCharacterClass{*cls}},
+                                 CharacterCreationChoice{SetCharacterBirthsign{*sign}}, CharacterCreationChoice{CompleteCharacterCreation{}}})
+                        {
+                            auto changed = applyCharacterCreation(profile, *catalog, {profile.revision(), std::move(choice)});
+                            require(std::holds_alternative<CharacterProfile>(changed), "Winning appearance completion rejected");
+                            profile = std::get<CharacterProfile>(std::move(changed));
+                        }
+                        const auto constructed = Native::constructNativeCharacter(profile, base, loadout.store());
+                        require(constructed.body.isMale() == (sex == CharacterSex::Male)
+                            && constructed.body.mRace == record.mId && constructed.body.mInventory.mList.empty(),
+                            "Winning body assembly changed sex/race or inherited items");
+                        ++cases;
+                    }
+                }
+            }
+            require(races && cases, "No winning playable appearances checked");
+            std::cout << "PASS character-appearances: races=" << races << " cases=" << cases << '\n';
+            return 0;
+        }
         if (argc == 4 && std::string_view(argv[1]) == "actor-effect-mod-records")
         {
             const auto load = [&](const char* directory) {

@@ -424,6 +424,26 @@ namespace TES3MP
         return false;
     }
 
+    bool ResumeTokenStore::keepAlive(SessionId session, SessionGeneration generation, MonotonicInstant now) noexcept
+    {
+        const std::scoped_lock lock(mMutex);
+        const auto deadline = expiryFrom(now);
+        if (!deadline) return false;
+        for (size_t index = 0; index < mRecords.size(); ++index)
+        {
+            auto& record = mRecords[index];
+            if (!record || record->session != session || record->generation != generation) continue;
+            if (now >= record->expiresAt || *deadline < record->expiresAt
+                || (mCommitted && mCommitted->recordSlot == index)
+                || std::any_of(mPending.begin(), mPending.end(), [index](const auto& pending) {
+                    return pending && pending->recordSlot == index;
+                })) return false;
+            record->expiresAt = *deadline;
+            return true;
+        }
+        return false;
+    }
+
     std::size_t ResumeTokenStore::size() const noexcept
     {
         const std::scoped_lock lock(mMutex);
@@ -667,5 +687,9 @@ namespace TES3MP
     bool SharedServerAuthenticationService::cancelResume(std::uint64_t preparationId) noexcept
     {
         return mResumeStore.cancelConsume(preparationId);
+    }
+    void SharedServerAuthenticationService::keepAlive(SessionId session, SessionGeneration generation) noexcept
+    {
+        (void)mResumeStore.keepAlive(session, generation, mClock.now());
     }
 }

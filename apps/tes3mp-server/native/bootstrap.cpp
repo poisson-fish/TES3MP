@@ -4,6 +4,10 @@
 #include <apps/openmw/mwworld/worldmodel.hpp>
 #include <apps/openmw/mwworld/cellstore.hpp>
 #include <apps/openmw/mwworld/class.hpp>
+#include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadrace.hpp>
+#include <components/esm3/loadbody.hpp>
+#include <components/esm3/loadbsgn.hpp>
 #include <tes3mp/server_authentication.hpp>
 #include <charconv>
 #include <cmath>
@@ -54,6 +58,54 @@ namespace
 int main(int argc, char** argv)
 try
 {
+    const bool inspectActors = argc >= 2 && std::string_view(argv[1]) == "--inspect-actors";
+    const bool inspectCharacter = argc >= 2 && std::string_view(argv[1]) == "--inspect-character";
+    if (inspectActors || inspectCharacter)
+    {
+        if (argc != 4 || std::string_view(argv[3]).empty() || std::string_view(argv[3]).size() > 128)
+            throw std::invalid_argument("Inspection requires CONFIG and a bounded cell/race selector");
+        const char* arguments[]{"tes3mp_native_bootstrap", "--config", argv[2]};
+        TES3MP::Native::Loadout loadout(TES3MP::Native::readLoadoutOptions(3, arguments));
+        if (inspectCharacter)
+        {
+            const auto* race = loadout.store().get<ESM::Race>().find(TES3MP::Native::interiorCell(argv[3]));
+            if (!(race->mData.mFlags & ESM::Race::Playable))
+                throw std::invalid_argument("Character inspection requires a playable race");
+            size_t count = 0;
+            for (const auto& part : loadout.store().get<ESM::BodyPart>())
+            {
+                if (part.mRace != race->mId || ESM::isFirstPersonBodyPart(part)
+                    || part.mData.mType != ESM::BodyPart::MT_Skin || (part.mData.mFlags & ESM::BodyPart::BPF_NotPlayable)
+                    || (part.mData.mPart != ESM::BodyPart::MP_Head && part.mData.mPart != ESM::BodyPart::MP_Hair)) continue;
+                if (++count > 1024) throw std::invalid_argument("Character appearance inspection budget exceeded");
+                std::cout << "part=" << std::quoted(part.mId.toString()) << " type=" << unsigned(part.mData.mPart)
+                    << " male=" << !(part.mData.mFlags & ESM::BodyPart::BPF_Female) << '\n';
+            }
+            if (loadout.store().get<ESM::BirthSign>().getSize() > 256)
+                throw std::invalid_argument("Birthsign inspection budget exceeded");
+            for (const auto& sign : loadout.store().get<ESM::BirthSign>())
+                std::cout << "birthsign=" << std::quoted(sign.mId.toString()) << '\n';
+            return 0;
+        }
+        const auto cell = startCell(argv[3]);
+        const auto actors = loadout.placedActors(cell);
+        if (actors.size() > 128) throw std::invalid_argument("Actor inspection budget exceeded");
+        for (const auto& actor : actors)
+        {
+            const auto* npc = loadout.store().get<ESM::NPC>().search(actor.mRef.mRefID);
+            std::cout << "actor=" << actor.mIdentity << " record=" << std::quoted(actor.mRef.mRefID.toString())
+                << " scripted=" << actor.mScripted << " leveled=" << actor.mLeveled
+                << " position=" << actor.mRef.mPos.pos[0] << ':' << actor.mRef.mPos.pos[1] << ':' << actor.mRef.mPos.pos[2];
+            if (npc) std::cout << " name=" << std::quoted(npc->mName) << " script=" << std::quoted(npc->mScript.toString())
+                << " ai_packages=" << npc->mAiPackage.mList.size();
+            std::cout << '\n';
+        }
+        for (const auto& door : loadout.teleportDoors(cell, std::span<const ESM::RefId>{}))
+            std::cout << "door=" << door.mIdentity << " record=" << std::quoted(door.mRef.mRefID.toString())
+                << " destination=" << std::quoted(door.mDestination.toString())
+                << " position=" << door.mRef.mPos.pos[0] << ':' << door.mRef.mPos.pos[1] << ':' << door.mRef.mPos.pos[2] << '\n';
+        return 0;
+    }
     const bool inspectArea = argc >= 2 && std::string_view(argv[1]) == "--inspect-area";
     const bool listCells = argc >= 2 && std::string_view(argv[1]) == "--list-cells";
     if ((listCells && argc != 4) || (inspectArea && argc != 4 && argc != 5))
@@ -135,6 +187,8 @@ try
         std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z] [NAV_SETTINGS] [chargen]\n"
             "tes3mp_native_bootstrap --list-cells OPENMW_CONFIG_DIR NAME_FILTER (at most 64 results)\n"
             "tes3mp_native_bootstrap --inspect-area OPENMW_CONFIG_DIR START [RADIUS] (all connected areas)\n"
+            "tes3mp_native_bootstrap --inspect-actors OPENMW_CONFIG_DIR CELL (placements and supported exits)\n"
+            "tes3mp_native_bootstrap --inspect-character OPENMW_CONFIG_DIR RACE (playable head/hair records)\n"
             "START is an interior name or exterior:X:Y; exterior radius defaults to 1 (maximum 7).\n"
             "Use RADIUS=single for a one-cell connection/presentation check with travel disabled.\n"
             "OpenMW discovers the area, connected interiors and intervention destinations. Outputs native-inventory-15 and matching\n"

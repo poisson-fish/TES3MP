@@ -331,6 +331,26 @@ namespace
             && !ResumeTokenStore::create(crypto, MaximumResumeTokenLifetimeMilliseconds + 1);
     }
 
+    bool live_binding_renews_resume_inactivity_only()
+    {
+        FakeCrypto crypto;
+        auto tokens = store(crypto, 1000);
+        auto issued = tokens->issue(principal(7), session(9), generation(3), context(), MonotonicInstant::fromNanoseconds(0));
+        auto token = std::get<AuthenticationAcceptedMessage>(std::move(issued)).takeToken();
+        if (tokens->keepAlive(session(8), generation(3), MonotonicInstant::fromNanoseconds(500'000'000))
+            || tokens->keepAlive(session(9), generation(2), MonotonicInstant::fromNanoseconds(500'000'000))) return false;
+        if (!tokens->keepAlive(session(9), generation(3), MonotonicInstant::fromNanoseconds(500'000'000))
+            || tokens->keepAlive(session(9), generation(3), MonotonicInstant::fromNanoseconds(400'000'000))) return false;
+        auto resumed = tokens->consume(token, context(), MonotonicInstant::fromNanoseconds(1'400'000'000));
+        if (!std::holds_alternative<AuthenticatedAdmission>(resumed)) return false;
+        if (tokens->keepAlive(session(9), generation(3), MonotonicInstant::fromNanoseconds(1'450'000'000))) return false;
+        if (tokens->keepAlive(session(9), generation(4), MonotonicInstant::fromNanoseconds(2'400'000'000))) return false;
+        auto grant = std::get<AuthenticatedAdmission>(std::move(resumed)).takeResumeGrant();
+        auto replacement = grant->takeResponse()->takeToken();
+        return std::get<ResumeTokenStoreError>(tokens->consume(replacement, context(),
+            MonotonicInstant::fromNanoseconds(2'400'000'000))) == ResumeTokenStoreError::Denied;
+    }
+
     bool issue_resume_rotate_and_replay_are_atomic()
     {
         FakeCrypto crypto;
@@ -379,6 +399,8 @@ namespace
         if (!pending || pending->admission.principal() != principal(7) || !pending->admission.isResume())
             return false;
         const auto firstId = pending->id;
+        if (tokens->keepAlive(session(9), generation(3), MonotonicInstant::fromNanoseconds(11)))
+            return false;
         if (std::get<ResumeTokenStoreError>(
                 tokens->prepareConsume(original, context(), MonotonicInstant::fromNanoseconds(11)))
             != ResumeTokenStoreError::Denied)
@@ -394,6 +416,8 @@ namespace
         auto response = grant ? grant->takeResponse() : std::nullopt;
         auto rotated = response ? response->takeToken() : std::optional<ResumeToken>{};
         if (!rotated || !tokens->commitConsume(replacement->id) || tokens->commitConsume(replacement->id))
+            return false;
+        if (tokens->keepAlive(session(9), generation(4), MonotonicInstant::fromNanoseconds(13)))
             return false;
         if (!tokens->rollbackConsume(replacement->id) || tokens->rollbackConsume(replacement->id))
             return false;
@@ -689,14 +713,16 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc != 1 && argc != 2) return 2;
     struct Test
     {
         std::string_view name;
         bool (*run)();
     };
     constexpr std::array tests{
+        Test{ "live-binding", live_binding_renews_resume_inactivity_only },
         Test{ "join_password_provider_handles_open_protected_and_denied_inputs",
             join_password_provider_handles_open_protected_and_denied_inputs },
         Test{ "join_password_operation_is_cancellable_and_one_shot",
@@ -726,11 +752,13 @@ int main()
     };
     for (const auto& test : tests)
     {
+        if (argc == 2 && test.name != argv[1]) continue;
         if (!test.run())
         {
             std::cerr << "FAILED: " << test.name << '\n';
             return 1;
         }
+        if (argc == 2) { std::cout << "PASS " << test.name << '\n'; return 0; }
     }
-    return 0;
+    return argc == 1 ? 0 : 2;
 }

@@ -6,7 +6,7 @@
       "id": "M4-015",
       "slice": "native character base construction",
       "owner": "OpenMW player construction and app-local character transaction",
-      "purpose": "Extract stock race/class base-stat construction into an explicit record/store helper called by MechanicsManager::buildPlayer and the native character provider. Preserve pre-selection behavior. Validate winning choices, body compatibility, representable stats and bounded spell membership. Player F_PCStart selection retains stock order/cost/chance/limits with explicit content. V78 stages owned NPC bodies, inventory, stock stats and selected sources/resources in the existing authoritative actor transaction; recovery rederives profiles/baselines and verifies resource signatures. Stock iAutoPCSpellMax=100 is bounded by eligible selection allocation, not rejected outright.",
+      "purpose": "Extract stock race/class base-stat construction into an explicit record/store helper called by MechanicsManager::buildPlayer and the native character provider. Preserve pre-selection behavior. Validate winning choices, body compatibility, representable stats and bounded spell membership. Player F_PCStart selection retains stock order/cost/chance/limits with explicit content. V78 stages owned NPC bodies, inventory, stock stats and selected sources/resources in the existing authoritative actor transaction; recovery rederives profiles/baselines and verifies resource signatures. Stock iAutoPCSpellMax=100 is bounded by eligible selection allocation, not rejected outright. Shared playable appearance validation and body assembly serve stock selection, native completion and replicated body mapping. Head/hair products are bounded to 8192 per race and 65536 total before allocation, supporting installed Tamriel Data appearances.",
       "paths": [
         "apps/openmw/mwmechanics/playerconstruction.cpp",
         "apps/openmw/mwmechanics/playerconstruction.hpp"
@@ -15,9 +15,12 @@
         "tes3mp_native_character_tests construction",
         "tes3mp_native_character_tests completion NEW_IDENTITY_FILE",
         "tes3mp_native_character_tests completion-native NEW_IDENTITY_FILE",
-        "tes3mp_native_loadout_tests chargen-installer"
+        "tes3mp_native_loadout_tests chargen-installer",
+        "tes3mp_character_profile_tests catalog-bounds",
+        "tes3mp_native_loadout_tests character-appearances CONFIG_DIRECTORY",
+        "scripts/capture_native_character_desktop.py complete|restart --runtime RUNTIME --output NEW_OUTPUT --binary BINARIES --profiles PROFILES --cell CELL [--steps STEPS]"
       ],
-      "disposition": "shared stock construction/native installation and remote body mapping; synthetic atomic completion/recovery evidence; live two-desktop acceptance pending",
+      "disposition": "shared stock construction/native installation and remote body mapping; synthetic completion/recovery plus rendered fixture completion, outfits, ground, door reentry, movement and restart evidence; broader rendered mod coverage remains pending",
       "removal_condition": "OpenMW supplies equivalent explicit chargen preparation independent of global player/presentation services"
     },
     {
@@ -902,7 +905,7 @@
       "id": "P18-001",
       "slice": "authoritative character creation",
       "owner": "OpenMW adapter",
-      "purpose": "Bridge stock prison-ship character-generation choices through bounded server confirmation before durable player mutation while retaining OpenMW dialogue, menus, animations, and presentation.",
+      "purpose": "Bridge stock prison-ship character-generation choices through bounded server confirmation before durable player mutation while retaining OpenMW dialogue, menus, animations, and presentation. Chargen visibility refreshes retain the active modal and edits; mode changes hide inactive dialogs. Resume projection only advances visible dialogs, preventing retained custom-class windows from repeatedly replacing birthsign selection.",
       "paths": [
         "apps/openmw/mwgui/charactercreation.cpp",
         "apps/openmw/mwgui/charactercreation.hpp"
@@ -911,7 +914,8 @@
         "scripts/tests/test_openmw_patch_registry.py",
         "openmw_tes3mp_adapter_tests",
         "tes3mp_character_profile_tests",
-        "tes3mp_character_creation_protocol_tests"
+        "tes3mp_character_creation_protocol_tests",
+        "scripts/capture_native_chargen_ui.py --route pick|generate|create --runtime FRESH_RUNTIME --binary BINARIES --server SERVER --output NEW_OUTPUT --cell CELL"
       ],
       "disposition": "local product adapter",
       "removal_condition": "OpenMW supplies an equivalent supported pre-mutation and confirmed-projection character-generation seam"

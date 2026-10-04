@@ -195,6 +195,8 @@ namespace TES3MP::ServerApp
         if (!state)
             return ConnectionSessionResult::UnknownConnection;
         const auto transition = state->handle(ServerCheckTimeout{});
+        if (state->state() == ServerSessionState::Established && state->sessionId())
+            mAuthentication.keepAlive(*state->sessionId(), state->generation());
         return transition.action == ServerSessionAction::SessionTimedOut ? ConnectionSessionResult::TimedOut
                                                                          : ConnectionSessionResult::Accepted;
     }
