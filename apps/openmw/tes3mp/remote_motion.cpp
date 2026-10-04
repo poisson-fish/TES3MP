@@ -51,6 +51,19 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
+    Turn32 networkTurnFromOpenMW(double radians) noexcept
+    {
+        if (!std::isfinite(radians)) return Turn32::fromValue(0);
+        double turns = std::fmod(-radians / (2.0 * std::numbers::pi), 1.0);
+        if (turns < 0.0) turns += 1.0;
+        return Turn32::fromUnnormalized(static_cast<uint64_t>(std::floor(turns * 4294967296.0 + 0.5)));
+    }
+
+    double openMWRadiansFromNetwork(Turn32 turn) noexcept
+    {
+        return -double(turn.value()) * (2.0 * std::numbers::pi / 4294967296.0);
+    }
+
     RemoteLocomotionAnimation remoteLocomotionAnimation(const RemoteMotionPose& pose) noexcept
     {
         if (pose.locomotionMode == LocomotionMode::Jump)
@@ -63,8 +76,7 @@ namespace TES3MP::OpenMWAdapter
                                                                 : RemoteLocomotionAnimation::Idle;
         }
 
-        constexpr double TurnScale = 2.0 * std::numbers::pi / 4294967296.0;
-        const double yaw = static_cast<double>(pose.orientation.z().value()) * TurnScale;
+        const double yaw = openMWRadiansFromNetwork(pose.orientation.z());
         const double sine = std::sin(yaw);
         const double cosine = std::cos(yaw);
         const double right = cosine * worldX - sine * worldY;
@@ -359,9 +371,7 @@ namespace TES3MP::OpenMWAdapter
         for (size_t i=0; i<3; ++i)
             if (!std::isfinite(sample.position[i]) || std::abs(sample.position[i])>1e7f
                 || !std::isfinite(sample.velocity[i]) || std::abs(sample.velocity[i])>4096) return false;
-        double turns = -double(sample.yaw)/(2*std::numbers::pi);
-        turns -= std::floor(turns);
-        const auto yaw = Turn32::fromValue(uint32_t(uint64_t(std::llround(turns*4294967296.0))));
+        const auto yaw = networkTurnFromOpenMW(sample.yaw);
         return observe({*tick, *entity, *revision, AuthorityEpoch::initial(),
             Transform(cell, Position3(std::llround(double(sample.position[0])*1024),
                 std::llround(double(sample.position[1])*1024), std::llround(double(sample.position[2])*1024)),

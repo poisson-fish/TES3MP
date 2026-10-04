@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <variant>
@@ -49,6 +50,9 @@ namespace TES3MP
         PlayerId playerId;
         CharacterConfirmationResult result = CharacterConfirmationResult::Confirmed;
         CharacterProfile profile = CharacterProfile::fresh();
+        // Revision of the committed transaction (or coherent join/resume image).
+        // Absent only for older character-creation peers.
+        std::optional<CanonicalRevision> canonicalRevision;
         friend bool operator==(const ReliableCharacterProfile&, const ReliableCharacterProfile&) noexcept = default;
     };
 

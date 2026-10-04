@@ -169,6 +169,14 @@ namespace TES3MP::OpenMWAdapter
         {
             return ProviderResult::Accepted;
         }
+        virtual ProviderResult applyPublicEquipment(const LatestWinsEquipmentSnapshot&, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
+        virtual ProviderResult applyCharacterProfile(const CharacterProfile&, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
         virtual ProviderResult applyInventory(const ReliablePlayerInventoryBaseline&,
             std::span<const ReliableContainerInventoryBaseline>, const ReliableGroundItemBaseline&,
             const LatestWinsEquipmentSnapshot&, MonotonicInstant) noexcept

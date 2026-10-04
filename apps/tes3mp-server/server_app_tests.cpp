@@ -579,7 +579,7 @@ namespace
             return std::get<LatestWinsCombatSnapshot>(std::move(result));
         }
     };
-    void chargenVisibilityBetweenTicks(bool native = false)
+    void chargenVisibilityBetweenTicks(bool native = false, bool reverse = false)
     {
         using namespace TES3MP::ServerApp;
         const auto config = parsedConfig();
@@ -679,10 +679,11 @@ namespace
             apply(SetCharacterClass{ id<ClassRecordId>(1) });
             apply(SetCharacterBirthsign{ id<BirthsignRecordId>(1) });
         }
-        for (uint64_t player : { 1, 2 })
+        for (uint64_t completedCount : { 1, 2 })
         {
+            const auto player = reverse ? 3 - completedCount : completedCount;
             clearSent();
-            clock.nanoseconds = player == 1 ? 1'000'000 : 35'000'000;
+            clock.nanoseconds = completedCount == 1 ? 1'000'000 : 35'000'000;
             const auto before = reducer.canonicalRevision();
             const ClientCharacterCreationCommand complete{ id<SessionId>(player), SessionGeneration::initial(),
                 CommandSequence::initial(), id<CommandId>(1), before,
@@ -711,26 +712,32 @@ namespace
                 // tick; queued candidate combat must retain its completed values.
                 clock.nanoseconds += 5'000'000;
                 assert(application.pump(intake.nextTick()));
-                bool inventory = false, combat = false;
+                bool inventory = false, combat = false, profile = false;
                 for (size_t i = 0; i < runtime.sent.size(); ++i)
                 {
                     if (runtime.sentConnections[i].value() != player) continue;
                     const auto frame = std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[i]));
                     if (frame.messageKind() == MessageKind::ReliablePlayerInventoryBaseline)
                         inventory = std::get<ReliablePlayerInventoryBaseline>(decodeReliablePlayerInventoryBaseline(frame.payload())).revision.value() == 2;
+                    if (frame.messageKind() == MessageKind::ReliableCharacterProfile)
+                    {
+                        const auto confirmed = std::get<ReliableCharacterProfile>(decodeReliableCharacterProfile(frame.payload()));
+                        profile = confirmed.canonicalRevision == before.next()
+                            && confirmed.profile.lifecycle() == CharacterLifecycle::EstablishedCharacter;
+                    }
                     if (frame.messageKind() == MessageKind::LatestWinsCombatSnapshot)
                         combat = std::get<LatestWinsCombatSnapshot>(decodeLatestWinsCombatSnapshot(frame.payload())).selfHealth() == 2;
                 }
                 if (!inventory || !combat || engine.projected < 4)
                     std::cerr << "native completion delivery: player=" << player << " inventory=" << inventory
                         << " combat=" << combat << " projected=" << engine.projected << '\n';
-                assert(inventory && combat && engine.image.at(player - 1) == std::byte{2} && engine.projected >= 4);
+                assert(inventory && combat && profile && engine.image.at(player - 1) == std::byte{2} && engine.projected >= 4);
             }
             // Another transport pump still precedes the next simulation tick.
             ++clock.nanoseconds;
             assert(application.pump(intake.nextTick()));
             clearSent();
-            clock.nanoseconds = player == 1 ? 34'000'000 : 67'000'000;
+            clock.nanoseconds = completedCount == 1 ? 34'000'000 : 67'000'000;
             assert(application.pump(intake.nextTick()));
             std::array<bool, 2> views{}, observations{};
             for (size_t index = 0; index < runtime.sent.size(); ++index)
@@ -740,14 +747,14 @@ namespace
                 if (frame.messageKind() == MessageKind::LatestWinsSnapshot)
                 {
                     const auto view = std::get<LatestWinsSnapshot>(decodeLatestWinsSnapshot(frame.payload()));
-                    assert(view.header().canonicalRevision() > before && view.view().entries().size() == player);
+                    assert(view.header().canonicalRevision() > before && view.view().entries().size() == completedCount);
                     views.at(target) = true;
                 }
                 if (frame.messageKind() == MessageKind::ReliableObservationBatch)
                 {
                     const auto batch = std::get<ReliableObservationBatch>(decodeReliableObservationBatch(frame.payload()));
                     assert(batch.changes().size() == 1 && batch.changes().front().kind
-                        == (player == 1 ? ObservationChangeKind::Leave : ObservationChangeKind::Enter));
+                        == (completedCount == 1 ? ObservationChangeKind::Leave : ObservationChangeKind::Enter));
                     observations.at(target) = true;
                 }
             }
@@ -755,7 +762,7 @@ namespace
         }
         assert(application.stop());
         std::cout << (native ? "chargen-native-visibility" : "chargen-visibility")
-            << ": two staggered completions publish safe-point views and peer leave/enter\n";
+            << (reverse ? " reverse" : "") << ": two staggered completions publish safe-point views and peer leave/enter\n";
     }
 }
 #ifdef TES3MP_NATIVE_INVENTORY_SCENARIO
@@ -1118,8 +1125,10 @@ int main(int argc, char** argv)
     if (argc > 1)
     {
         assert(argc == 2 && (std::string_view(argv[1]) == "chargen-visibility"
-            || std::string_view(argv[1]) == "chargen-native-visibility"));
-        chargenVisibilityBetweenTicks(std::string_view(argv[1]) == "chargen-native-visibility");
+            || std::string_view(argv[1]) == "chargen-native-visibility"
+            || std::string_view(argv[1]) == "chargen-native-visibility-reverse"));
+        chargenVisibilityBetweenTicks(std::string_view(argv[1]) != "chargen-visibility",
+            std::string_view(argv[1]) == "chargen-native-visibility-reverse");
         return 0;
     }
     chargenVisibilityBetweenTicks();

@@ -352,20 +352,19 @@ namespace TES3MP::OpenMWAdapter
                     && captured.transition->requestedCell() == selfEntry(*snapshot)->transform().cell())
                     captured.transition.reset();
                 if (advanced.characterProfileApplied
-                    && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
-                    && mPendingCharacterCompletionRevision)
+                    && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter)
                 {
-                    mMinimumEstablishedSnapshotRevision = *mPendingCharacterCompletionRevision;
+                    const auto& profile = mRuntime->confirmedCharacterProfile();
+                    if (profile && profile->result == CharacterConfirmationResult::Confirmed
+                        && (!mInstalledCharacterProfileRevision
+                            || profile->profile.revision() != *mInstalledCharacterProfileRevision))
+                        mMinimumEstablishedSnapshotRevision = profile->canonicalRevision
+                            ? profile->canonicalRevision
+                            : mPendingCharacterCompletionRevision
+                                ? mPendingCharacterCompletionRevision->next() : std::nullopt;
+                    if (mMinimumEstablishedSnapshotRevision)
+                        mCharacterInstallationDeadline = sessionDeadline(now, RetryIntervalNanoseconds);
                     mPendingCharacterCompletionRevision.reset();
-                }
-                if (mMinimumEstablishedSnapshotRevision && snapshot
-                    && snapshot->header().canonicalRevision() > *mMinimumEstablishedSnapshotRevision)
-                {
-                    const auto safePointRevision = snapshot->header().canonicalRevision();
-                    mMinimumActorBaselineRevision = safePointRevision;
-                    mMinimumObjectBaselineRevision = safePointRevision;
-                    mMinimumInventoryRevision = safePointRevision;
-                    mMinimumEstablishedSnapshotRevision.reset();
                 }
                 if (snapshot)
                     mMotion.observeAcknowledgement(snapshot->header().acknowledgedCommandSequence(), now);
@@ -433,6 +432,77 @@ namespace TES3MP::OpenMWAdapter
                 if (!mResuming && mReady && snapshot)
                     if (auto current = continuity(*snapshot))
                         mContinuity = std::move(current);
+                if (mMinimumEstablishedSnapshotRevision && snapshot && mGameRunning)
+                {
+                    const auto revision = *mMinimumEstablishedSnapshotRevision;
+                    const auto& state = mRuntime->session().stateMachine();
+                    const auto& interest = state.confirmedInterestBaseline();
+                    const auto& inventory = state.confirmedPlayerInventoryBaseline();
+                    const auto& ground = state.confirmedGroundItemBaseline();
+                    const auto& gear = state.confirmedEquipmentSnapshot();
+                    const auto& combat = mRuntime->confirmedCombatSnapshot();
+                    const auto& actors = state.confirmedActorInterestBaseline();
+                    const auto& objects = state.confirmedInteractiveObjectInterestBaseline();
+                    const auto* self = selfEntry(*snapshot);
+                    const auto& profile = mRuntime->confirmedCharacterProfile();
+                    const auto& hello = state.negotiatedHello();
+                    const bool bodiesRequired = hello && std::ranges::binary_search(
+                        hello->negotiatedCapabilities(), playerAppearanceCapability());
+                    const bool bodyReady = !bodiesRequired || (gear && gear->characterBodies && profile
+                        && std::ranges::any_of(gear->appearances, [&](const auto& body) {
+                            return body.player == snapshot->header().targetPlayerId()
+                                && profile->profile.appearance() == body.appearance;
+                        }));
+                    const bool installedImageReady = state.interestBaselineComplete() && interest && self
+                        && bodyReady
+                        && snapshot->header().canonicalRevision() >= revision
+                        && (!inventoryNegotiated(*mRuntime) || (state.inventoryReplicationComplete()
+                            && inventory && ground && gear && ground->cell == self->transform().cell()
+                            && (!mAwaitingResync || mResyncInventory)
+                            && inventory->header.canonicalRevision >= revision
+                            && inventory->header.canonicalRevision >= interest->canonicalRevision()
+                            && inventory->header.canonicalRevision <= snapshot->header().canonicalRevision()
+                            && ground->header.canonicalRevision == inventory->header.canonicalRevision
+                            && gear->canonicalRevision >= inventory->header.canonicalRevision))
+                        && (!combatNegotiated(*mRuntime) || (combat && combat->canonicalRevision() >= revision))
+                        && (!actorsNegotiated(*mRuntime) || (actors && state.actorInterestBaselineComplete()
+                            && actors->canonicalRevision() >= revision
+                            && actors->canonicalRevision() >= interest->canonicalRevision()
+                            && actors->canonicalRevision() <= snapshot->header().canonicalRevision()))
+                        && (!interactiveObjectsNegotiated(*mRuntime) || (objects
+                            && state.interactiveObjectInterestBaselineComplete() && objects->canonicalRevision() >= revision
+                            && objects->canonicalRevision() >= interest->canonicalRevision()
+                            && objects->canonicalRevision() <= snapshot->header().canonicalRevision()));
+                    if (installedImageReady)
+                    {
+                        if (profile && mPresentation.applyCharacterProfile(profile->profile, now) != ProviderResult::Accepted)
+                        {
+                            closeForProviderFailure(ProviderResult::ContentMappingFailed);
+                            return;
+                        }
+                        if (profile) mInstalledCharacterProfileRevision = profile->profile.revision();
+                        mMinimumActorBaselineRevision = revision;
+                        mMinimumObjectBaselineRevision = revision;
+                        mMinimumInventoryRevision = revision;
+                        mMinimumEstablishedSnapshotRevision.reset();
+                        mCharacterInstallationDeadline.reset();
+                        // Replay retained lanes even if their delivery preceded the profile.
+                        mPresentationBootstrapPending = true;
+                    }
+                    else if (mCharacterInstallationDeadline && now >= *mCharacterInstallationDeadline
+                        && !mAwaitingResync)
+                    {
+                        if (mRuntime->requestResync(ResyncReason::EntityRevisionMismatch) != ClientRuntimeResult::Accepted)
+                        {
+                            closeTerminal(ConnectionStatus::TransportFailed);
+                            return;
+                        }
+                        mAwaitingResync = true;
+                        mResyncPlayerBaseline = mResyncActorBaseline = mResyncObjectBaseline = false;
+                        mResyncInventory = mResyncCombat = mResyncWeather = mResyncWorldTime = false;
+                        mCharacterInstallationDeadline = sessionDeadline(now, RetryIntervalNanoseconds);
+                    }
+                }
                 if (mRuntime->characterLifecycle() != CharacterLifecycle::EstablishedCharacter
                     || mMinimumEstablishedSnapshotRevision)
                 {
@@ -550,6 +620,22 @@ namespace TES3MP::OpenMWAdapter
                 const auto& playerInventory = mRuntime->session().stateMachine().confirmedPlayerInventoryBaseline();
                 const auto& groundItems = mRuntime->session().stateMachine().confirmedGroundItemBaseline();
                 const auto& equipment = mRuntime->session().stateMachine().confirmedEquipmentSnapshot();
+                // Public equipment is a session-bound latest-wins image. Private
+                // stacks and ground delivery do not own remote presentation.
+                if (mGameRunning && equipment && playerBaseline && snapshot
+                    && (mPresentationBootstrapPending || advanced.equipmentSnapshotApplied
+                        || advanced.baselineCompleted || advanced.snapshotApplied)
+                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
+                    && equipment->canonicalRevision >= playerBaseline->canonicalRevision()
+                    && (!mMinimumInventoryRevision || equipment->canonicalRevision >= *mMinimumInventoryRevision))
+                {
+                    const auto applied = mPresentation.applyPublicEquipment(*equipment, now);
+                    if (applied != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(applied);
+                        return;
+                    }
+                }
                 if (mGameRunning
                     && (mPresentationBootstrapPending || advanced.inventoryReplicationCompleted
                         || advanced.playerInventoryApplied || advanced.containerInventoryApplied
@@ -929,6 +1015,9 @@ namespace TES3MP::OpenMWAdapter
 
             CharacterLifecycle characterLifecycle() const noexcept override
             {
+                if (mRuntime && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
+                    && mMinimumEstablishedSnapshotRevision)
+                    return CharacterLifecycle::CreatingCharacter;
                 return mRuntime ? mRuntime->characterLifecycle() : CharacterLifecycle::NewCharacter;
             }
 
@@ -1092,6 +1181,8 @@ namespace TES3MP::OpenMWAdapter
                 mMinimumObjectBaselineRevision.reset();
                 mMinimumInventoryRevision.reset();
                 mMinimumEstablishedSnapshotRevision.reset();
+                mCharacterInstallationDeadline.reset();
+                mInstalledCharacterProfileRevision.reset();
                 mPendingCharacterCompletionRevision.reset();
                 mReady = false;
                 mResuming = true;
@@ -1272,6 +1363,8 @@ namespace TES3MP::OpenMWAdapter
             std::optional<CanonicalRevision> mMinimumObjectBaselineRevision;
             std::optional<CanonicalRevision> mMinimumInventoryRevision;
             std::optional<CanonicalRevision> mMinimumEstablishedSnapshotRevision;
+            std::optional<MonotonicInstant> mCharacterInstallationDeadline;
+            std::optional<CharacterProfileRevision> mInstalledCharacterProfileRevision;
             std::optional<CanonicalRevision> mPendingCharacterCompletionRevision;
             std::optional<PendingDialogueChoice> mPendingDialogueChoice;
             std::optional<DialogueChoiceResolution> mDialogueChoiceResolution;

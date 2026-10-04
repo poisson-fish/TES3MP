@@ -186,7 +186,8 @@ namespace TES3MP::ServerApp
                     = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
                         encodeReliableCharacterProfile(
                             { join.session, join.initialSnapshot.header().targetSessionGeneration(), join.player,
-                                CharacterConfirmationResult::Confirmed, join.characterProfile }));
+                                CharacterConfirmationResult::Confirmed, join.characterProfile,
+                                join.initialSnapshot.header().canonicalRevision() }));
                 if (!std::holds_alternative<std::vector<std::byte>>(profileFrame))
                     return false;
                 owned.push_back(std::get<std::vector<std::byte>>(std::move(profileFrame)));

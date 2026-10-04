@@ -472,7 +472,8 @@ namespace TES3MP::ServerApp
             if (characterCapable
                 && !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
                     encodeReliableCharacterProfile({ *session->sessionId(), session->generation(),
-                        resumedSession->playerId(), CharacterConfirmationResult::Confirmed, *resumedProfile })))
+                        resumedSession->playerId(), CharacterConfirmationResult::Confirmed, *resumedProfile,
+                        baseline->view.header().canonicalRevision() })))
             {
                 cancel();
                 return false;

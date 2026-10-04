@@ -85,6 +85,7 @@ namespace
             capabilities.push_back(TES3MP::authoritativeInstantMagicCapability());
             capabilities.push_back(TES3MP::authoritativeTimedAreaMagicCapability());
         }
+        std::ranges::sort(capabilities);
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -575,12 +576,29 @@ namespace
                 objectRevisions.insert_or_assign(member.objectId, member.revision);
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyPublicEquipment(const TES3MP::LatestWinsEquipmentSnapshot& equipment,
+            TES3MP::MonotonicInstant) noexcept override
+        {
+            ++publicEquipmentUpdates;
+            lastPublicEquipment = equipment.members;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
+        TES3MP::OpenMWAdapter::ProviderResult applyCharacterProfile(const TES3MP::CharacterProfile& profile,
+            TES3MP::MonotonicInstant) noexcept override
+        {
+            ++profiles;
+            installedProfile = profile;
+            installationOrder.push_back(1);
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         TES3MP::OpenMWAdapter::ProviderResult applyInventory(const TES3MP::ReliablePlayerInventoryBaseline& player,
             std::span<const TES3MP::ReliableContainerInventoryBaseline> containers,
             const TES3MP::ReliableGroundItemBaseline& ground, const TES3MP::LatestWinsEquipmentSnapshot& equipment,
             TES3MP::MonotonicInstant) noexcept override
         {
             ++inventories;
+            localItems = player.stacks.size();
+            installationOrder.push_back(2);
             lastInventoryRevision = player.revision;
             lastContainerCount = containers.size();
             lastGroundCount = ground.items.size();
@@ -598,6 +616,7 @@ namespace
             std::span<const TES3MP::ReliableCombatEventBatch> events, TES3MP::MonotonicInstant) noexcept override
         {
             ++combats;
+            installationOrder.push_back(3);
             lastCombatFatigue = snapshot.selfFatigue();
             lastCombatEvents = events.size();
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
@@ -656,6 +675,12 @@ namespace
         unsigned actors = 0;
         unsigned interactiveObjects = 0;
         unsigned inventories = 0;
+        unsigned profiles = 0;
+        unsigned publicEquipmentUpdates = 0;
+        std::vector<TES3MP::PublicEquipmentMember> lastPublicEquipment;
+        size_t localItems = 2;
+        std::optional<TES3MP::CharacterProfile> installedProfile;
+        std::vector<int> installationOrder;
         std::vector<float> doorAngles;
         std::optional<TES3MP::CellId> lastGroundCell;
         unsigned combats = 0;
@@ -850,6 +875,12 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
     }
     if (bodyProgress)
     {
+        const auto installedInventories = presentation.inventories;
+        // A newer private image with missing ground delivery must not block
+        // equip, replacement, unequip or breakage on the public lane.
+        wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
+            encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(generation, 2, 2)), TransportChannel::ReliableOrdered);
+        coordinator->frame(.01f);
         const auto sendBodies = [&](uint64_t revision, std::span<const PublicPlayerAppearance> bodies) {
             auto equipment = equipmentSnapshot(generation, revision, revision);
             equipment.characterBodies = true;
@@ -872,7 +903,29 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
         sendBodies(4, {}); coordinator->frame(.01f);
         require(presentation.characterBodies && presentation.publicAppearances.empty()
             && presentation.motionAppearances.empty() && coordinator->multiplayerState() == MultiplayerState::Ready);
-        std::cout << "PASS player-appearances: membership before motion; fresh/complete/remove; stale and retry safe\n";
+        const auto sendOutfit = [&](uint64_t revision, std::optional<uint64_t> item) {
+            auto gear = equipmentSnapshot(generation, revision, revision);
+            gear.characterBodies = true; gear.appearances.assign(bodies.begin(), bodies.end());
+            gear.members.front().slots = {};
+            if (item) gear.members.front().slots[3] = value<ItemPrototypeId>(*item);
+            wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsEquipmentSnapshot,
+                encodeLatestWinsEquipmentSnapshot(gear), TransportChannel::LatestWins);
+            coordinator->frame(.01f);
+        };
+        for (const auto [revision, item] : {std::pair{5u, std::optional<uint64_t>(1)},
+                std::pair{6u, std::optional<uint64_t>(2)}, std::pair{7u, std::optional<uint64_t>{}},
+                std::pair{8u, std::optional<uint64_t>(1)}, std::pair{9u, std::optional<uint64_t>{}}})
+        {
+            const auto before = presentation.publicEquipmentUpdates;
+            sendOutfit(revision, item);
+            require(presentation.publicEquipmentUpdates > before && presentation.inventories == installedInventories);
+            require(presentation.lastPublicEquipment.front().slots[3]
+                == (item ? std::optional(value<ItemPrototypeId>(*item)) : std::nullopt));
+        }
+        const auto updates = presentation.publicEquipmentUpdates;
+        sendOutfit(8, 1);
+        require(presentation.publicEquipmentUpdates == updates && !presentation.lastPublicEquipment.front().slots[3]);
+        std::cout << "PASS player-appearances: public outfits with incomplete private lanes; equip/replace/unequip/break; membership before motion; stale/retry safe\n";
         return;
     }
     if (doorProgress)
@@ -988,10 +1041,212 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
     std::cout << "PASS teleport-presentation: delayed baselines and correction echo\n";
 }
 
+void chargenInstallation()
+{
+    using namespace TES3MP;
+    using namespace TES3MP::OpenMWAdapter;
+    // Each player's completion can commit before or after its peer's. All
+    // retained images must install even when movement has advanced far ahead.
+    for (const uint64_t completion : {2u, 3u}) for (const unsigned order : {0u, 1u, 2u})
+    {
+        Input input; Presentation presentation; Status status; DisconnectOnce control;
+        control.pending = false;
+        auto transport = std::make_unique<IdleTransport>();
+        auto* wire = transport.get(); wire->acceptConnections = true;
+        auto clock = std::make_unique<Clock>(); auto* timer = clock.get();
+        const auto endpoint = *ConnectionEndpoint::create("127.0.0.1", 25560);
+        const auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        const auto outbound = *OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
+        const ReconnectConfiguration reconnect{endpoint, timeouts, outbound, testContentManifestId()};
+        auto runtime = std::get<std::unique_ptr<ClientSessionRuntime>>(
+            ClientSessionRuntime::create(*wire, *timer, timeouts, SessionGeneration::initial(), outbound));
+        std::vector capabilities{inventoryReplicationCapability(), combatReplicationCapability(), playerAppearanceCapability()};
+        std::ranges::sort(capabilities);
+        auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(
+            std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1,3,3)), capabilities, {}));
+        const std::array password{std::byte{1}};
+        require(runtime->start(endpoint, ClientHello::fromOffer(std::move(offer)),
+            AuthenticationRequest::join(*AuthenticationMaterial::create(password))) == HeadlessClientResult::Accepted);
+        auto coordinator = makeCoordinator(std::move(transport), std::move(clock), std::move(runtime),
+            reconnect, input, presentation, status, &control);
+        auto generation = SessionGeneration::initial();
+        const auto hello = [&] {
+            coordinator->frame(.01f);
+            wire->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+                encodeServerHello(serverHello(false,false,false,true,true,3,false,false,false,false,false,true)),
+                TransportChannel::ReliableOrdered);
+            coordinator->frame(.01f);
+        };
+        const auto spatial = [&](uint64_t revision, uint64_t baseline) {
+            if (revision == baseline)
+                wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+                    encodeReliableInterestBaseline(selfBaseline(generation, false, baseline, revision)), TransportChannel::ReliableOrdered);
+            wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+                encodeLatestWinsSnapshot(selfSnapshot(generation, false, revision, revision)), TransportChannel::LatestWins);
+        };
+        const auto profile = [&](uint64_t revision) {
+            wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
+                encodeReliableCharacterProfile({value<SessionId>(1), generation, value<PlayerId>(1),
+                    CharacterConfirmationResult::Confirmed, establishedCharacterProfile(), value<CanonicalRevision>(revision)}),
+                TransportChannel::ReliableOrdered);
+        };
+        const auto inventory = [&](uint64_t revision) {
+            auto player = playerInventoryBaseline(generation, revision, revision);
+            player.stacks.clear(); player.equipment.clear();
+            wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
+                encodeReliablePlayerInventoryBaseline(player), TransportChannel::ReliableOrdered);
+            wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableGroundItemBaseline,
+                encodeReliableGroundItemBaseline(groundItemBaseline(generation, revision, revision)), TransportChannel::ReliableOrdered);
+        };
+        const auto equipment = [&](uint64_t revision) {
+            auto gear = equipmentSnapshot(generation, revision, revision);
+            gear.characterBodies = true;
+            gear.appearances = {{value<PlayerId>(1), *establishedCharacterProfile().appearance()}};
+            wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsEquipmentSnapshot,
+                encodeLatestWinsEquipmentSnapshot(gear), TransportChannel::LatestWins);
+        };
+        const auto combat = [&](uint64_t revision) {
+            std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
+            for (size_t i = 0; i < skills.size(); ++i) skills[i].skill = static_cast<ReplicatedCombatSkill>(i);
+            const auto state = std::get<LatestWinsCombatSnapshot>(LatestWinsCombatSnapshot::create(
+                value<SessionId>(1), generation, value<ServerTick>(revision), value<CanonicalRevision>(revision),
+                value<PlayerId>(1), value<CombatRevision>(revision), 100,100,100,100,100,100,false,{},skills));
+            wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsCombatSnapshot,
+                encodeLatestWinsCombatSnapshot(state), TransportChannel::LatestWins);
+        };
+        hello();
+        wire->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+            encodeAuthenticationAccepted(accepted(std::byte{7}, MinimumResumeTokenLifetimeMilliseconds, false,
+                CharacterLifecycle::NewCharacter)), TransportChannel::ReliableOrdered);
+        spatial(1,1); coordinator->frame(.01f);
+        require(coordinator->submitCharacterCreation(CompleteCharacterCreation{}));
+        if (order == 1) { inventory(completion); equipment(completion); }
+        if (order != 2) profile(completion);
+        spatial(20,1); coordinator->frame(.01f);
+        require(input.calls == 0 && presentation.inventories == 0 && presentation.localItems == 2);
+        require(coordinator->characterLifecycle() == (order == 2
+            ? CharacterLifecycle::NewCharacter : CharacterLifecycle::CreatingCharacter));
+        if (order == 2) profile(completion);
+        if (order != 1) inventory(completion);
+        coordinator->frame(.01f);
+        require(input.calls == 0 && presentation.inventories == 0);
+        require(coordinator->characterLifecycle() == CharacterLifecycle::CreatingCharacter);
+        equipment(completion); coordinator->frame(.01f);
+        require(input.calls == 0 && presentation.inventories == 0);
+        combat(completion); coordinator->frame(.01f);
+        require(presentation.profiles == 1 && presentation.inventories >= 1 && presentation.localItems == 0
+            && presentation.installedProfile == establishedCharacterProfile() && input.calls > 0
+            && presentation.installationOrder.size() >= 3 && presentation.installationOrder[0] == 1
+            && presentation.installationOrder[1] == 2 && presentation.installationOrder[2] == 3);
+        require(coordinator->characterLifecycle() == CharacterLifecycle::EstablishedCharacter);
+
+        // Resume uses a new session generation and a coherent current image.
+        control.pending = true; coordinator->frame(.01f);
+        require(coordinator->multiplayerState() == MultiplayerState::Connecting);
+        generation = *generation.next(); hello();
+        wire->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+            encodeAuthenticationAccepted(accepted(std::byte{8})), TransportChannel::ReliableOrdered);
+        spatial(30,30); profile(30); equipment(30); combat(30); coordinator->frame(.01f);
+        const auto inputs = input.calls, installs = presentation.profiles;
+        require(installs == 1);
+        // Delayed private baseline recovers without duplicate resync requests.
+        timer->nanoseconds = 1'100'000'000; coordinator->frame(.01f);
+        unsigned resyncs = 0;
+        for (const auto& sent : wire->sentFrames)
+            if (std::get<DecodedFrame>(decodeProtocolFrame(sent)).messageKind() == MessageKind::SessionResyncRequest) ++resyncs;
+        require(resyncs == 1 && input.calls == inputs);
+        coordinator->frame(.01f);
+        spatial(31,31); inventory(30); equipment(31); combat(31); coordinator->frame(.01f);
+        require(presentation.profiles == 1 && input.calls == inputs);
+        inventory(31); coordinator->frame(.01f);
+        require(presentation.profiles == 2 && presentation.localItems == 0 && input.calls > inputs
+            && coordinator->multiplayerState() == MultiplayerState::Ready);
+    }
+    std::cout << "PASS chargen-installation: both commit orders; reordered/delayed lanes; empty inventory; coherent profile/resources; resume and resync\n";
+}
+
+void remoteLocomotionCoordinates()
+{
+    using namespace TES3MP;
+    using namespace TES3MP::OpenMWAdapter;
+    const auto cell = CellId::interior(value<CellSpaceId>(7));
+    const auto zero = Turn32::fromValue(0);
+    constexpr std::array walk{RemoteLocomotionAnimation::WalkForward, RemoteLocomotionAnimation::WalkBack,
+        RemoteLocomotionAnimation::WalkLeft, RemoteLocomotionAnimation::WalkRight};
+    constexpr std::array run{RemoteLocomotionAnimation::RunForward, RemoteLocomotionAnimation::RunBack,
+        RemoteLocomotionAnimation::RunLeft, RemoteLocomotionAnimation::RunRight};
+    constexpr std::array sneak{RemoteLocomotionAnimation::SneakForward, RemoteLocomotionAnimation::SneakBack,
+        RemoteLocomotionAnimation::SneakLeft, RemoteLocomotionAnimation::SneakRight};
+    const std::array directions{std::pair{0.,1.}, std::pair{0.,-1.}, std::pair{-1.,0.}, std::pair{1.,0.},
+        std::pair{-1.,1.}, std::pair{1.,1.}, std::pair{-1.,-1.}, std::pair{1.,-1.}};
+    for (int heading = -4; heading <= 12; ++heading)
+        for (const auto mode : {LocomotionMode::Walk, LocomotionMode::Run, LocomotionMode::Sneak})
+            for (size_t direction = 0; direction < directions.size(); ++direction)
+            {
+                const double yaw = heading * std::numbers::pi / 4;
+                const auto [right, forward] = directions[direction];
+                const auto intent = mapPlanarMovement(right, forward, yaw, mode);
+                const auto velocity = intent.desiredVelocity();
+                require(intent.rootFacing() == networkTurnFromOpenMW(yaw));
+                const auto orientation = Orientation3(zero, zero, intent.rootFacing());
+                const auto position = Position3(100 * 1024, 200 * 1024, 300 * 1024);
+                const auto tick = value<ServerTick>(100);
+                const SpatialEntitySnapshot player(tick, value<PlayerId>(1), value<EntityId>(2), value<AppearanceId>(1),
+                    EntityRevision::initial(), AuthorityEpoch::initial(), Transform(cell, position, orientation), velocity, mode);
+                const ActorSpatialSnapshot npc(tick, value<ActorId>(1), value<EntityId>(9), value<ActorPrototypeId>(1),
+                    EntityRevision::initial(), AuthorityEpoch::initial(), Transform(cell, position, orientation), velocity, ActorActivity::Wander);
+                NullRemoteMotionMetricSink metrics;
+                RemoteMotionBuffer playerMotion(metrics), npcMotion(metrics), nativeMotion(metrics);
+                const auto now = MonotonicInstant::fromNanoseconds(0);
+                require(playerMotion.observe(player, now) && npcMotion.observe(npc, now));
+                NativeActorMotion native;
+                native.placement = 9; native.tick = 100; native.yaw = float(yaw);
+                native.position = {100,200,300};
+                native.velocity = {float(double(velocity.x()) * 30 / 1024), float(double(velocity.y()) * 30 / 1024),0};
+                require(nativeMotion.observe(native, cell, now));
+                const auto playerPose = *playerMotion.advance(now), npcPose = *npcMotion.advance(now);
+                auto nativePose = *nativeMotion.advance(now);
+                // Native motion carries no gait; direction is shared for every gait.
+                nativePose.locomotionMode = mode;
+                auto actorPose = npcPose; actorPose.locomotionMode = mode;
+                const auto& expected = mode == LocomotionMode::Run ? run : mode == LocomotionMode::Sneak ? sneak : walk;
+                const auto matches = [&](RemoteLocomotionAnimation animation) {
+                    if (direction < 4) return animation == expected[direction];
+                    return animation == expected[forward > 0 ? 0 : 1] || animation == expected[right < 0 ? 2 : 3];
+                };
+                require(matches(remoteLocomotionAnimation(playerPose)) && matches(remoteLocomotionAnimation(actorPose))
+                    && matches(remoteLocomotionAnimation(nativePose)));
+                require(playerPose.x == position.x() && playerPose.y == position.y() && playerPose.z == position.z()
+                    && nativePose.velocity == velocity && nativePose.x == position.x() && nativePose.y == position.y());
+                require(std::abs(std::sin(openMWRadiansFromNetwork(orientation.z())) - std::sin(yaw)) < 1e-8
+                    && std::abs(std::cos(openMWRadiansFromNetwork(orientation.z())) - std::cos(yaw)) < 1e-8);
+                const auto later = MonotonicInstant::fromNanoseconds(100'000'000);
+                const auto moved = Position3(position.x() + 3 * velocity.x(), position.y() + 3 * velocity.y(), position.z());
+                const SpatialEntitySnapshot next(value<ServerTick>(103), player.playerId(), player.entityId(), player.appearanceId(),
+                    value<EntityRevision>(2), player.authorityEpoch(), Transform(cell, moved, orientation), velocity, mode);
+                require(playerMotion.observe(next, later));
+                // Let the existing correction blend finish before measuring
+                // the world-space midpoint between the retained samples.
+                const auto interpolated = *playerMotion.advance(MonotonicInstant::fromNanoseconds(200'000'000), 101.5);
+                require(std::abs(interpolated.x - (position.x() + 1.5 * velocity.x())) < .01
+                    && std::abs(interpolated.y - (position.y() + 1.5 * velocity.y())) < .01
+                    && interpolated.z == position.z());
+            }
+    std::cout << "PASS remote-locomotion-coordinates: players and both NPC streams; forward/back/strafe/diagonals; 17 headings; walk/run/sneak; world interpolation unchanged\n";
+}
+
 int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "remote-locomotion-coordinates")
+    {
+        remoteLocomotionCoordinates(); return 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "chargen-installation")
+    {
+        chargenInstallation(); return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "projectile-presentation")
     {
         ActorPresentationTimeline timeline;

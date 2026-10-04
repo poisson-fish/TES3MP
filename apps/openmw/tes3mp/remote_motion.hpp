@@ -132,6 +132,10 @@ namespace TES3MP::OpenMWAdapter
         Jump,
     };
 
+    // Both spaces use world X/Y/Z unchanged. OpenMW positive yaw turns local
+    // +Y (forward) toward world +X; network turns negate engine radians.
+    Turn32 networkTurnFromOpenMW(double radians) noexcept;
+    double openMWRadiansFromNetwork(Turn32 turn) noexcept;
     RemoteLocomotionAnimation remoteLocomotionAnimation(const RemoteMotionPose& pose) noexcept;
 
     struct RemoteMotionSample

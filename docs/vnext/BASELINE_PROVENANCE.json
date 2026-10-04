@@ -257,12 +257,12 @@
     {
       "path": "apps/openmw/mwrender/replicatedactor.cpp",
       "status": "A",
-      "purpose": "Implements C-R1 immutable appearance projection, canonical locomotion-driven loop selection, typed lifecycle, and RAII cleanup without gameplay authority."
+      "purpose": "Implements C-R1 immutable appearance projection, canonical locomotion-driven loop selection, typed lifecycle, and RAII cleanup without gameplay authority. Retains locomotion loop phase when replacing equipped player replicas."
     },
     {
       "path": "apps/openmw/mwrender/replicatedactor.hpp",
       "status": "A",
-      "purpose": "Declares the opaque capacity-bounded replicated-actor API and typed outcomes."
+      "purpose": "Declares the opaque capacity-bounded replicated-actor API and typed outcomes. Includes locomotion presentation preservation across replica replacement."
     },
     {
       "path": "apps/openmw/mwrender/vismask.hpp",
@@ -377,7 +377,7 @@
     {
       "path": "apps/openmw/tes3mp/adapter.cpp",
       "status": "A",
-      "purpose": "Implements the bounded correct-then-command coordinator, including authoritative wait/rest submission, optional pose weighting, and borrowed-provider orchestration."
+      "purpose": "Implements the bounded correct-then-command coordinator, including authoritative wait/rest submission, optional pose weighting, and borrowed-provider orchestration. Binds chargen readiness to committed profile revisions, resyncs delayed baselines and presents public equipment independently."
     },
     {
       "path": "apps/openmw/tes3mp/adapter.hpp",
@@ -412,12 +412,12 @@
     {
       "path": "apps/openmw/tes3mp/desktop_providers.cpp",
       "status": "A",
-      "purpose": "Implements fixture cell mapping, semantic desktop input, exact local correction, and canonical locomotion-driven C-R1 replicated-actor presentation."
+      "purpose": "Implements fixture cell mapping, semantic desktop input, exact local correction, and canonical locomotion-driven C-R1 replicated-actor presentation. Installs committed profile/stats before forced empty inventory replacement; retains selected bodies and locomotion during public equipment updates."
     },
     {
       "path": "apps/openmw/tes3mp/desktop_providers.hpp",
       "status": "A",
-      "purpose": "Declares concrete OpenMW semantic input, presentation, and fixture mapping providers."
+      "purpose": "Declares concrete OpenMW semantic input, presentation, and fixture mapping providers. Exposes coherent character profile and independent public equipment presentation."
     },
     {
       "path": "apps/openmw/tes3mp/engine_coordinator.hpp",
@@ -427,27 +427,27 @@
     {
       "path": "apps/openmw/tes3mp/movement_mapping.cpp",
       "status": "A",
-      "purpose": "Implements deterministic planar movement mapping, bounded intent coordination, pose evidence, and stale-pose weighting."
+      "purpose": "Implements deterministic planar movement mapping, bounded intent coordination, pose evidence, and stale-pose weighting. Uses the shared negative engine-yaw convention for network facing."
     },
     {
       "path": "apps/openmw/tes3mp/movement_mapping.hpp",
       "status": "A",
-      "purpose": "Declares engine-independent desktop movement mapping and intent tracking helpers."
+      "purpose": "Declares engine-independent desktop movement mapping and intent tracking helpers. Documents engine-space input yaw."
     },
     {
       "path": "apps/openmw/tes3mp/providers.hpp",
       "status": "A",
-      "purpose": "Separates semantic input, authoritative presentation, optional pose samples, and pose-weight fallback using domain types."
+      "purpose": "Separates semantic input, authoritative presentation, optional pose samples, and pose-weight fallback using domain types. Separates committed character installation from public equipment presentation."
     },
     {
       "path": "apps/openmw/tes3mp/remote_motion.cpp",
       "status": "A",
-      "purpose": "Implements bounded adaptive remote playback, canonical locomotion animation selection, correction, reset, and typed metrics."
+      "purpose": "Implements bounded adaptive remote playback, canonical locomotion animation selection, correction, reset, and typed metrics. Shares the engine/network angle convention for actor-local animation directions without rotating world interpolation."
     },
     {
       "path": "apps/openmw/tes3mp/remote_motion.hpp",
       "status": "A",
-      "purpose": "Declares the engine-independent four-sample remote-motion buffer and adapter-owned metric boundary."
+      "purpose": "Declares the engine-independent 16-sample remote-motion buffer, adapter-owned metric boundary and shared engine/network angle conversion."
     },
     {
       "path": "apps/openmw_tests/CMakeLists.txt",
@@ -772,7 +772,7 @@
     {
       "path": "components/tes3mp/client_session/headless_client_session.cpp",
       "status": "A",
-      "purpose": "Caller-pumped single-attempt/single-connection headless client façade over owned transport and client-session state."
+      "purpose": "Caller-pumped single-attempt/single-connection headless client fa\u00e7ade over owned transport and client-session state."
     },
     {
       "path": "components/tes3mp/include/tes3mp/actor_catalog.hpp",

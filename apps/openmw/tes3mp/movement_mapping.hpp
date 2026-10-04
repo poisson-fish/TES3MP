@@ -14,6 +14,8 @@ namespace TES3MP::OpenMWAdapter
 {
     constexpr std::int64_t DesktopFixtureSpeedQuantaPerTick = 4096;
 
+    // Engine-space yaw in radians; world velocity and network facing share the
+    // conversion declared in remote_motion.hpp.
     LocomotionIntent mapPlanarMovement(double right, double forward, double yawRadians,
         LocomotionMode mode = LocomotionMode::Walk) noexcept;
     std::uint64_t movementCorrectionDistanceQuanta(

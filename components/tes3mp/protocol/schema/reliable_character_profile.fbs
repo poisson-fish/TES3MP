@@ -72,6 +72,7 @@ table ReliableCharacterProfile {
   item_prototypes:[ulong] (id: 24);
   item_counts:[uint] (id: 25);
   equipment_slots:[ubyte] (id: 26);
+  canonical_revision:ulong (id: 27);
 }
 
 root_type ReliableCharacterProfile;

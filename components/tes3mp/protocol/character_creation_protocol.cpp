@@ -304,6 +304,7 @@ namespace TES3MP
         if (favored.o) root.add_favored_attributes(favored); if (minor.o) root.add_minor_skills(minor); if (major.o) root.add_major_skills(major);
         root.add_birthsign_id(birthsign); root.add_attributes(attributes); root.add_skills(skills); root.add_starting_spells(encodedSpells);
         root.add_item_prototypes(encodedPrototypes); root.add_item_counts(encodedCounts); root.add_equipment_slots(encodedSlots);
+        if (value.canonicalRevision) root.add_canonical_revision(value.canonicalRevision->value());
         const auto offset = root.Finish(); S::FinishSizePrefixedReliableCharacterProfileBuffer(builder, offset); return take(builder);
     }
 
@@ -359,6 +360,12 @@ namespace TES3MP
         auto profile=CharacterProfile::restore(static_cast<CharacterLifecycle>(value->lifecycle()), static_cast<CharacterCreationPhase>(value->phase()),
             std::move(name), appearance, std::move(selectedClass), birthsign, std::move(derived), std::move(inventory), *revision);
         if(!profile) return error(CharacterProtocolErrorCode::InvalidProfile);
-        return ReliableCharacterProfile{*session,*generation,*player,static_cast<CharacterConfirmationResult>(value->result()),std::move(*profile)};
+        std::optional<CanonicalRevision> canonicalRevision;
+        if (value->canonical_revision())
+        {
+            canonicalRevision = strong<CanonicalRevision>(value->canonical_revision());
+            if (!canonicalRevision) return error(CharacterProtocolErrorCode::InvalidStrongValue);
+        }
+        return ReliableCharacterProfile{*session,*generation,*player,static_cast<CharacterConfirmationResult>(value->result()),std::move(*profile),canonicalRevision};
     }
 }

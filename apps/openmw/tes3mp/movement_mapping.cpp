@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <numbers>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -19,16 +18,6 @@ namespace TES3MP::OpenMWAdapter
                 return static_cast<std::int64_t>(lower + 1.0);
             const auto lowerInteger = static_cast<std::int64_t>(lower);
             return lowerInteger % 2 == 0 ? lowerInteger : lowerInteger + 1;
-        }
-
-        Turn32 rootFacing(double yawRadians) noexcept
-        {
-            constexpr double Tau = 2.0 * std::numbers::pi;
-            double turns = std::fmod(yawRadians / Tau, 1.0);
-            if (turns < 0.0)
-                turns += 1.0;
-            return Turn32::fromUnnormalized(static_cast<std::uint64_t>(
-                std::floor(turns * 4294967296.0 + 0.5)));
         }
     }
 
@@ -49,7 +38,7 @@ namespace TES3MP::OpenMWAdapter
         const double cosine = std::cos(yawRadians);
         const double worldX = cosine * right + sine * forward;
         const double worldY = -sine * right + cosine * forward;
-        return LocomotionIntent(mode, rootFacing(yawRadians),
+        return LocomotionIntent(mode, networkTurnFromOpenMW(yawRadians),
             LinearVelocity3(roundTiesToEven(worldX * DesktopFixtureSpeedQuantaPerTick),
                 roundTiesToEven(worldY * DesktopFixtureSpeedQuantaPerTick), 0));
     }

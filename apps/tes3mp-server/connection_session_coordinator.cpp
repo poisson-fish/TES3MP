@@ -420,7 +420,8 @@ namespace TES3MP::ServerApp
                 return ConnectionSessionResult::ProtocolRejected;
             auto encoded = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
                 encodeReliableCharacterProfile(
-                    { *state->sessionId(), state->generation(), progress->playerId(), result, *profile }));
+                    { *state->sessionId(), state->generation(), progress->playerId(), result, *profile,
+                        pending ? std::optional(pending->candidateRevision()) : std::nullopt }));
             auto* bytes = std::get_if<std::vector<std::byte>>(&encoded);
             if (!bytes)
             {

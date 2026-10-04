@@ -101,6 +101,7 @@ namespace MWRender
         ReplicatedActorResult playAction(ReplicatedActorAction action) noexcept;
         ReplicatedActorResult setCast(bool active, unsigned range, float completion) noexcept;
         Animation* animation() const;
+        ReplicatedActorResult preserveLocomotionFrom(const ReplicatedActor& source) noexcept;
         ReplicatedActorResult setKnockout(unsigned state, unsigned frame) noexcept;
         ReplicatedActorResult setMelee(std::string_view group, unsigned phase, unsigned direction,
             float strength, float completion) noexcept;

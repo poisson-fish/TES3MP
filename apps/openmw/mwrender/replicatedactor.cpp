@@ -350,6 +350,18 @@ namespace MWRender
                 mLocomotion = locomotion;
             }
 
+            void preserveLocomotionFrom(const ReplicatedActorAnimation& source)
+            {
+                if (!source.mLocomotion || source.mDead || source.mCurrentGroup.empty()) return;
+                setLocomotion(*source.mLocomotion);
+                if (mAnimationFallback || mCurrentGroup.empty()) return;
+                float completion = 0.f, speed = 1.f;
+                uint32_t loops = 0;
+                if (!source.getInfo(source.mCurrentGroup, &completion, &speed, &loops)) return;
+                disable(mCurrentGroup);
+                play(mCurrentGroup, 1, BlendMask_All, false, speed, "start", "stop", completion, loops, true);
+            }
+
             void setDead(bool dead)
             {
                 if (mAnimationFallback || mDead == dead)
@@ -874,6 +886,19 @@ namespace MWRender
     }
 
     Animation* ReplicatedActor::animation() const { return mImpl ? mImpl->animation() : nullptr; }
+
+    ReplicatedActorResult ReplicatedActor::preserveLocomotionFrom(const ReplicatedActor& source) noexcept
+    {
+        try
+        {
+            auto* target = dynamic_cast<ReplicatedActorAnimation*>(animation());
+            const auto* prior = dynamic_cast<const ReplicatedActorAnimation*>(source.animation());
+            if (!target || !prior) return ReplicatedActorResult::LifecycleViolation;
+            target->preserveLocomotionFrom(*prior);
+            return ReplicatedActorResult::Accepted;
+        }
+        catch (...) { return ReplicatedActorResult::ResourceLoadFailed; }
+    }
 
     ReplicatedActorResult ReplicatedActor::setKnockout(unsigned state, unsigned frame) noexcept
     {

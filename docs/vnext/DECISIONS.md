@@ -321,3 +321,7 @@ empty inventory/one safe point. Capability 36 carries established bodies with ce
 fresh profiles have none. Replicas own NPC copies through gear/cell rebuilds,
 preserving winning records and private profiles.
 V78 requires capabilities 6 and 36; older peers reject during negotiation.
+
+**Character installation:** committed profile revisions bind coherent installation;
+newer motion cannot raise inventory floors. Delayed lanes resync; public equipment
+presents independently of private delivery.

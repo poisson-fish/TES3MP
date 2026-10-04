@@ -684,9 +684,6 @@ int main(int argc, char** argv)
         if (interactiveObjectWorld && inventoryWorld)
             optionalCapabilities.push_back(TES3MP::authoritativeSecurityCapability());
     }
-    std::sort(optionalCapabilities.begin(), optionalCapabilities.end());
-    optionalCapabilities.erase(
-        std::unique(optionalCapabilities.begin(), optionalCapabilities.end()), optionalCapabilities.end());
     std::vector<TES3MP::CapabilityId> requiredCapabilities;
     if (nativeInventory && characterContent)
     {
@@ -734,6 +731,9 @@ int main(int argc, char** argv)
         requiredCapabilities.push_back(TES3MP::magicVisualReplicationCapability());
         requiredCapabilities.push_back(TES3MP::magicEffectVisualLoopsCapability());
     }
+    std::ranges::sort(optionalCapabilities);
+    optionalCapabilities.erase(
+        std::unique(optionalCapabilities.begin(), optionalCapabilities.end()), optionalCapabilities.end());
     std::ranges::sort(requiredCapabilities);
     requiredCapabilities.erase(std::unique(requiredCapabilities.begin(), requiredCapabilities.end()), requiredCapabilities.end());
     auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities,

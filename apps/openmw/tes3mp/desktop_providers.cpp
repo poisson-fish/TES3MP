@@ -53,6 +53,8 @@
 #include <components/esm3/loadbody.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadrace.hpp>
+#include <components/esm3/loadclas.hpp>
+#include <components/esm3/loadbsgn.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
 #include <components/esm3/loadregn.hpp>
@@ -202,7 +204,6 @@ namespace TES3MP::OpenMWAdapter
                     - effects.getOrDefault(ESM::MagicEffect::Paralyze).getMagnitude()));
         }
         constexpr double PositionScale = 1024.0;
-        constexpr double TurnScale = 4294967296.0;
 
         std::int64_t roundTiesToEven(double value) noexcept
         {
@@ -218,11 +219,7 @@ namespace TES3MP::OpenMWAdapter
 
         Turn32 turnFromOpenMW(float rad) noexcept
         {
-            constexpr double Tau = 2.0 * std::numbers::pi;
-            double turns = std::fmod(-static_cast<double>(rad) / Tau, 1.0);
-            if (turns < 0.0)
-                turns += 1.0;
-            return Turn32::fromUnnormalized(static_cast<std::uint64_t>(std::floor(turns * TurnScale + 0.5)));
+            return networkTurnFromOpenMW(rad);
         }
 
         ESM::RefId refId(std::string_view value)
@@ -269,7 +266,7 @@ namespace TES3MP::OpenMWAdapter
             result.pos[2] = static_cast<float>(static_cast<double>(position.z()) / PositionScale);
             const auto orientation = transform.orientation();
             const auto radians = [](Turn32 turn) {
-                return -static_cast<float>(static_cast<double>(turn.value()) / TurnScale * 2.0 * std::numbers::pi);
+                return static_cast<float>(openMWRadiansFromNetwork(turn));
             };
             result.rot[0] = radians(orientation.x());
             result.rot[1] = radians(orientation.y());
@@ -284,7 +281,7 @@ namespace TES3MP::OpenMWAdapter
             result.pos[1] = static_cast<float>(pose.y / PositionScale);
             result.pos[2] = static_cast<float>(pose.z / PositionScale);
             const auto radians = [](Turn32 turn) {
-                return -static_cast<float>(static_cast<double>(turn.value()) / TurnScale * 2.0 * std::numbers::pi);
+                return static_cast<float>(openMWRadiansFromNetwork(turn));
             };
             result.rot[0] = radians(pose.orientation.x());
             result.rot[1] = radians(pose.orientation.y());
@@ -1331,6 +1328,13 @@ namespace TES3MP::OpenMWAdapter
 
         ProviderResult applyPublicEquipment(const LatestWinsEquipmentSnapshot& snapshot, MonotonicInstant receivedAt)
         {
+            if (!mapping) return ProviderResult::ContentMappingFailed;
+            if (nativeItemRecords.empty() && !snapshot.actors.empty())
+            {
+                const auto& store = *MWBase::Environment::get().getESMStore();
+                nativeItemRecords = MWWorld::inventoryRecords(store);
+                nativeSoulRecords = MWWorld::inventorySoulRecords(store);
+            }
             auto world = MWBase::Environment::get().getWorld();
             std::set<uint64_t> desiredSpawns;
             std::vector<const ReliableGroundItemBaseline*> areas;
@@ -1547,6 +1551,8 @@ namespace TES3MP::OpenMWAdapter
                 const auto mapped = mapReplicatedActorResult(actorResult);
                 if (mapped != ProviderResult::Accepted || !actor)
                     return mapped;
+                if (remote.actor && !MWRender::replicatedActorResultAccepted(actor->preserveLocomotionFrom(*remote.actor)))
+                    return ProviderResult::PresentationFailed;
                 remote.actor = std::move(actor);
                 if (combatSnapshot && applyRemotePlayerCombat(*remote.actor,
                         remote.lastObserved->playerId(), *combatSnapshot) != ProviderResult::Accepted)
@@ -3116,6 +3122,77 @@ namespace TES3MP::OpenMWAdapter
             return std::forward<Sink>(sink)(ptr);
         }
 
+        ProviderResult applyCharacterProfile(const CharacterProfile& profile)
+        {
+            if (!profile.appearance() || !profile.characterClass() || !profile.birthsign())
+                return ProviderResult::ContentMappingFailed;
+            const auto& appearance = *profile.appearance();
+            const auto* race = characterRecord<ESM::Race>(appearance.race);
+            const auto* head = characterRecord<ESM::BodyPart>(appearance.head);
+            const auto* hair = characterRecord<ESM::BodyPart>(appearance.hair);
+            const auto* sign = characterRecord<ESM::BirthSign>(*profile.birthsign());
+            if (!race || !head || !hair || !sign) return ProviderResult::ContentMappingFailed;
+            ESM::Class selectedClass;
+            if (const auto* predefined = std::get_if<ClassRecordId>(&*profile.characterClass()))
+            {
+                const auto* record = characterRecord<ESM::Class>(*predefined);
+                if (!record) return ProviderResult::ContentMappingFailed;
+                selectedClass = *record;
+            }
+            else
+            {
+                const auto& custom = std::get<CustomClassDefinition>(*profile.characterClass());
+                selectedClass.blank();
+                selectedClass.mName = custom.name;
+                selectedClass.mDescription = custom.description;
+                selectedClass.mData.mSpecialization = static_cast<int>(custom.specialization);
+                selectedClass.mData.mIsPlayable = 1;
+                for (size_t i = 0; i < custom.favoredAttributes.size(); ++i)
+                    selectedClass.mData.mAttribute[i] = custom.favoredAttributes[i];
+                for (size_t i = 0; i < custom.minorSkills.size(); ++i)
+                {
+                    selectedClass.mData.mSkills[i][0] = custom.minorSkills[i];
+                    selectedClass.mData.mSkills[i][1] = custom.majorSkills[i];
+                }
+            }
+            std::vector<ESM::RefId> spells;
+            for (const auto id : profile.derived().startingSpells)
+            {
+                const auto* spell = characterRecord<ESM::Spell>(id);
+                if (!spell) return ProviderResult::ContentMappingFailed;
+                spells.push_back(spell->mId);
+            }
+            const auto& environment = MWBase::Environment::get();
+            const auto multiplier = environment.getESMStore()->get<ESM::GameSetting>()
+                .find("fPCbaseMagickaMult")->mValue.getFloat();
+            if (!std::isfinite(multiplier) || multiplier < 0 || multiplier > 1000)
+                return ProviderResult::ContentMappingFailed;
+            auto mechanics = environment.getMechanicsManager();
+            mechanics->setPlayerName(profile.name());
+            mechanics->setPlayerRace(race->mId, appearance.sex == CharacterSex::Male, head->mId, hair->mId);
+            if (selectedClass.mId.empty()) mechanics->setPlayerClass(selectedClass);
+            else mechanics->setPlayerClass(selectedClass.mId);
+            mechanics->setPlayerBirthsign(sign->mId);
+            const auto player = environment.getWorld()->getPlayerPtr();
+            auto& stats = player.getClass().getNpcStats(player);
+            for (size_t i = 0; i < profile.derived().attributes.size(); ++i)
+            {
+                MWMechanics::AttributeValue value;
+                value.setBase(profile.derived().attributes[i]);
+                stats.setAttribute(ESM::Attribute::indexToRefId(int(i)), value, multiplier);
+            }
+            for (size_t i = 0; i < profile.derived().skills.size(); ++i)
+                stats.getSkill(ESM::Skill::indexToRefId(int(i))).setBase(profile.derived().skills[i]);
+            stats.getSpells().clear(false);
+            for (const auto& spell : spells) stats.getSpells().add(spell, false);
+            // Stock body assembly can create starter equipment. The next call
+            // must install the authoritative inventory even when its revision
+            // equals the pre-completion empty image.
+            observedPlayerInventoryRevision.reset();
+            environment.getWindowManager()->getInventoryWindow()->rebuildAvatar();
+            return ProviderResult::Accepted;
+        }
+
         ProviderResult applyInventory(const ReliablePlayerInventoryBaseline& player,
             std::span<const ReliableContainerInventoryBaseline> containers,
             const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt)
@@ -3865,6 +3942,37 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             const auto result = mImpl->applyNativeDoors(groundItems);
+            if (result != ProviderResult::Accepted) mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::applyPublicEquipment(const LatestWinsEquipmentSnapshot& equipment,
+        MonotonicInstant receivedAt) noexcept
+    {
+        try
+        {
+            const auto result = mImpl->applyPublicEquipment(equipment, receivedAt);
+            if (result != ProviderResult::Accepted) mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::applyCharacterProfile(const CharacterProfile& profile, MonotonicInstant) noexcept
+    {
+        try
+        {
+            const auto result = mImpl->applyCharacterProfile(profile);
             if (result != ProviderResult::Accepted) mImpl->clear();
             return result;
         }

@@ -287,7 +287,8 @@ struct ReliableCharacterProfile FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_STARTING_SPELLS = 50,
     VT_ITEM_PROTOTYPES = 52,
     VT_ITEM_COUNTS = 54,
-    VT_EQUIPMENT_SLOTS = 56
+    VT_EQUIPMENT_SLOTS = 56,
+    VT_CANONICAL_REVISION = 58
   };
   uint64_t target_session_id() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_ID, 0);
@@ -370,6 +371,9 @@ struct ReliableCharacterProfile FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   const ::flatbuffers::Vector<uint8_t> *equipment_slots() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_EQUIPMENT_SLOTS);
   }
+  uint64_t canonical_revision() const {
+    return GetField<uint64_t>(VT_CANONICAL_REVISION, 0);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -412,6 +416,7 @@ struct ReliableCharacterProfile FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyVector(item_counts()) &&
            VerifyOffset(verifier, VT_EQUIPMENT_SLOTS) &&
            verifier.VerifyVector(equipment_slots()) &&
+           VerifyField<uint64_t>(verifier, VT_CANONICAL_REVISION, 8) &&
            verifier.EndTable();
   }
 };
@@ -501,6 +506,9 @@ struct ReliableCharacterProfileBuilder {
   void add_equipment_slots(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> equipment_slots) {
     fbb_.AddOffset(ReliableCharacterProfile::VT_EQUIPMENT_SLOTS, equipment_slots);
   }
+  void add_canonical_revision(uint64_t canonical_revision) {
+    fbb_.AddElement<uint64_t>(ReliableCharacterProfile::VT_CANONICAL_REVISION, canonical_revision, 0);
+  }
   explicit ReliableCharacterProfileBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -540,8 +548,10 @@ inline ::flatbuffers::Offset<ReliableCharacterProfile> CreateReliableCharacterPr
     ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> starting_spells = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint64_t>> item_prototypes = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> item_counts = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> equipment_slots = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> equipment_slots = 0,
+    uint64_t canonical_revision = 0) {
   ReliableCharacterProfileBuilder builder_(_fbb);
+  builder_.add_canonical_revision(canonical_revision);
   builder_.add_birthsign_id(birthsign_id);
   builder_.add_class_id(class_id);
   builder_.add_hair_id(hair_id);
@@ -600,7 +610,8 @@ inline ::flatbuffers::Offset<ReliableCharacterProfile> CreateReliableCharacterPr
     const std::vector<uint64_t> *starting_spells = nullptr,
     const std::vector<uint64_t> *item_prototypes = nullptr,
     const std::vector<uint32_t> *item_counts = nullptr,
-    const std::vector<uint8_t> *equipment_slots = nullptr) {
+    const std::vector<uint8_t> *equipment_slots = nullptr,
+    uint64_t canonical_revision = 0) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto custom_class_name__ = custom_class_name ? _fbb.CreateString(custom_class_name) : 0;
   auto custom_class_description__ = custom_class_description ? _fbb.CreateString(custom_class_description) : 0;
@@ -641,7 +652,8 @@ inline ::flatbuffers::Offset<ReliableCharacterProfile> CreateReliableCharacterPr
       starting_spells__,
       item_prototypes__,
       item_counts__,
-      equipment_slots__);
+      equipment_slots__,
+      canonical_revision);
 }
 
 inline const TES3MP::Protocol::Schema::CharacterProfile::ReliableCharacterProfile *GetReliableCharacterProfile(const void *buf) {

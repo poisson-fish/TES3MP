@@ -65,11 +65,17 @@ namespace
     {
         ReliableCharacterProfile value{ id<SessionId>(11), id<SessionGeneration>(2), id<PlayerId>(7),
             CharacterConfirmationResult::Confirmed, completeProfile() };
-        const auto encoded = encodeReliableCharacterProfile(value);
-        const auto decoded = decodeReliableCharacterProfile(encoded);
-        return std::holds_alternative<ReliableCharacterProfile>(decoded)
-            && std::get<ReliableCharacterProfile>(decoded) == value
-            && encodeReliableCharacterProfile(std::get<ReliableCharacterProfile>(decoded)) == encoded;
+        for (const auto revision : {std::optional<CanonicalRevision>{}, std::optional(id<CanonicalRevision>(1234))})
+        {
+            value.canonicalRevision = revision;
+            const auto encoded = encodeReliableCharacterProfile(value);
+            const auto decoded = decodeReliableCharacterProfile(encoded);
+            if (!std::holds_alternative<ReliableCharacterProfile>(decoded)
+                || std::get<ReliableCharacterProfile>(decoded) != value
+                || encodeReliableCharacterProfile(std::get<ReliableCharacterProfile>(decoded)) != encoded)
+                return false;
+        }
+        return true;
     }
 
     bool confirmationResultNamesAreStable()
