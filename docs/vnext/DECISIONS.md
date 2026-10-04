@@ -302,10 +302,12 @@ helpers; snapshots own continuous loops/cleanup. Admit bounded cue chunks atomic
 gameplay events occur once. Reconnect restores loops without transient replay.
 Capability 33 retains legacy cues; presentation never enters saves.
 
-**Shared cell combat (V77).** Discover bounded placements; share physics/navigation
-within each interior/exterior neighborhood. Union occupancy simulates once; retain
-one campaign transaction/writer. Freeze empty-cell actor clocks, retain flight collision,
-unload when demand ends. Persist flight cells/static cast clocks and dynamic spawn cells.
+**Shared cell combat (V77).** Connected exteriors share physics/navigation;
+interiors/disconnected regions stay separate. Merge domains before allocation.
+Startup bounds: 256 cells, 8,192 references/region; navigation follows actors within
+256 cached tiles. Automatic discovery/geometry streaming remains pending.
+One campaign transaction simulates occupancy once; empty-cell clocks freeze.
+Retain flight collision; unload without demand. Persist flight cells/static cast clocks/dynamic spawn cells.
 Unsupported script/leveled/corpse services reject at startup; full AI packages remain M5.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;

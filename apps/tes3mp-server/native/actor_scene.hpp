@@ -102,7 +102,7 @@ namespace TES3MP::Native
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
             std::span<const uint64_t> neighbors, Impl* sharedParent,
-            std::span<const DynamicActorBody> dynamic = {}, bool scenery = false);
+            std::span<const DynamicActorBody> dynamic = {}, bool scenery = false, bool regions = false);
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
             bindAnimationSources(ESM::RefId actor, const ESM::NPC* playerBody = nullptr);
     public:
@@ -118,8 +118,10 @@ namespace TES3MP::Native
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
             std::span<const uint64_t> neighbors, std::span<const DynamicActorBody> dynamic);
-        // Each processing domain owns its collision world; actors in the same
-        // domain share bodies. The linked image still commits as one transaction.
+        // Up to 256 bound cells form connected exterior regions or separate
+        // interiors. Overlapping actor domains merge before collision allocation;
+        // every actor has one frame and each region owns one collision world.
+        // The linked image still commits as one transaction.
         InteriorActorScene(Loadout& loadout,
             const std::vector<std::pair<uint64_t, std::vector<ESM::RefId>>>& actors,
             const std::string& baseAnimation, const std::string& beastAnimation,
@@ -145,6 +147,8 @@ namespace TES3MP::Native
         // or authenticated player input. Invalid input leaves the scene unchanged.
         ActorSceneSnapshot step(const std::array<float, 3>& velocity);
         size_t bodyCount() const;
+        // Native callers can test region membership without exposing Bullet types.
+        bool sharesCollisionWorld(const InteriorActorScene& other) const noexcept;
         // First server-owned collision and impact point along a spell bolt
         // segment. Actor zero means world geometry; absence means clear.
         std::optional<ActorProjectileContact> projectileContact(const std::array<float, 3>& from,

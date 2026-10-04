@@ -1,5 +1,6 @@
 #include <apps/openmw/mwmechanics/jump.hpp>
 #include "actor_scene.hpp"
+#include "actor_processing_regions.hpp"
 #include "stock_actor_script.hpp"
 #include <components/sceneutil/animationkeys.hpp>
 #include <apps/openmw/mwmechanics/weapontype.hpp>
@@ -188,6 +189,7 @@ namespace TES3MP::Native
         std::vector<std::unique_ptr<Terrain>> mTerrain;
         std::vector<ESM::RefId> mCells;
         bool mMultipleDomains = false;
+        bool mExpandedExterior = false;
         std::vector<ActorSceneDoor> localDoors(std::span<const ActorSceneDoor> doors) const
         {
             std::vector<ActorSceneDoor> result(doors.begin(), doors.end());
@@ -367,10 +369,21 @@ namespace TES3MP::Native
             mNavigationValid = true;
         }
 
+        void syncNavigationPosition(const osg::Vec3f& position)
+        {
+            if (!mExpandedExterior || !mNavigator) return;
+            // The tile cache follows this actor, not the region's initial anchor.
+            // It is derived state: every query recenters even after rejection.
+            mNavigator->updateBounds(ESM::RefId::stringRefId("native-interior"), {}, position, nullptr);
+            mNavigator->update(position, nullptr);
+            mNavigator->wait(DetourNavigator::WaitConditionType::allJobsDone, nullptr);
+        }
+
         void rebuildPath(MWMechanics::PathFinder& path, const osg::Vec3f& position, const Travel& travel)
         {
             path.clearPath();
             if (!travel.hasDestination) return;
+            syncNavigationPosition(position);
             std::vector<osg::Vec3f> points;
             const auto status = DetourNavigator::findPath(*mNavigator, mAgentBounds, position,
                 travel.destination, navigationFlags(),
@@ -414,7 +427,7 @@ namespace TES3MP::Native
 
         Impl(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation, Impl* sharedParent = nullptr,
-            std::span<const DynamicActorBody> dynamic = {}, bool scenery = false)
+            std::span<const DynamicActorBody> dynamic = {}, bool scenery = false, bool regions = false)
             : mStore(loadout.store()), mResources(&mVfs, 0, &loadout.encoder()),
               mShapes(new Resource::BulletShapeManager(&mVfs, mResources.getSceneManager(),
                   mResources.getNifFileManager(), 0)),
@@ -423,7 +436,7 @@ namespace TES3MP::Native
               mWorld(mCollision->world), mSharedParent(sharedParent), mActorId(actor),
               mBaseAnimation(baseAnimation), mBeastAnimation(beastAnimation)
         {
-            if (cells.empty() || cells.size() > 9 || (!actor && !scenery)
+            if (cells.empty() || cells.size() > (regions ? MaxActorProcessingCells : 9) || (!actor && !scenery)
                 || baseAnimation.empty() || baseAnimation.size() > 1024
                 || beastAnimation.empty() || beastAnimation.size() > 1024)
                 throw std::invalid_argument("Interior NPC binding outside bounds");
@@ -434,10 +447,15 @@ namespace TES3MP::Native
             {
                 const auto* exterior = cell.getIf<ESM::ESM3ExteriorCellRefId>();
                 if (!unique.insert(cell).second || (anchor ? (!exterior
-                    || std::abs(int64_t(exterior->getX()) - anchor->getX()) > 1
-                    || std::abs(int64_t(exterior->getY()) - anchor->getY()) > 1) : cells.size() != 1))
+                    || (!regions && (std::abs(int64_t(exterior->getX()) - anchor->getX()) > 1
+                        || std::abs(int64_t(exterior->getY()) - anchor->getY()) > 1))) : cells.size() != 1))
                     throw std::invalid_argument("Actor processing cells must fit one unique 3x3 neighborhood");
             }
+            mExpandedExterior = anchor && std::ranges::any_of(cells, [&](auto cell) {
+                const auto& exterior = *cell.template getIf<ESM::ESM3ExteriorCellRefId>();
+                return std::abs(int64_t(exterior.getX()) - anchor->getX()) > 1
+                    || std::abs(int64_t(exterior.getY()) - anchor->getY()) > 1;
+            });
             MWClass::registerClasses();
             // Non-NIF collision meshes use the stock scene importer; shader
             // generation is presentation and must not initialize here.
@@ -795,8 +813,8 @@ namespace TES3MP::Native
         : InteriorActorScene(loadout, cells, actor, baseAnimation, beastAnimation, neighbors, nullptr) {}
     InteriorActorScene::InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
         const std::string& baseAnimation, const std::string& beastAnimation,
-        std::span<const uint64_t> neighbors, Impl* sharedParent, std::span<const DynamicActorBody> dynamic, bool scenery)
-        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation, sharedParent, dynamic, scenery))
+        std::span<const uint64_t> neighbors, Impl* sharedParent, std::span<const DynamicActorBody> dynamic, bool scenery, bool regions)
+        : mImpl(std::make_unique<Impl>(loadout, cells, actor, baseAnimation, beastAnimation, sharedParent, dynamic, scenery, regions))
     {
         if (actor && !contains(snapshot().mPosition))
             throw std::invalid_argument("Actor start outside dry processing neighborhood");
@@ -824,29 +842,59 @@ namespace TES3MP::Native
         if (actors.empty() || actors.size() > 37)
             throw std::invalid_argument("Actor processing domain capacity exceeded");
         std::set<uint64_t> identities;
-        std::map<std::vector<ESM::RefId>, Impl*> parents;
-        InteriorActorScene* previous = nullptr;
+        std::vector<ESM::RefId> boundCells;
+        const auto addCell = [&](ESM::RefId cell) {
+            if (std::ranges::find(boundCells, cell) != boundCells.end()) return;
+            if (boundCells.size() == MaxActorProcessingCells)
+                throw std::invalid_argument("Actor processing cell capacity exceeded");
+            boundCells.push_back(cell);
+        };
+        if (allCells.size() > MaxActorProcessingCells)
+            throw std::invalid_argument("Actor processing cell capacity exceeded");
         for (const auto& [id, cells] : actors)
         {
-            if (!id || !identities.insert(id).second)
-                throw std::invalid_argument("Duplicate processing actor");
+            if (!id || !identities.insert(id).second || cells.empty() || cells.size() > MaxActorProcessingCells
+                || std::set<ESM::RefId>(cells.begin(), cells.end()).size() != cells.size())
+                throw std::invalid_argument("Actor processing identity/domain invalid");
+            for (auto cell : cells) addCell(cell);
+        }
+        if (std::set<ESM::RefId>(allCells.begin(), allCells.end()).size() != allCells.size())
+            throw std::invalid_argument("Duplicate bound processing cell");
+        for (auto cell : allCells) addCell(cell);
+        const auto regions = actorProcessingRegions(boundCells);
+        std::vector<size_t> actorRegions;
+        for (const auto& [id, cells] : actors)
+        {
+            const auto region = std::ranges::find_if(regions, [&](const auto& value) {
+                return std::ranges::find(value, cells.front()) != value.end();
+            });
+            if (!std::ranges::all_of(cells, [&](auto cell) {
+                    return std::ranges::find(*region, cell) != region->end(); }))
+                throw std::invalid_argument("Actor domain spans separate processing regions");
+            actorRegions.push_back(size_t(region - regions.begin()));
+        }
+        std::map<std::vector<ESM::RefId>, Impl*> parents;
+        InteriorActorScene* previous = nullptr;
+        for (size_t i = 0; i < actors.size(); ++i)
+        {
+            const auto id = actors[i].first;
+            const auto& cells = regions[actorRegions[i]];
             std::vector<DynamicActorBody> bodies;
             for (const auto& body : dynamic)
                 if (std::ranges::find(cells, body.cell) != cells.end()) bodies.push_back(body);
             auto next = std::unique_ptr<InteriorActorScene>(new InteriorActorScene(loadout, cells, id,
-                baseAnimation, beastAnimation, {}, parents[cells], bodies));
+                baseAnimation, beastAnimation, {}, parents[cells], bodies, false, true));
             next->mImpl->mMultipleDomains = true;
             next->mImpl->mDynamicDestination = previous != nullptr;
             if (!parents[cells]) parents[cells] = next->mImpl.get();
             if (!previous) { mImpl.swap(next->mImpl); previous = this; }
             else { previous->mNeighbor = std::move(next); previous = previous->mNeighbor.get(); }
         }
-        for (const auto cell : allCells)
+        for (size_t i = 0; i < regions.size(); ++i)
         {
-            if (std::ranges::any_of(actors, [&](const auto& domain) {
-                    return std::ranges::find(domain.second, cell) != domain.second.end(); })) continue;
+            if (std::ranges::find(actorRegions, i) != actorRegions.end()) continue;
             auto scenery = std::unique_ptr<InteriorActorScene>(new InteriorActorScene(loadout,
-                std::array{cell}, 0, baseAnimation, beastAnimation, {}, nullptr, {}, true));
+                regions[i], 0, baseAnimation, beastAnimation, {}, nullptr, {}, true, true));
             scenery->mImpl->mMultipleDomains = true;
             mImpl->mFingerprint += scenery->fingerprint();
             mScenery.push_back(std::move(scenery));
@@ -997,6 +1045,8 @@ namespace TES3MP::Native
         return halfExtent;
     }
     size_t InteriorActorScene::bodyCount() const { return mImpl ? mImpl->mBodies.size() : 0; }
+    bool InteriorActorScene::sharesCollisionWorld(const InteriorActorScene& other) const noexcept
+    { return mImpl && other.mImpl && mImpl->mCollision == other.mImpl->mCollision; }
     bool InteriorActorScene::lineOfSight(const std::array<float, 3>& from, const std::array<float, 3>& to) const
     {
         if (!mImpl) throw std::invalid_argument("Visibility scene is unloaded");
@@ -1551,6 +1601,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Interior destination outside bounds");
         if (!contains(destination)) throw std::invalid_argument("Travel destination outside processing neighborhood");
         mImpl->syncNavigation(mImpl->mDoors);
+        mImpl->syncNavigationPosition(mImpl->mActor->mPosition);
         std::vector<osg::Vec3f> path;
         const auto status = DetourNavigator::findPath(*mImpl->mNavigator, mImpl->mAgentBounds,
             mImpl->mActor->mPosition, {destination[0], destination[1], destination[2]},
@@ -2036,6 +2087,7 @@ namespace TES3MP::Native
         mImpl->validateDoors(doors);
         if (!mImpl->mNavigator) throw std::logic_error("Actor navigation unavailable");
         mImpl->validateMovement(movement);
+        mImpl->syncNavigationPosition(mImpl->mActor->mPosition);
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(movement.enabled
             ? mImpl->movementFrame(*mImpl->mActor, movement) : *mImpl->mActor);
         auto path = mImpl->mPath;

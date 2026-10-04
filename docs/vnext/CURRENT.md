@@ -3,12 +3,14 @@
 **M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp)
 runs 60 Hz NPC/door substeps and 30 Hz commits.
 
-**V77 NPCs:** `actors auto "NAV_SETTINGS"`; isolated interiors/shared exterior
-neighborhoods, single simulation, empty-cell clock freeze, filtered unload/reentry.
-Bounds: 1–37 NPCs/summons, one exterior 3x3, 256 cells. Scripted/leveled/corpse
-placements reject; AI packages remain M5. `build/logs/cell-actors-21.log`:
-synthetic occupancy/collision/rollback/reload/restart/combat/flight.
-Builds pass; desktop acceptance pending.
+**V77:** discovered actors, shared interior/exterior simulation, empty-cell freeze,
+filtered unload/reentry. Bounds: 37 actors/summons, 256 bound cells.
+Connected exterior regions share collision; interiors/disconnected regions stay separate.
+Navigation follows actors. `build/logs/actor-regions-07.log`: synthetic 12-cell crossing/contact,
+overlap/freeze/retry/restart/reentry. Startup geometry remains bound; discovery anchors one 3x3.
+Scripts/leveled/corpses reject; full AI packages remain M5.
+`build/logs/cell-actors-regions-02.log`: synthetic collision/rollback/restart/combat/flight.
+Impaired desktop acceptance remains pending.
 
 **V74–V76:** 143 selectors/141 lifecycles, Target/ground collision,
 capability-34/35 presentation. `build/logs`:
@@ -58,10 +60,6 @@ ground/reconnect at 100ms delay, ±25ms jitter, 10% loss. V74:
 `build/combat-acceptance-16/result.json`.
 [Stock comparisons](../../scripts/native_spell_presentation_capture.py) prove dispatch only.
 
-**Next:** retest both clients' empty completion inventory/outfits, reentry/reconnect/
-restart and walking directions. Test legitimate server-owned drops through durable
-commit/replication/rendering/pickup/restart, with rejection diagnostics. Then bind
-discovered interior doors, trace the six loaded exterior actors before restoring
-excluded scripted/AI content, and share stock appearance assembly. Death-menu
-respawn and varied/modded bodies still need rendered acceptance.
-V77 latency/jitter/loss acceptance still precedes player physics cutover.
+**Next:** expand bounded exterior discovery/streaming and cross-boundary gameplay/visibility;
+accept impaired two-client crossings. Retain body, stock-door exclusion,
+NPC movement/death-menu acceptance before player physics cutover.

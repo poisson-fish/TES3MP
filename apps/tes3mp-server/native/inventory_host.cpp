@@ -6,6 +6,7 @@
 #include "loadout.hpp"
 #include "environment.hpp"
 #include "actor_campaign.hpp"
+#include "actor_processing_regions.hpp"
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <algorithm>
 #include <fstream>
@@ -751,29 +752,13 @@ namespace TES3MP::Native
                 std::vector<std::pair<uint64_t, std::vector<ESM::RefId>>> processing;
                 if (start.binding.mCellActors)
                 {
-                    std::vector<ESM::RefId> exteriors;
-                    for (const auto& name : names)
-                        if (name.is<ESM::ESM3ExteriorCellRefId>()) exteriors.push_back(name);
-                    if (exteriors.size() > 9)
-                        throw std::invalid_argument("Cell actor exterior neighborhood exceeds nine cells");
-                    if (!exteriors.empty())
-                    {
-                        const auto center = std::ranges::find_if(exteriors, [&](const auto& candidate) {
-                            const auto& anchor = *candidate.template getIf<ESM::ESM3ExteriorCellRefId>();
-                            return std::ranges::all_of(exteriors, [&](const auto& cell) {
-                                const auto& point = *cell.template getIf<ESM::ESM3ExteriorCellRefId>();
-                                return std::abs(point.getX() - anchor.getX()) <= 1
-                                    && std::abs(point.getY() - anchor.getY()) <= 1;
-                            });
-                        });
-                        if (center == exteriors.end()) throw std::invalid_argument("Cell actor exterior neighborhood lacks a center");
-                        std::iter_swap(exteriors.begin(), center);
-                    }
+                    const auto regions = actorProcessingRegions(names);
                     const auto add = [&](const auto& actor) {
-                        std::vector<ESM::RefId> cells;
-                        if (actor.mCell.kind() == CellId::Kind::Exterior) cells = exteriors;
-                        else cells.push_back(names[std::ranges::find(wireCells, actor.mCell) - wireCells.begin()]);
-                        processing.emplace_back(actor.mId.value(), std::move(cells));
+                        const auto cell = names[std::ranges::find(wireCells, actor.mCell) - wireCells.begin()];
+                        const auto region = std::ranges::find_if(regions, [&](const auto& cells) {
+                            return std::ranges::find(cells, cell) != cells.end();
+                        });
+                        processing.emplace_back(actor.mId.value(), *region);
                     };
                     add(owner);
                     for (const auto& adjacent : neighborOwners) add(adjacent);
