@@ -21,7 +21,9 @@
 #include "../mwworld/manualref.hpp"
 #include "../mwworld/containerstore.hpp"
 #include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/combat.hpp"
 #include "../mwmechanics/spellcasting.hpp"
+#include "../mwrender/animation.hpp"
 #include "../mwphysics/raycasting.hpp"
 #include "../mwworld/esmstore.hpp"
 #include <cmath>
@@ -38,6 +40,8 @@
 #include <MyGUI_EditBox.h>
 #include <MyGUI_Gui.h>
 #include <MyGUI_InputManager.h>
+#include <MyGUI_ProgressBar.h>
+#include <SDL_events.h>
 
 #include <stdexcept>
 
@@ -516,6 +520,11 @@ namespace TES3MP::OpenMWAdapter
             if (!(file >> strength) || !std::isfinite(strength) || strength < 0.f || strength > 1.f)
                 throw std::runtime_error("Traversal shoot strength invalid");
         }
+        else if (action == "use")
+        {
+            if (!(file >> direction) || direction > 1)
+                throw std::runtime_error("Traversal use button state invalid");
+        }
         else if (action == "probe")
         {
             if (!(file >> x >> y >> z >> endX >> endY >> endZ))
@@ -604,6 +613,53 @@ namespace TES3MP::OpenMWAdapter
             world->toggleVanityMode(false);
             world->moveObject(world->getPlayerPtr(), osg::Vec3f(x,y,z));
             world->rotateObject(world->getPlayerPtr(), osg::Vec3f(pitch,0,yaw));
+        }
+        else if (action == "use")
+        {
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal use requires game focus");
+            // Follow mouse bindings, Lua controls and the stock charge/release
+            // controller instead of submitting a melee hit directly.
+            SDL_Event event{};
+            event.type = direction ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
+            event.button.button = SDL_BUTTON_LEFT;
+            event.button.state = direction ? SDL_PRESSED : SDL_RELEASED;
+            if (SDL_PushEvent(&event) != 1)
+                throw std::runtime_error("Traversal use event could not be queued");
+        }
+        else if (action == "combatstats")
+        {
+            const auto player = world->getPlayerPtr();
+            const auto& stats = player.getClass().getCreatureStats(player);
+            MyGUI::ProgressBar* bar = nullptr;
+            wm->getHud()->getWidget(bar, "Stamina");
+            const auto* animation = world->getAnimation(player);
+            mOutput << "{\"event\":\"traversal_combat_stats\",\"sequence\":" << sequence
+                << ",\"race\":" << std::quoted(player.get<ESM::NPC>()->mBase->mRace.toString())
+                << ",\"health\":" << stats.getHealth().getCurrent()
+                << ",\"fatigue\":" << stats.getFatigue().getCurrent()
+                << ",\"maximum_fatigue\":" << stats.getFatigue().getModified()
+                << ",\"hud_fatigue\":" << bar->getProgressPosition()
+                << ",\"hud_maximum_fatigue\":" << bar->getProgressRange()
+                << ",\"weapon_drawn\":" << (stats.getDrawState() == MWMechanics::DrawState::Weapon ? "true" : "false")
+                << ",\"committed_body\":" << (animation ? animation->committedBodyState() : 0)
+                << ",\"committed_melee\":" << (animation && animation->hasCommittedMelee() ? "true" : "false")
+                << "}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
+        }
+        else if (action == "hitrecoil")
+        {
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal recoil requires game focus");
+            // Inject one committed presentation frame to exercise the local
+            // controller's interruption cleanup without mutating canonical combat.
+            auto* animation = world->getAnimation(world->getPlayerPtr());
+            if (!animation || !animation->setCommittedBody(4, 0.f, 1))
+                throw std::runtime_error("Traversal recoil presentation unavailable");
+        }
+        else if (action == "readyweapon")
+        {
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal ready weapon requires game focus");
+            MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_ToggleWeapon);
         }
         else if (action == "autowalk")
         {
@@ -712,6 +768,22 @@ namespace TES3MP::OpenMWAdapter
             if (!wm->containsMode(MWGui::GM_Dialogue))
                 throw std::runtime_error("Traversal dialogue window is not open");
             wm->removeGuiMode(MWGui::GM_Dialogue);
+        }
+        else if (action == "contact")
+        {
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal contact requires game focus");
+            const auto player = world->getPlayerPtr();
+            auto& inventory = player.getClass().getInventoryStore(player);
+            const auto held = inventory.getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
+            const MWWorld::Ptr weapon = held == inventory.end() ? MWWorld::Ptr() : *held;
+            const auto hit = MWMechanics::getHitContact(player, MWMechanics::getMeleeWeaponReach(player, weapon));
+            mOutput << "{\"event\":\"traversal_contact\",\"sequence\":" << sequence
+                << ",\"target\":" << std::quoted(hit.first.isEmpty() ? std::string{}
+                    : hit.first.getCellRef().getRefId().toString())
+                << ",\"mapped\":" << (!hit.first.isEmpty()
+                    && mPresentation.captureMeleeAttack(hit.first, 1.f, 0) ? "true" : "false") << "}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
         }
         else if (action == "attack" || action == "swing" || action == "swingat")
         {

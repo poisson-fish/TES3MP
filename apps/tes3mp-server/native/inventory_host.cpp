@@ -8,6 +8,9 @@
 #include "actor_campaign.hpp"
 #include "actor_processing_regions.hpp"
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
+#include <apps/openmw/mwworld/manualref.hpp>
+#include <apps/openmw/mwworld/class.hpp>
+#include <apps/openmw/mwclass/classes.hpp>
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -45,6 +48,7 @@ namespace TES3MP::Native
         };
         struct Startup
         {
+            struct StartingRecord { ESM::RefId record; uint32_t count; std::optional<uint8_t> slot; };
             std::string text;
             LoadoutOptions options;
             InventoryServiceBinding binding;
@@ -61,6 +65,7 @@ namespace TES3MP::Native
             std::optional<CellId> secondWireCell;
             std::vector<std::pair<ESM::RefId, CellId>> additionalCells;
             std::optional<Navigation> navigation;
+            std::vector<StartingRecord> startingItems;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -262,13 +267,37 @@ namespace TES3MP::Native
                 navigation = std::move(nav);
             }
             bool levitationEnabled = true;
-            in >> std::ws;
-            if (descriptorVersion >= 56 && in.rdbuf()->sgetc() != std::char_traits<char>::eof())
+            bool haveLevitation = false, haveStartingItems = false;
+            std::vector<Startup::StartingRecord> startingItems;
+            while (in >> std::ws, in && !in.eof())
             {
-                key("levitation"); int enabled = -1; in >> enabled;
-                if (!in || (enabled != 0 && enabled != 1))
-                    throw std::invalid_argument("Native levitation rule invalid");
-                levitationEnabled = enabled != 0;
+                std::string field; in >> field;
+                if (field == "levitation" && descriptorVersion >= 56 && !haveLevitation)
+                {
+                    int enabled = -1; in >> enabled;
+                    if (!in || (enabled != 0 && enabled != 1))
+                        throw std::invalid_argument("Native levitation rule invalid");
+                    levitationEnabled = enabled != 0; haveLevitation = true;
+                }
+                else if (field == "starting_items" && descriptorVersion >= 78 && !haveStartingItems)
+                {
+                    size_t count = 0; in >> count;
+                    if (!in || count > MaximumStartingItems)
+                        throw std::invalid_argument("Native starting item count outside bound");
+                    haveStartingItems = true;
+                    std::set<ESM::RefId> records;
+                    std::set<int> slots;
+                    for (size_t i = 0; i < count; ++i)
+                    {
+                        auto name = record();
+                        uint64_t quantity = 0; int slot = -2; in >> quantity >> slot;
+                        if (!in || !quantity || quantity > MaximumTransferCount || slot < -1 || slot >= 19
+                            || !records.insert(name).second || (slot >= 0 && !slots.insert(slot).second))
+                            throw std::invalid_argument("Native starting item quantity, record or slot invalid");
+                        startingItems.push_back({name, uint32_t(quantity), slot < 0 ? std::nullopt : std::optional{uint8_t(slot)}});
+                    }
+                }
+                else throw std::invalid_argument("Native optional descriptor field invalid or repeated");
             }
             if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
                 || lootLevel < 1 || lootLevel > 1000 || lootSeed > UINT32_MAX
@@ -364,10 +393,13 @@ namespace TES3MP::Native
             if (meleeCampaign) semantic << navigation->meleeGroup << ':' << navigation->meleeAttack << ':'
                 << navigation->meleeSpeed << '\n';
             if (binding.mNpcLifecycle) semantic << "respawn:" << respawnDelayTicks << '\n';
+            for (const auto& item : startingItems)
+                semantic << "starting:" << item.record << ':' << item.count << ':'
+                    << (item.slot ? int(*item.slot) : -1) << '\n';
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,
-                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation)};
+                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems)};
         }
     }
     struct InventoryHost::Impl
@@ -379,6 +411,28 @@ namespace TES3MP::Native
         static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto,
             std::vector<std::unique_ptr<PlacementScene>>& scenes, std::span<const std::byte> restored)
         {
+            if (!start.startingItems.empty())
+            {
+                MWClass::registerClasses();
+                const auto items = MWWorld::inventoryRecords(loadout.store());
+                for (const auto& item : start.startingItems)
+                {
+                    const auto prototype = MWWorld::inventoryRecordId(item.record);
+                    if (!items.contains(prototype) || items.at(prototype) != item.record)
+                        throw std::invalid_argument("Native starting item missing from winning loadout");
+                    MWWorld::ManualRef reference(loadout.store(), item.record);
+                    const auto ptr = reference.getPtr();
+                    if (!ptr.getClass().getScript(ptr).empty())
+                        throw std::invalid_argument("Native starting item requires unavailable script services");
+                    if (item.slot)
+                    {
+                        const auto slots = ptr.getClass().getEquipmentSlots(ptr).first;
+                        if (std::ranges::find(slots, int(*item.slot)) == slots.end())
+                            throw std::invalid_argument("Native starting equipment slot incompatible with record");
+                    }
+                    start.binding.mStartingInventory.push_back({ItemPrototypeId::fromValue(prototype).value(), item.count, item.slot});
+                }
+            }
             std::optional<std::vector<ActorSpawnSelection>> savedSpawns;
             if (start.binding.mActorSelections && !restored.empty())
             {
@@ -1087,7 +1141,7 @@ namespace TES3MP::Native
         };
         if (!bound(creation.cell()) || !bound(completion.cell()))
             throw std::invalid_argument("Character safe point outside native domain");
-        auto result = discoverNativeCharacterContent(manifest, creation, completion, {}, mImpl->loadout.store());
+        auto result = discoverNativeCharacterContent(manifest, creation, completion, binding.mStartingInventory, mImpl->loadout.store());
         if (!result) throw std::invalid_argument("Native character choice discovery unavailable or outside bounds");
         return result;
     }

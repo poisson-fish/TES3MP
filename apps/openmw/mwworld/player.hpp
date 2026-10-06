@@ -113,6 +113,7 @@ namespace MWWorld
         }
         void clearActivationInterceptor() { mActivationInterceptor = nullptr; }
         void setMeleeHitInterceptor(MeleeHitInterceptor interceptor) { mMeleeHitInterceptor = std::move(interceptor); }
+        bool hasMeleeHitInterceptor() const { return bool(mMeleeHitInterceptor); }
         void setRangedReleaseInterceptor(RangedReleaseInterceptor interceptor)
         { mRangedReleaseInterceptor = std::move(interceptor); }
         void setMeleeTargetProvider(MeleeTargetProvider provider) { mMeleeTargetProvider = std::move(provider); }

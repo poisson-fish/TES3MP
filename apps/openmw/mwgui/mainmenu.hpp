@@ -79,6 +79,7 @@ namespace MWGui
         MyGUI::Button* mMultiplayerButton = nullptr;
         MyGUI::Button* mProfileButton = nullptr;
         MyGUI::Button* mRespawnButton = nullptr;
+        MyGUI::TextBox* mDeathText = nullptr;
 
         BackgroundImage* mBackground;
 

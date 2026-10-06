@@ -59,6 +59,7 @@
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/localscripts.hpp"
 #include "../mwworld/ptr.hpp"
+#include "../mwworld/player.hpp"
 #include "../mwworld/worldmodel.hpp"
 
 #include "../mwrender/npcanimation.hpp"
@@ -396,6 +397,11 @@ namespace MWClass
         // This is because hitting nothing is not a "miss" and should be handled as such character controller-side.
         victim = result.first;
         hitPosition = result.second;
+
+        // Multiplayer predicts contact, never the canonical hit roll. Preserve
+        // the charged strength even when the server will resolve a miss.
+        if (ptr == MWMechanics::getPlayer() && world->getPlayer().hasMeleeHitInterceptor())
+            return true;
 
         ESM::RefId weapskill = ESM::Skill::HandToHand;
         if (!weapon.isEmpty())

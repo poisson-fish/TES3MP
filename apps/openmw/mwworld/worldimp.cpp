@@ -2478,6 +2478,19 @@ namespace MWWorld
         if (!targetActor.getRefData().getBaseNode() || !actor.getRefData().getBaseNode())
             return false; // not in active cell
 
+        if ((targetActor.getRefData().getBaseNode()->getNodeMask() & MWRender::Mask_ReplicatedActor)
+            || (actor.getRefData().getBaseNode()->getNodeMask() & MWRender::Mask_ReplicatedActor))
+        {
+            // Replicas have content geometry but no local simulation/LOS actor.
+            // This is only an input contact witness; the server rechecks contact.
+            const auto eye = [&](const MWWorld::ConstPtr& ptr) {
+                return ptr.getRefData().getPosition().asVec3()
+                    + osg::Vec3f(0, 0, getHalfExtents(ptr).z() * 1.9f);
+            };
+            return !mPhysics->castRay(eye(actor), eye(targetActor),
+                MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door
+                    | MWPhysics::CollisionType_HeightMap).mHit;
+        }
         return mPhysics->getLineOfSight(actor, targetActor);
     }
 
@@ -3417,6 +3430,10 @@ namespace MWWorld
     {
         if (!object.getClass().isActor())
             return mRendering->getHalfExtents(object);
+
+        if (const auto* node = object.getRefData().getBaseNode();
+            node && (node->getNodeMask() & MWRender::Mask_ReplicatedActor))
+            return mPhysics->getActorModelHalfExtents(object, rendering);
 
         // Handle actors separately because of bodyparts
         if (rendering)

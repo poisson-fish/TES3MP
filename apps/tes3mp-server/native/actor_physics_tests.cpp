@@ -192,6 +192,25 @@ namespace
             && !offset.mRotationallyInvariant, "Stock actor hull selection changed");
     }
 
+    void actorGeometry()
+    {
+        Resource::BulletShape shape;
+        shape.mCollisionBox = {{16, 24, 40}, {1, 2, 40}};
+        require(MWPhysics::actorCollisionBox(shape, false).mExtents == osg::Vec3f(16, 24, 40)
+            && MWPhysics::actorCollisionBox(shape, true).mCenter == osg::Vec3f(1, 2, 40),
+            "Authored actor geometry changed");
+        shape.mCollisionBox = {};
+        shape.mCollisionShape.reset(new btBoxShape({12, 18, 25}));
+        const auto creature = MWPhysics::actorCollisionBox(shape, false);
+        require((creature.mExtents - osg::Vec3f(12, 18, 25)).length() < .001f
+            && creature.mCenter == osg::Vec3f(0, 0, creature.mExtents.z())
+            && MWPhysics::actorCollisionBox(shape, true).mExtents.length2() == 0,
+            "Creature mesh fallback changed or generated an NPC body hull");
+        shape.mCollisionShape.reset();
+        require(MWPhysics::actorCollisionBox(shape, false).mExtents.length2() == 0,
+            "Missing actor geometry acquired invented bounds");
+    }
+
     void collision()
     {
         Scene wall;
@@ -426,7 +445,8 @@ int main(int argc, char** argv)
         if (argc != 2)
             throw std::invalid_argument("Select movement-collision, movement-environment or collision-effects");
         const std::string_view filter = argv[1];
-        if (filter == "jump-fall") jumpFall();
+        if (filter == "actor-geometry") actorGeometry();
+        else if (filter == "jump-fall") jumpFall();
         else if (filter == "movement-collision")
             collision();
         else if (filter == "movement-environment")

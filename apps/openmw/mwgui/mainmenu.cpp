@@ -1,5 +1,7 @@
 #include "mainmenu.hpp"
 
+#include <algorithm>
+
 #include <MyGUI_Gui.h>
 #include <MyGUI_Button.h>
 #include <MyGUI_InputManager.h>
@@ -374,6 +376,14 @@ namespace MWGui
                 const auto player = MWBase::Environment::get().getWorld()->getPlayerPtr();
                 return player.getClass().getCreatureStats(player).isDead();
             }();
+        if (!mDeathText)
+        {
+            mDeathText = mButtonBox->createWidget<MyGUI::TextBox>(
+                "SandBrightText", MyGUI::IntCoord(0, 0, 180, 28), MyGUI::Align::Default);
+            mDeathText->setTextAlign(MyGUI::Align::Center);
+            mDeathText->setCaption("#{OMWEngine:MultiplayerDeath}");
+        }
+        mDeathText->setVisible(multiplayerDeath);
         if (!mRespawnButton)
         {
             mRespawnButton = mButtonBox->createWidget<MyGUI::Button>(
@@ -454,7 +464,7 @@ namespace MWGui
         }
 
         // Start by hiding all buttons
-        int maxwidth = 0;
+        int maxwidth = multiplayerDeath ? std::max(180, mDeathText->getTextSize().width) : 0;
         for (const auto& buttonPair : mButtons)
         {
             buttonPair.second->setVisible(false);
@@ -488,13 +498,14 @@ namespace MWGui
 
         if (multiplayerDeath)
         {
-            mRespawnButton->setCoord((maxwidth - 180) / 2, 0, 180, 28);
+            mDeathText->setCoord(0, 0, maxwidth, 28);
+            mRespawnButton->setCoord((maxwidth - 180) / 2, 32, 180, 28);
             for (const auto& id : buttons)
             {
                 const auto coord = mButtons[id]->getCoord();
-                mButtons[id]->setPosition(coord.left, coord.top + 36);
+                mButtons[id]->setPosition(coord.left, coord.top + 68);
             }
-            curH += 36;
+            curH += 68;
         }
         if (showMultiplayer)
         {

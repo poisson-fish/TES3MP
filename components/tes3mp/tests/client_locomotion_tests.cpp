@@ -15,10 +15,10 @@ namespace
             std::abort();
     }
 
-    SpatialEntitySnapshot snapshot(CellId cell, std::uint64_t tick, Position3 position)
+    SpatialEntitySnapshot snapshot(CellId cell, std::uint64_t tick, Position3 position, std::uint64_t epoch = 5)
     {
         return SpatialEntitySnapshot(value<ServerTick>(tick), value<PlayerId>(1), value<EntityId>(2),
-            value<AppearanceId>(3), value<EntityRevision>(4), value<AuthorityEpoch>(5),
+            value<AppearanceId>(3), value<EntityRevision>(4), value<AuthorityEpoch>(epoch),
             Transform(cell, position, Orientation3(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0))),
             LinearVelocity3(0, 0, 0));
     }
@@ -50,6 +50,16 @@ int main()
     const auto exterior = CellId::exterior(value<CellSpaceId>(2), 0, 0);
     const auto discontinuity = history.reconcile(snapshot(exterior, 11, Position3(5, 6, 7)), std::nullopt);
     require(discontinuity.hardDiscontinuity && discontinuity.replayedInputCount == 0 && history.size() == 0);
+
+    // A respawn can return to a different position in the same exterior cell.
+    // The new authority epoch must discard pre-death movement, once only.
+    require(history.retain(value<CommandSequence>(3), input(3, LinearVelocity3(100, 0, 0))));
+    const auto spawn = snapshot(exterior, 12, Position3(500, 600, 700), 6);
+    const auto respawn = history.reconcile(spawn, std::nullopt);
+    require(respawn.hardDiscontinuity && respawn.root == spawn.transform()
+        && respawn.velocity == LinearVelocity3(0, 0, 0)
+        && respawn.replayedInputCount == 0 && history.size() == 0);
+    require(!history.reconcile(spawn, std::nullopt).hardDiscontinuity);
 
     history.clear();
     for (std::size_t index = 0; index < MaximumRetainedLocomotionInputs; ++index)

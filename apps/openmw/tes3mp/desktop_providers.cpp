@@ -606,7 +606,8 @@ namespace TES3MP::OpenMWAdapter
                     auto capture = presentation->captureMeleeAttack(victim, strength, type);
                     if (capture && !self->mImpl->pendingMeleeAttack)
                         self->mImpl->pendingMeleeAttack = std::move(*capture);
-                    return capture.has_value();
+                    // An unmapped/rejected contact must not mutate local gameplay.
+                    return true;
                 });
                 player.setRangedReleaseInterceptor([self](float strength) {
                     auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
@@ -1597,7 +1598,11 @@ namespace TES3MP::OpenMWAdapter
             else if (player.getCell() == targetCell)
             {
                 world->setLeveledActorAuthority(true);
-                if (sessionBootstrapPending)
+                // Respawn and same-cell teleports change the authority epoch
+                // without changing cells. Install that committed discontinuity
+                // once, just as for the initial session pose.
+                if (sessionBootstrapPending || (allowLocalCellCorrection
+                        && localReconciliation && localReconciliation->hardDiscontinuity))
                 {
                     world->moveObject(player, selfPosition.asVec3());
                     world->rotateObject(player, selfPosition.asRotationVec3());
@@ -1851,6 +1856,7 @@ namespace TES3MP::OpenMWAdapter
                 if (combat == combatSnapshot->actors().end() || combat->actorId != *target || combat->dead)
                     return std::nullopt;
                 targetRevision = combat->combatRevision;
+                MWBase::Environment::get().getWindowManager()->setEnemy(victim);
             }
             return MeleeAttackCapture{ target, combatSnapshot->serverTick(), combatSnapshot->selfCombatRevision(),
                 targetRevision, type, attackStrength };

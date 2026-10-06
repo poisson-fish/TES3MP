@@ -5,9 +5,12 @@
 #include <osg/Vec3f>
 #include <BulletCollision/CollisionShapes/btConvexShape.h>
 #include <components/detournavigator/collisionshapetype.hpp>
+#include <components/resource/bulletshape.hpp>
 
 namespace MWPhysics
 {
+    Resource::CollisionBox actorCollisionBox(const Resource::BulletShape& shape, bool npc);
+
     struct ActorShape
     {
         std::unique_ptr<btConvexShape> mShape;

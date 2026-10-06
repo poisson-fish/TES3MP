@@ -38,6 +38,7 @@ namespace MWRender
 
 namespace Resource
 {
+    struct BulletShape;
     class BulletShapeManager;
     class ResourceSystem;
 }
@@ -132,6 +133,8 @@ namespace MWPhysics
 
         Actor* getActor(const MWWorld::Ptr& ptr);
         const Actor* getActor(const MWWorld::ConstPtr& ptr) const;
+        // Read-only geometry for rendered replicas; never registers a simulated actor.
+        osg::Vec3f getActorModelHalfExtents(const MWWorld::ConstPtr& ptr, bool rendering) const;
 
         const Object* getObject(const MWWorld::ConstPtr& ptr) const;
 
@@ -250,6 +253,8 @@ namespace MWPhysics
         float mPhysicsDt;
 
     private:
+        osg::ref_ptr<const Resource::BulletShape> actorModelShape(
+            const MWWorld::ConstPtr& ptr, VFS::Path::NormalizedView mesh) const;
         void updateWater();
 
         void prepareSimulation(bool willSimulate, std::vector<Simulation>& simulations);

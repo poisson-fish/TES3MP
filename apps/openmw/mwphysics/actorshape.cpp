@@ -6,6 +6,19 @@
 
 namespace MWPhysics
 {
+    Resource::CollisionBox actorCollisionBox(const Resource::BulletShape& shape, bool npc)
+    {
+        auto box = shape.mCollisionBox;
+        if (!npc && box.mExtents.length2() == 0.f && shape.mCollisionShape)
+        {
+            btVector3 minimum, maximum;
+            shape.mCollisionShape->getAabb(btTransform::getIdentity(), minimum, maximum);
+            box.mExtents = Misc::Convert::toOsg((maximum - minimum) / 2);
+            box.mCenter = osg::Vec3f(0, 0, box.mExtents.z());
+        }
+        return box;
+    }
+
     ActorShape makeActorShape(const osg::Vec3f& halfExtents, const osg::Vec3f& translation,
         DetourNavigator::CollisionShapeType requested)
     {

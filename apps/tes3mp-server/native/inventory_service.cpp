@@ -7277,7 +7277,7 @@ namespace TES3MP::Native
             // visible. The loaded actor has an animation; a two-handed weapon
             // hides the shield in OpenMW's NpcAnimation.
             bool readyToBlock = true;
-            if (mBinding.mMeleeDefenseRules)
+            if (mBinding.mMeleeDefenseRules && shield)
             {
                 const auto* inventory = mRuntime.inventoryStorage(owner);
                 if (!inventory) throw std::invalid_argument("Native block defender has no inventory");

@@ -383,7 +383,9 @@ namespace MWMechanics
                     clearStateAnimation(mCurrentHit);
                 mCurrentHit.clear();
                 mHitState = committed == 2 ? CharState_KnockOut : committed == 3 ? CharState_KnockDown : CharState_Hit;
-                if (!mCurrentWeapon.empty()) clearStateAnimation(mCurrentWeapon);
+                // Interrupt the clip while retaining the equipped weapon's group.
+                // Its type is unchanged, so updateWeaponState will not select it again.
+                if (!mCurrentWeapon.empty()) mAnimation->disable(mCurrentWeapon);
                 setAttackingOrSpell(false);
                 mReadyToHit = false;
                 mUpperBodyState = UpperBodyState::WeaponEquipped;

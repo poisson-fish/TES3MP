@@ -8,6 +8,10 @@
 
 namespace TES3MP::Native
 {
+    // V78 optionally appends starting_items COUNT followed by quoted record,
+    // quantity and equipment slot (-1 for unequipped), at most 64 entries.
+    // The explicit campaign policy joins saved identity and grants once at
+    // completion; omission preserves empty inventories in existing campaigns.
     // V76 wraps V75: unbound Target flight follows authoritative release facing;
     // collision selects recipients, retaining caster/recipient lives and object revisions.
     // Expanded sources retain bounded dimensions and capability-35 ordinal cues.

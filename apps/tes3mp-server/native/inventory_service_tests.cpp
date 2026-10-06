@@ -9179,6 +9179,7 @@ namespace TES3MP::Native::Testing
             if (melee && !cellActors) out << "processing 1 2\nmelee "
                 << std::quoted(effectFamily == "ai-creature" ? "handtohand" : "weapononehand") << " \"chop\" 1\n";
             if (lifecycle) out << "respawn " << std::dec << (playerLives ? 20 : boundEquipment ? 90 : 3) << "\n";
+            if (characterCreation) out << "starting_items 1\n\"common_shirt_01\" 1 8\n";
         }
         if (playerCastLifecycle)
         {
@@ -9232,15 +9233,25 @@ namespace TES3MP::Native::Testing
             Loadout source(readLoadoutOptions(3, arguments));
             require(source.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("chargen_autocalc_npc"))->mNpdtType
                 == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS, "Headless autocalculated NPC fixture absent");
-            ESM::RefId shirt;
-            for (const auto& item : source.store().get<ESM::Clothing>())
-                if (item.mData.mType == ESM::Clothing::Shirt && item.mScript.empty() && item.mEnchant.empty())
-                { shirt = item.mId; break; }
-            require(!shirt.empty(), "Character starting shirt fixture absent");
+            const auto shirt = ESM::RefId::stringRefId("common_shirt_01");
             const StartingItem starting{id<ItemPrototypeId>(MWWorld::inventoryRecordId(shirt)), 1,
                 uint8_t(MWWorld::InventoryStore::Slot_Shirt)};
-            auto catalog = discoverNativeCharacterContent(manifest.id(), checkpoint, checkpoint,
-                std::span(&starting, 1), source.store());
+            auto catalog = host.characterContent(manifest.id(), checkpoint, checkpoint);
+            require(catalog && std::ranges::equal(catalog->startingInventory(), std::span(&starting, 1)),
+                "Configured native starter policy missing from completion catalog");
+            std::ifstream descriptorInput(descriptor);
+            std::string baseDescriptor((std::istreambuf_iterator<char>(descriptorInput)), std::istreambuf_iterator<char>());
+            baseDescriptor.erase(baseDescriptor.find("starting_items"));
+            for (const auto& policy : {"starting_items 65\n", "starting_items 1\n\"missing_starter\" 0 -1\n",
+                    "starting_items 1\n\"missing_starter\" 1 19\n"})
+            {
+                const auto invalidDescriptor = scratch / "invalid-starter-native.txt";
+                { std::ofstream out(invalidDescriptor); out << baseDescriptor << '\n' << policy; }
+                bool rejected = false;
+                try { InventoryHost invalid(invalidDescriptor, manifest, *registry, *crypto, {}); }
+                catch (const std::invalid_argument&) { rejected = true; }
+                require(rejected, "Invalid native starter policy admitted");
+            }
             require(bool(catalog), "Native character fixture choices unavailable");
             const CharacterRaceDefinition* race = nullptr;
             for (const auto& value : source.store().get<ESM::Race>())

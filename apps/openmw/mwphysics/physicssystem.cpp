@@ -48,6 +48,7 @@
 #include "../mwworld/class.hpp"
 
 #include "actor.hpp"
+#include "actorshape.hpp"
 #include "collisiontype.hpp"
 
 #include "closestnotmerayresultcallback.hpp"
@@ -577,21 +578,32 @@ namespace MWPhysics
         }
     }
 
-    void PhysicsSystem::addActor(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh)
+    osg::ref_ptr<const Resource::BulletShape> PhysicsSystem::actorModelShape(
+        const MWWorld::ConstPtr& ptr, VFS::Path::NormalizedView mesh) const
     {
         const VFS::Path::Normalized animationMesh
             = Misc::ResourceHelpers::correctActorModelPath(mesh, mResourceSystem->getVFS());
-        osg::ref_ptr<const Resource::BulletShape> shape = mShapeManager->getShape(animationMesh);
+        auto shape = mShapeManager->getShape(animationMesh);
+        if (!ptr.getClass().isNpc() && shape && shape->mCollisionBox.mExtents.length2() == 0
+            && animationMesh != mesh)
+            shape = mShapeManager->getShape(mesh);
+        return shape;
+    }
 
-        // Try to get shape from basic model as fallback for creatures
-        if (!ptr.getClass().isNpc() && shape && shape->mCollisionBox.mExtents.length2() == 0)
-        {
-            if (animationMesh != mesh)
-            {
-                shape = mShapeManager->getShape(mesh);
-            }
-        }
+    osg::Vec3f PhysicsSystem::getActorModelHalfExtents(const MWWorld::ConstPtr& ptr, bool rendering) const
+    {
+        const auto shape = actorModelShape(ptr, VFS::Path::Normalized(ptr.getClass().getCorrectedModel(ptr)));
+        if (!shape) return {};
+        const auto box = actorCollisionBox(*shape, ptr.getClass().isNpc());
+        const float scale = ptr.getCellRef().getScale();
+        osg::Vec3f scaleVector(scale, scale, scale);
+        ptr.getClass().adjustScale(ptr, scaleVector, rendering);
+        return osg::componentMultiply(box.mExtents, scaleVector);
+    }
 
+    void PhysicsSystem::addActor(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh)
+    {
+        const auto shape = actorModelShape(ptr, mesh);
         if (!shape)
             return;
 
