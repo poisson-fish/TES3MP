@@ -64,6 +64,38 @@ class Phase12MovementCaptureTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "overflowed"):
                 MODULE.parse_metrics(path)
 
+    def test_relay_reuses_expired_endpoints_without_evicting_active_peer(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
+            server.bind(("127.0.0.1", 0))
+            server.settimeout(2)
+            relay = MODULE.UdpImpairmentRelay(MODULE.free_port(), server.getsockname()[1], "direct")
+            relay.MAXIMUM_CLIENTS = 2
+            relay.CLIENT_IDLE_SECONDS = .3
+            clients = [socket.socket(socket.AF_INET, socket.SOCK_DGRAM) for _ in range(3)]
+            for client in clients:
+                client.settimeout(2)
+            def round_trip(client, payload):
+                client.sendto(payload, ("127.0.0.1", relay.listen_port))
+                received, peer = server.recvfrom(1024)
+                self.assertEqual(received, payload)
+                server.sendto(received, peer)
+                self.assertEqual(client.recvfrom(1024)[0], payload)
+                return peer
+            relay.start()
+            try:
+                round_trip(clients[0], b"retiring")
+                active_peer = round_trip(clients[1], b"active")
+                for index in range(5):
+                    time.sleep(.1)
+                    self.assertEqual(round_trip(clients[1], b"keepalive"), active_peer)
+                replacement_peer = round_trip(clients[2], b"reconnected")
+                self.assertNotEqual(replacement_peer, active_peer)
+                self.assertEqual(round_trip(clients[1], b"still active"), active_peer)
+            finally:
+                relay.stop()
+                for client in clients:
+                    client.close()
+
     def test_commands_keep_credentials_in_files(self):
         args = argparse.Namespace(
             artifacts=pathlib.Path("evidence"), profile="direct", interior="Balmora",

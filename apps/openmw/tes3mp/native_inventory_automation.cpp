@@ -191,6 +191,7 @@ namespace TES3MP::OpenMWAdapter
 
     void DesktopAutomation::writeNativeInventory(std::string_view event)
     {
+        if (mRole == DesktopAutomationRole::NativeTraversal && mEvidenceEvents >= MaximumEvidenceEvents) return;
         if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents)
             throw std::runtime_error("Native evidence event budget exhausted");
         mOutput << "{\"event\":\"" << event << "\",\"role\":\"" << roleName()
@@ -236,7 +237,19 @@ namespace TES3MP::OpenMWAdapter
         for (const auto& neighbor : groundItems.neighbors)
             doors.insert(doors.end(), neighbor.doors.begin(), neighbor.doors.end());
         if (doors == mPresentedNativeDoors) return result;
-        if (mEvidenceEvents >= MaximumEvidenceEvents) return ProviderResult::PresentationFailed;
+        if (mEvidenceEvents >= MaximumEvidenceEvents)
+        {
+            // Recording is bounded; its limit cannot revoke a successful door install.
+            if (!mDoorEvidenceLimitReported)
+            {
+                Log(Debug::Info) << "TES3MP door update applied after capture limit: placement="
+                    << (doors.empty() ? 0 : doors.front().placement) << " motion="
+                    << (doors.empty() ? 0 : doors.front().motion);
+                mDoorEvidenceLimitReported = true;
+            }
+            mPresentedNativeDoors = std::move(doors);
+            return result;
+        }
         auto world = MWBase::Environment::get().getWorld();
         std::map<uint64_t, float> rendered;
         std::map<uint64_t, bool> renderedLocks;
@@ -283,8 +296,9 @@ namespace TES3MP::OpenMWAdapter
 
     void DesktopAutomation::writeNativeTraversal(std::string_view event)
     {
-        if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents || !mTraversalGround)
-            throw std::runtime_error("Traversal evidence unavailable or exhausted");
+        if (!mOutput || !mTraversalGround)
+            throw std::runtime_error("Traversal evidence unavailable");
+        if (mEvidenceEvents >= MaximumEvidenceEvents) return;
         auto world = MWBase::Environment::get().getWorld();
         const auto player = world->getPlayerPtr();
         auto* cell = player.getCell();
@@ -543,6 +557,13 @@ namespace TES3MP::OpenMWAdapter
                 throw std::runtime_error("Traversal spell target invalid");
         }
         if (file >> trailing) throw std::runtime_error("Trailing traversal control input");
+        if (action == "stoptrace")
+        {
+            mTraversalSequence = sequence;
+            writeNativeTraversal(action);
+            mEvidenceEvents = MaximumEvidenceEvents;
+            return;
+        }
         if (action == "uistate" || action == "uiclick" || action == "uirefresh" || action == "uimode"
             || action == "uitext")
         {

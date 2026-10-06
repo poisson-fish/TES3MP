@@ -44,7 +44,7 @@ discovery/streaming; prove adjacent-cell movement/combat/visibility;
 two players separate and regroup through unload, reconnect and restart under
 delay/jitter/loss. Preserve reference/life identity, state and access across areas,
 without duplicate simulation/outcomes. Require two-desktop travel evidence;
-synthetic crossings are insufficient. Then begin M5 context work without
+synthetic crossings are insufficient. Then begin M5 scripting without
 waiting for every remaining M4 combat feature; full M4 sign-off still requires
 its exit criteria.
 
@@ -130,46 +130,52 @@ duplicate settings and client gameplay writers; retain shared calculations/one c
 
 ## M5 - Complete scripted quests independently and together
 
-**Outcome:** personal progression over shared NPC lifecycles using unchanged engine
-scripts, without quest-specific handlers. Start after the verified exploration
-slice above; it enables meaningful stock/TR quest testing. Follow DECISIONS.md:
+**Outcome:** unchanged engine scripts support a living shared world and independent
+progression. Start after accepted exploration; remaining M4 acceptance/movement
+cutover stay open. Follow [current direction](DECISIONS.md#scripted-quest-execution-contract):
 
-1. **Context first:** refactor InterpreterContext, dialogue filters and Journal/
-   AddTopic around explicit character/story identity. First bounded slice: execute
-   one journal/topic script for two characters, proving separate state and unchanged
-   stock single-player behavior. Missing identity rejects before mutation.
-2. **State and execution:** namespace globals, locals, global-script instances,
-   cross-script access and callbacks. Add bounded transactional script execution:
-   commit state/effects/event consumption together. Distinguish committed, deferred
-   and rejected outcomes in ScriptManager; a wait must not deactivate the script.
-3. **Shared death, personal consequences:** connect M4 life generations to
-   attributed death history and OnDeath cursors. Implement unavailable-aware actor
-   queries, including GetHealth/existence/enumeration. A foreign kill defers B's
-   dependent invocation until respawn; B's own failure is preserved. Pause affected
-   deadlines, persist wake dependencies and revalidate on retry.
-4. **Persistent effects:** route Disable/Delete, relocation, scripted inventory/AI
-   changes and spawns through scoped references. Prove A's departure/removal leaves
-   B's interaction available. Physical divergence requires a coherent instance;
-   unsupported operations reject atomically. Shared combat remains a single writer.
-5. **Lua and recovery:** propagate context through Lua bindings, events, storage
-   and timers. Prove rollback of script-owned state as well as engine effects before
-   enabling gameplay handlers. Extend the durable image for personal state,
-   invocations, waits and scoped references; do not recreate today's singleton access.
-6. **Content proof:** run one unchanged TR quest separately and cooperatively.
-   A finishes first; B later completes without A's presence/items. Verify personal
-   rewards, shared encounters, respawn, concurrent dialogue and reconnect. Broader
-   compatibility follows exercised API coverage, not this single quest.
+1. **Shared world first:** execute one context-free world script once for two
+   desktops, preserving state through reentry/restart. Broaden ambient/object/door/NPC
+   scripts by supported operations; separate presentation. Inspect excluded Seyda
+   Neen content; restore only proven services.
+2. **Context and transactions:** refactor InterpreterContext, dialogue filters,
+   Journal/AddTopic and cross-script access. Prove separate journals/topics and stock
+   single-player behavior. Namespace story globals/locals/script instances/callbacks;
+   personal operations require character/story identity. Bound execution and commit
+   state, effects, RNG and event consumption together. ScriptManager distinguishes
+   committed/deferred/rejected; waits never deactivate scripts.
+3. **Runtime waits and diagnostics:** discover dependencies during execution;
+   persist bounded wake records and revalidate on changes. Log script/instruction,
+   context/reference/life, reads, effects and outcome; fix API semantics with
+   arbitrary-name regressions, without quest-specific handlers or prerequisite graphs.
+4. **Shared death:** consume attributed M4 life history through personal OnDeath
+   cursors and unavailable-aware health/existence/enumeration. Foreign kills defer
+   dependent work until respawn; preserve own failures and pause affected deadlines.
+   Explain waits; show authoritative remaining respawn time only when known.
+5. **NPC activities and divergence:** reserve conflicting scripted control for one
+   story while server AI/combat continues. Define completion, disconnect, death and
+   recovery rules before admission. Release alone cannot restore departed NPCs.
+   Scoped Disable/Delete, inventory/AI edits, relocation and spawns preserve others'
+   access; persistent physical divergence needs coherent instances across affected
+   cells. Restoration/item-access policies remain unresolved; never reset rewards.
+6. **Lua and recovery:** propagate context through bindings/storage/events/timers;
+   prove Lua-state and engine-effect rollback before admission. Persist personal state,
+   invocations/waits/reservations/scoped references coherently. Keep story identity ready
+   for optional shared-party stories; party formation/progress merging remain deferred.
+7. **Content proof:** advance Seyda Neen activation, ring rewards, departure, scripted
+   routines and taxman branches; then one unchanged TR quest independently/together.
+   A finishes; B completes without A/items. Verify concurrent dialogue/recovery;
+   API coverage bounds compatibility.
 
-**Acceptance:** fixtures use arbitrary script/reference names. Exercise
-OnDeath and polling; write a local/grant an item before an unavailable read and
-prove zero partial effects. Cover indirect cross-script dependencies, foreign
-versus own kills, pre-quest/party credit, Disable, stale generations, late joins,
-duplicate callbacks, legitimate repeats, interrupted writes and restart while
-waiting. No duplicate public spawns or authored-corpse resurrection. Reuse the stock
-script-test harness and filtered native tests; one relevant check at a time.
+**Acceptance:** arbitrary names; OnDeath/polling, indirect dependencies, foreign/own
+and pre-quest/helper credit, stale lives, late joins, legitimate repeats, duplicate
+callbacks, failed writes and restart while waiting/reserved. Local/item writes before
+unavailable reads leak nothing. No duplicate public spawns/authored-corpse revival.
+Prove reservation contention and instance isolation. Use stock script harness/filtered
+native tests individually.
 
-**Retire:** bespoke quests, duplicate logic, old ABI and unscoped callers after
-replacement/failure evidence; retain engine serialization and unsupported-API diagnostics.
+**Retire:** bespoke quests, duplicate logic, old ABI/unscoped callers after replacement
+evidence; retain engine serialization and unsupported-API diagnostics.
 
 ## M6 - Restore the world and personal progression
 

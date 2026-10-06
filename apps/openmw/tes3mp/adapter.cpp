@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <limits>
 #include <ranges>
+#include <source_location>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -1328,8 +1329,11 @@ namespace TES3MP::OpenMWAdapter
                 return true;
             }
 
-            void closeForProviderFailure(ProviderResult result) noexcept
+            void closeForProviderFailure(ProviderResult result,
+                std::source_location location = std::source_location::current()) noexcept
             {
+                std::fprintf(stderr, "TES3MP provider failure: result=%u adapter_line=%u\n",
+                    unsigned(result), location.line());
                 closeTerminal(result == ProviderResult::ContentMappingFailed ? ConnectionStatus::ContentMappingFailed
                                                                              : ConnectionStatus::PresentationFailed);
             }

@@ -522,6 +522,9 @@ namespace TES3MP
         if (mConfirmedPlayerInventoryBaseline
             && complete->header.canonicalRevision == mConfirmedPlayerInventoryBaseline->header.canonicalRevision)
         {
+            // Resync can sample the same committed image on a later server tick.
+            // The canonical revision still requires identical inventory contents.
+            complete->header.serverTick = mConfirmedPlayerInventoryBaseline->header.serverTick;
             const bool identical = *complete == *mConfirmedPlayerInventoryBaseline;
             mPendingPlayerInventory.reset();
             return identical ? InventoryReplicationReceiveResult::IdenticalDuplicate
@@ -613,6 +616,7 @@ namespace TES3MP
         {
             if (current->header.canonicalRevision == complete->header.canonicalRevision)
             {
+                complete->header.serverTick = current->header.serverTick;
                 const bool identical = *current == *complete;
                 mPendingContainerInventories.erase(pending);
                 return identical ? InventoryReplicationReceiveResult::IdenticalDuplicate
@@ -687,6 +691,7 @@ namespace TES3MP
         if (mConfirmedGroundItemBaseline
             && complete->header.canonicalRevision == mConfirmedGroundItemBaseline->header.canonicalRevision)
         {
+            complete->header.serverTick = mConfirmedGroundItemBaseline->header.serverTick;
             const bool identical = *complete == *mConfirmedGroundItemBaseline;
             mPendingGroundItems.reset();
             return identical ? InventoryReplicationReceiveResult::IdenticalDuplicate

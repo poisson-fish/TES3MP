@@ -670,7 +670,7 @@ namespace TES3MP::Native
         size_t owner, const PlainEquipmentValues& baseline, ESM::RefNum candidateCounter)
     {
         if (!mConnected || mRestartActor || mFailedClosed || owner >= ownerCount()
-            || !inventoryStorage(owner) || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - 1)
+            || mWorld.getPtrRegistryRevision() >= std::numeric_limits<size_t>::max() - 1)
             throw std::invalid_argument("NPC respawn owner or runtime invalid");
         const auto actorId = ownerPtr(owner).getCellRef().getRefNum();
         baseline.validate(mStore, actorId, mScriptLocals.get());
@@ -707,7 +707,7 @@ namespace TES3MP::Native
         staged->values = replacement;
         encodeSession(std::move(values), staged->image);
         staged->restored = std::make_unique<RestoredPlainEquipment>(RestoredPlainEquipment::restore(
-            replacement, mStore, actorId, mScriptLocals));
+            replacement, mStore, actorId, mScriptLocals, !inventoryStorage(owner)));
         auto& candidate = staged->restored->installationStorage(mStore, actorId, counter);
         staged->candidate = &candidate;
         staged->registry = mWorld.mPtrRegistry.mIndex;
@@ -824,9 +824,11 @@ namespace TES3MP::Native
         assert(staged.runtime == this && staged.beforeRevision == mWorld.getPtrRegistryRevision());
         auto& live = storage(staged.owner);
         installStorage(live, *staged.candidate, true);
-        auto& equipped = *inventoryStorage(staged.owner);
-        std::copy(staged.slots.begin(), staged.slots.end(), equipped.mSlots.begin());
-        equipped.mSelectedEnchantItem = staged.selected;
+        if (auto* equipped = inventoryStorage(staged.owner))
+        {
+            std::copy(staged.slots.begin(), staged.slots.end(), equipped->mSlots.begin());
+            equipped->mSelectedEnchantItem = staged.selected;
+        }
         if (staged.owner < 2) mItems[staged.owner] = staged.playerItem;
         mWorld.mPtrRegistry.mIndex.swap(staged.registry);
         mWorld.mPtrRegistry.mRevision = staged.beforeRevision + 1;

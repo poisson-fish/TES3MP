@@ -7012,6 +7012,13 @@ namespace TES3MP::Native::Testing
                         "Neighbor creature fixture requires a walking biped");
                     creature.mId = ESM::RefId::stringRefId("neighbor_test_creature");
                     creature.mScript = {}; creature.mSpells.mList.clear(); creature.mInventory.mList.clear();
+                    // Exercise ordinary creature ContainerStore death/respawn,
+                    // rather than the dremora's optional weapon InventoryStore.
+                    if (effectFamily == "neighbor-creature")
+                    {
+                        creature.mFlags &= ~ESM::Creature::Weapon;
+                        creature.mInventory.mList.push_back({1, ESM::RefId::stringRefId("common_shirt_01")});
+                    }
                     creature.mData.mHealth = playerLives ? 200 : 5;
                     creature.mData.mMana = 100; creature.mData.mFatigue = 100;
                     if (objectSoul) creature.mData.mSoul = 10;
@@ -13115,6 +13122,40 @@ namespace TES3MP::Native::Testing
                             require(false, detail.str().c_str());
                         }
                         require(damaged, missingHit.c_str());
+                        if (neighborCreature && neighbor == 3 && magic)
+                        {
+                            std::optional<ReliableContainerInventoryBaseline> prior;
+                            for (uint64_t observer : {1ull, 2ull})
+                            {
+                                const auto view = runtime.projectInventory(authority, id<SessionId>(observer),
+                                    id<ServerTick>(terminalTick), id<CanonicalRevision>(terminalTick));
+                                require(bool(view), "Creature corpse projection absent");
+                                const auto corpse = std::ranges::find(view->containers, id<ContainerId>(target),
+                                    &ReliableContainerInventoryBaseline::container);
+                                require(corpse != view->containers.end() && !corpse->stacks.empty(),
+                                    "Neighbor creature corpse omitted its plain container loot");
+                                require(!prior || (prior->stacks == corpse->stacks
+                                        && prior->position == corpse->position && prior->revision == corpse->revision),
+                                    "Creature corpse inventory differs between observers");
+                                prior = *corpse;
+                                auto players = std::vector(authority.players().begin(), authority.players().end());
+                                players[observer - 1] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(
+                                    players[observer - 1], id<ServerTick>(terminalTick),
+                                    Transform(corpse->cell, corpse->position, players[observer - 1].transform().orientation()),
+                                    LinearVelocity3(0, 0, 0)));
+                                const auto nearby = std::get<CanonicalServerState>(
+                                    createCanonicalServerState(players, authority.activeSessions()));
+                                const auto& item = corpse->stacks.front();
+                                ClientInventoryTransactionCommand take{id<SessionId>(observer), SessionGeneration::initial(),
+                                    CommandSequence::initial(), id<CommandId>(terminalTick + 1), id<CanonicalRevision>(terminalTick),
+                                    InventoryTransactionKind::TakeFromContainer, corpse->container, item.prototypeId,
+                                    item.stackId, 1, {}, view->playerInventory.front().revision, corpse->revision, {}, corpse->position};
+                                const auto before = bytes(runtime);
+                                require(bool(runtime.prepareInventory(nearby, bind(nearby, take).proposal()))
+                                        && bytes(runtime) == before,
+                                    "Neighbor corpse loot rejected a nearby observer or mutated before commit");
+                            }
+                        }
                         if (manyNeighbors)
                         {
                             const auto terminal = bytes(runtime);

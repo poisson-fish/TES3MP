@@ -2075,17 +2075,16 @@ namespace TES3MP::Native
         if (areaContainerLock(sharedIndex).level)
             throw std::invalid_argument("Locked native container rejects inventory transfer");
         const auto sharedOwner = mRuntime.ownerPtr(sharedIndex + 2);
-        const bool selectedCorpse = mCombat && sharedIndex + 2 == mCombatNpcOwner
-            && mCombat->actors[2][8][2] <= 0;
-        if (actorInventory(sharedOwner) && !initialCorpse(sharedOwner) && !selectedCorpse)
+        const bool deadActor = combatCorpse(shared.mId.value(), mCombat ? &*mCombat : nullptr);
+        if (actorInventory(sharedOwner) && !initialCorpse(sharedOwner) && !deadActor)
             throw std::invalid_argument("Living actor inventory access requires theft/companion services");
         const auto& player = *players.findPlayer(bound.player());
         const auto revision = mWorld.getPtrRegistryRevision();
         CellId sharedCell = shared.mCell;
         Position3 sharedPosition = shared.mPosition;
-        if (selectedCorpse)
+        if (deadActor)
         {
-            const auto state = mBinding.mNavigatingActor->snapshot();
+            const auto state = mBinding.mNavigatingActor->forActor(shared.mId.value()).snapshot();
             sharedCell = actorCell(state);
             sharedPosition = Position3(int64_t(std::llround(double(state.mPosition[0]) * 1024)),
                 int64_t(std::llround(double(state.mPosition[1]) * 1024)),
@@ -2122,11 +2121,12 @@ namespace TES3MP::Native
         validate(players, bound); // Bound all external fields before engine allocation.
         const auto index = actor(bound.player());
         const auto& input = bound.transaction();
+        const auto sharedIndex = container(input.containerId);
         auto command = mRuntime.containerCommand(index, input.kind == InventoryTransactionKind::PutIntoContainer,
-            nativeId(*input.stackId), int32_t(input.count), container(input.containerId));
+            nativeId(*input.stackId), int32_t(input.count), sharedIndex);
         command.mTakeAll = input.kind == InventoryTransactionKind::TakeAllFromContainer;
-        const auto openedCorpse = mCombat && mCombat->actors[2][8][2] <= 0
-            ? std::optional(mCombatNpcOwner) : std::nullopt;
+        const auto openedCorpse = combatCorpse(mBinding.mContainers[sharedIndex].mId.value(), mCombat ? &*mCombat : nullptr)
+            ? std::optional(sharedIndex + 2) : std::nullopt;
         return PreparedCommand(bound, mRuntime.prepare({ command.mInitiator }, command, openedCorpse));
     }
 
@@ -2627,6 +2627,16 @@ namespace TES3MP::Native
         return {index, owner, {mCombat->npcPlacements.empty() ? mBinding.mNavigatingActor->actorId()
                     : mCombat->npcPlacements.at(index - 2),
             mBinding.mDurableCasters ? 2u : 0u, mBinding.mDurableCasters ? life->generation : 0u}};
+    }
+
+    bool InventoryService::combatCorpse(uint64_t placement, const ActorCampaignCombat* combat) const
+    {
+        if (!combat) return false;
+        const auto found = std::ranges::find(combat->npcPlacements, placement);
+        const size_t index = found != combat->npcPlacements.end()
+            ? size_t(found - combat->npcPlacements.begin()) + 2
+            : mBinding.mNavigatingActor && placement == mBinding.mNavigatingActor->actorId() ? 2 : SIZE_MAX;
+        return index < combat->actors.size() && combat->actors[index][8][2] <= 0;
     }
 
     size_t InventoryService::combatOwner(size_t index) const
@@ -11880,10 +11890,11 @@ namespace TES3MP::Native
         {
             const auto& shared = binding.mContainers[i];
             const auto* life = stagedCombat ? stagedCombat : mCombat ? &*mCombat : nullptr;
-            const bool selectedCorpse = life && i + 2 == mCombatNpcOwner && life->actors[2][8][2] <= 0;
+            const bool deadActor = combatCorpse(shared.mId.value(), life);
             const auto frame = std::ranges::find(actorFrames, shared.mId.value(), &ActorSceneSnapshot::mActor);
             const auto selectedPosition = frame != actorFrames.end() ? std::optional(*frame)
-                : selectedCorpse ? std::optional(moving ? *moving : binding.mNavigatingActor->snapshot()) : std::nullopt;
+                : deadActor ? std::optional(moving && i + 2 == mCombatNpcOwner ? *moving
+                    : binding.mNavigatingActor->forActor(shared.mId.value()).snapshot()) : std::nullopt;
             const auto sharedCell = selectedPosition && shared.mCell.asExterior()
                 ? CellId::exterior(shared.mCell.asExterior()->worldspace(),
                     int32_t(std::floor(double(selectedPosition->mPosition[0])/8192)),
@@ -11899,10 +11910,10 @@ namespace TES3MP::Native
                 || mRuntime.mStore.find(shared.mBase) == ESM::Creature::sRecordId;
             const bool corpse = i + 2 < mRuntime.ownerCount() && initialCorpse(mRuntime.ownerPtr(i + 2));
             const auto sharedValues = values(i + 2);
-            if (visibleCell != sharedCell && !(ownerActor && !corpse && !selectedCorpse && visibleCell == shared.mCell)) continue;
-            if (selectedCorpse)
+            if (visibleCell != sharedCell && !(ownerActor && !corpse && !deadActor && visibleCell == shared.mCell)) continue;
+            if (deadActor)
                 actors.push_back({shared.mId, publicSlots(sharedValues)});
-            if (ownerActor && !corpse && !selectedCorpse)
+            if (ownerActor && !corpse && !deadActor)
             {
                 // Appearance only: no private stacks, counts or transfer revision.
                 // Empty slots also suppress any locally selected starting gear.

@@ -2121,12 +2121,17 @@ namespace TES3MP::Native
             travel.hasDestination = boolean(); travel.destination = vector();
             travel.door = word(); travel.avoidance.mDuration = real(); travel.avoidance.mLastPos = vector();
             const auto direction = word(), random = word();
-            if ((!mImpl->mDynamicDestination && travel.hasDestination != mImpl->mTravel.hasDestination)
-                || (travel.destination != mImpl->mTravel.destination
+            if (!mImpl->mDynamicDestination && travel.hasDestination != mImpl->mTravel.hasDestination)
+                throw std::invalid_argument("Actor destination presence outside binding");
+            if (travel.destination != mImpl->mTravel.destination
                     && (!mImpl->mDynamicDestination && !mImpl->mWaterNavigation
-                        || !contains({travel.destination.x(), travel.destination.y(), travel.destination.z()})))
-                || (travel.door && std::ranges::find(doors, travel.door, &ActorSceneDoor::mId) == doors.end())
-                || travel.avoidance.mDuration < 0 || travel.avoidance.mDuration > 1 || direction > 3
+                        || (travel.hasDestination
+                            && !contains({travel.destination.x(), travel.destination.y(), travel.destination.z()}))))
+                throw std::invalid_argument("Actor destination outside binding: actor=" + std::to_string(actor)
+                    + " has_destination=" + std::to_string(travel.hasDestination));
+            if (travel.door && std::ranges::find(doors, travel.door, &ActorSceneDoor::mId) == doors.end())
+                throw std::invalid_argument("Actor avoidance door outside binding");
+            if (travel.avoidance.mDuration < 0 || travel.avoidance.mDuration > 1 || direction > 3
                 || random < Misc::Rng::Generator::min() || random > Misc::Rng::Generator::max())
                 throw std::invalid_argument("Actor avoidance image outside bounds");
             travel.avoidance.mDirection = int(direction);

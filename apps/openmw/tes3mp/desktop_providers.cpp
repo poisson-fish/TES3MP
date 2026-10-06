@@ -1805,16 +1805,23 @@ namespace TES3MP::OpenMWAdapter
                 return entry.second.actor && entry.second.actor->ptr() == target;
             });
             if (remote == nativeRemotes.end()) return false;
-            // The replica is presentation owned. Never open a local corpse
-            // inventory or execute gameplay scripts through its ManualRef.
-            if (target.getType() != ESM::NPC::sRecordId || !combatSnapshot)
+            // The replica is presentation owned. Corpse UI may use only its
+            // installed authoritative container; living actors may only talk.
+            if (!combatSnapshot)
                 return true;
             const auto id = ActorId::fromValue(remote->first);
             if (!id) return true;
             const auto state = std::ranges::lower_bound(combatSnapshot->actors(), *id,
                 {}, &ActorCombatSnapshot::actorId);
-            if (state == combatSnapshot->actors().end() || state->actorId != *id || state->dead)
+            if (state == combatSnapshot->actors().end() || state->actorId != *id)
                 return true;
+            if (state->dead)
+            {
+                if (containerId(target))
+                    MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_Container, target);
+                return true;
+            }
+            if (target.getType() != ESM::NPC::sRecordId) return true;
             auto action = target.getClass().activate(target, player);
             if (dynamic_cast<MWWorld::ActionTalk*>(action.get())) action->execute(player);
             return true;
@@ -3938,8 +3945,18 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             const auto result = mImpl->applyNativeDoors(groundItems);
-            if (result != ProviderResult::Accepted) mImpl->clear();
+            if (result != ProviderResult::Accepted)
+            {
+                Log(Debug::Error) << "TES3MP native door presentation rejected: " << int(result);
+                mImpl->clear();
+            }
             return result;
+        }
+        catch (const std::exception& error)
+        {
+            Log(Debug::Error) << "TES3MP native door presentation exception: " << error.what();
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
         }
         catch (...)
         {
@@ -3954,8 +3971,18 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             const auto result = mImpl->applyPublicEquipment(equipment, receivedAt);
-            if (result != ProviderResult::Accepted) mImpl->clear();
+            if (result != ProviderResult::Accepted)
+            {
+                Log(Debug::Error) << "TES3MP public equipment presentation rejected: " << int(result);
+                mImpl->clear();
+            }
             return result;
+        }
+        catch (const std::exception& error)
+        {
+            Log(Debug::Error) << "TES3MP public equipment presentation exception: " << error.what();
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
         }
         catch (...)
         {

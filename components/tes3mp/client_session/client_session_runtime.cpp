@@ -4,6 +4,8 @@
 #include <array>
 #include <ranges>
 #include <iterator>
+#include <cstdio>
+#include <source_location>
 
 namespace TES3MP
 {
@@ -70,7 +72,10 @@ namespace TES3MP
 
     ClientRuntimeAdvanceResult ClientSessionRuntime::advance()
     {
-        const auto reject = [this] {
+        const auto reject = [this](unsigned detail = 0,
+            std::source_location location = std::source_location::current()) {
+            std::fprintf(stderr, "TES3MP inbound state rejected: runtime_line=%u detail=%u\n",
+                location.line(), detail);
             fail(ClientRuntimeResult::ProtocolRejected);
             return ClientRuntimeAdvanceResult{ ClientRuntimeResult::ProtocolRejected,
                 ClientSessionAction::SessionClosed };
@@ -355,20 +360,33 @@ namespace TES3MP
                     && mSession->bindEstablishedSession(playerInventory->header.targetSessionId)
                         != ClientSessionBindingResult::Bound)
                     return reject();
+                const auto header = playerInventory->header;
+                const auto inventoryRevision = playerInventory->revision;
                 const auto applied = mSession->receiveReliablePlayerInventoryBaseline(std::move(*playerInventory));
                 if (applied != InventoryReplicationReceiveResult::Applied
                     && applied != InventoryReplicationReceiveResult::ChunkAccepted
-                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate)
-                    return reject();
+                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate
+                    && applied != InventoryReplicationReceiveResult::StaleTick)
+                {
+                    const auto& confirmed = mSession->stateMachine().confirmedPlayerInventoryBaseline();
+                    std::fprintf(stderr, "TES3MP private inventory rejected: incoming=%llu/%llu/%llu confirmed=%llu/%llu/%llu chunks=%u/%u\n",
+                        header.canonicalRevision.value(), header.serverTick.value(), inventoryRevision.value(),
+                        confirmed ? confirmed->header.canonicalRevision.value() : 0ull,
+                        confirmed ? confirmed->header.serverTick.value() : 0ull,
+                        confirmed ? confirmed->revision.value() : 0ull, header.chunkIndex, header.chunkCount);
+                    return reject(unsigned(applied));
+                }
                 result.playerInventoryApplied
                     = result.playerInventoryApplied || applied == InventoryReplicationReceiveResult::Applied;
-                if (mResyncPending && applied != InventoryReplicationReceiveResult::ChunkAccepted)
+                if (mResyncPending && applied != InventoryReplicationReceiveResult::ChunkAccepted
+                    && applied != InventoryReplicationReceiveResult::StaleTick)
                 {
                     mResyncPlayerInventoryObserved = true;
                     mResyncInventoryObserved = mResyncGroundItemsObserved && mResyncEquipmentObserved;
                 }
                 result.inventoryReplicationCompleted = result.inventoryReplicationCompleted
-                    || ((!wasComplete || (mResyncPending && mResyncInventoryObserved))
+                    || (applied != InventoryReplicationReceiveResult::StaleTick
+                        && (!wasComplete || (mResyncPending && mResyncInventoryObserved))
                         && mSession->stateMachine().inventoryReplicationComplete());
             }
             else if (auto* containerInventory = std::get_if<ReliableContainerInventoryBaseline>(&message))
@@ -382,12 +400,14 @@ namespace TES3MP
                     = mSession->receiveReliableContainerInventoryBaseline(std::move(*containerInventory));
                 if (applied != InventoryReplicationReceiveResult::Applied
                     && applied != InventoryReplicationReceiveResult::ChunkAccepted
-                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate)
-                    return reject();
+                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate
+                    && applied != InventoryReplicationReceiveResult::StaleTick)
+                    return reject(unsigned(applied));
                 result.containerInventoryApplied
                     = result.containerInventoryApplied || applied == InventoryReplicationReceiveResult::Applied;
                 result.inventoryReplicationCompleted = result.inventoryReplicationCompleted
-                    || (!wasComplete && mSession->stateMachine().inventoryReplicationComplete());
+                    || (applied != InventoryReplicationReceiveResult::StaleTick
+                        && !wasComplete && mSession->stateMachine().inventoryReplicationComplete());
             }
             else if (auto* groundItems = std::get_if<ReliableGroundItemBaseline>(&message))
             {
@@ -399,17 +419,20 @@ namespace TES3MP
                 const auto applied = mSession->receiveReliableGroundItemBaseline(std::move(*groundItems));
                 if (applied != InventoryReplicationReceiveResult::Applied
                     && applied != InventoryReplicationReceiveResult::ChunkAccepted
-                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate)
-                    return reject();
+                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate
+                    && applied != InventoryReplicationReceiveResult::StaleTick)
+                    return reject(unsigned(applied));
                 result.groundItemsApplied
                     = result.groundItemsApplied || applied == InventoryReplicationReceiveResult::Applied;
-                if (mResyncPending && applied != InventoryReplicationReceiveResult::ChunkAccepted)
+                if (mResyncPending && applied != InventoryReplicationReceiveResult::ChunkAccepted
+                    && applied != InventoryReplicationReceiveResult::StaleTick)
                 {
                     mResyncGroundItemsObserved = true;
                     mResyncInventoryObserved = mResyncPlayerInventoryObserved && mResyncEquipmentObserved;
                 }
                 result.inventoryReplicationCompleted = result.inventoryReplicationCompleted
-                    || ((!wasComplete || (mResyncPending && mResyncInventoryObserved))
+                    || (applied != InventoryReplicationReceiveResult::StaleTick
+                        && (!wasComplete || (mResyncPending && mResyncInventoryObserved))
                         && mSession->stateMachine().inventoryReplicationComplete());
             }
             else if (auto* equipment = std::get_if<LatestWinsEquipmentSnapshot>(&message))
@@ -432,7 +455,8 @@ namespace TES3MP
                     mResyncInventoryObserved = mResyncPlayerInventoryObserved && mResyncGroundItemsObserved;
                 }
                 result.inventoryReplicationCompleted = result.inventoryReplicationCompleted
-                    || ((!wasComplete || (mResyncPending && mResyncInventoryObserved))
+                    || (applied != InventoryReplicationReceiveResult::StaleTick
+                        && (!wasComplete || (mResyncPending && mResyncInventoryObserved))
                         && mSession->stateMachine().inventoryReplicationComplete());
             }
             else if (auto* weather = std::get_if<ReliableWeatherState>(&message))

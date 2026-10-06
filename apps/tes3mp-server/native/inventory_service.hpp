@@ -189,6 +189,7 @@ namespace TES3MP::Native
         std::function<void(const std::vector<bool>&, const DynamicActorSet&,
             const ActorSceneWorld&, std::span<const ActorSceneDoor>)> mGeometryActivity;
         bool mCharacterCreation = false;
+        std::vector<StartingItem> mStartingInventory; // Explicit campaign policy, granted once at completion.
         std::array<std::optional<CharacterProfile>, 2> mCharacters;
         std::array<std::string, 2> mCharacterResources;
         std::vector<const WorldItems*> worldDomains() const
@@ -248,6 +249,7 @@ namespace TES3MP::Native
         };
         MagicCasterContext magicCaster(size_t combatIndex) const;
         size_t combatOwner(size_t combatIndex) const;
+        bool combatCorpse(uint64_t placement, const ActorCampaignCombat* combat) const;
         struct WeaponWear
         {
             size_t owner;

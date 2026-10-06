@@ -154,6 +154,7 @@ namespace TES3MP::OpenMWAdapter
         bool mNativeInventoryAfterResume = false;
         std::optional<MonotonicInstant> mNativeStageAt;
         std::size_t mEvidenceEvents = 0;
+        bool mDoorEvidenceLimitReported = false;
         std::size_t mPresentationFrames = 0;
         uint64_t mLastNativePoseEvidence = 0;
         std::size_t mSnapshots = 0;

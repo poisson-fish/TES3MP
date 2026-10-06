@@ -124,46 +124,51 @@ environmental and pre-quest credit across revival.
 
 ### Scripted quest execution contract
 
-**Proposed engine fix:** run supported scripts with character, story scope,
-source reference/life and causal event identity. Background scripts, timers and
-Lua callbacks retain context. Stock single-player uses a default context. Scope
-engine operations, never quest names.
+**Current direction (unimplemented):** restore shared world scripts first, once per
+instance across player interest; separate ambient presentation. Classify supported
+operations, not names; object/NPC/door scripts may require personal context.
+Prove services before removing guards.
 
-| Operation/state | Default rule |
+**Context:** world or explicit character/story identity, source reference/life and
+causal event; personal access without identity rejects. Background/cross-script/Lua
+calls and timers retain scope through contextual services. Party membership/credit/
+progress-merging rules remain deferred. Locals/cursors bind story/script/reference
+and survive respawn.
+
+| Operation/state | Rule |
 |---|---|
-| Journal, topics, choices, faction, relationship, player inventory | Read/write the initiating character. |
-| Legacy globals, script locals, running/stopped scripts, event cursors | Personal story namespace; cross-script lookups retain it. Engine-owned world globals have explicit contracts. |
-| Combat, native activation, shared AI and actor respawn | One physical writer; authenticated, attributed events. |
-| Script Disable/Delete, relocation, non-player inventory/AI edits, persistent spawns | Scoped reference changes; never destroy another character's access. Materialize a coherent scene variant when physics diverges. |
-| Unsupported or ambiguous mixed effects | Reject atomically with script/API/context diagnostics; never silently run globally. |
+| Journal/topics/choices, relationships, faction progress, player inventory | Initiating character; shared-story credit needs explicit rules. |
+| Globals/locals, script instances/cursors | Story namespace; shared scripts/world globals have explicit ownership. |
+| Combat, native activation, AI/respawn | One authoritative physical writer. |
+| Scripted removal/relocation, inventory/AI edits, spawns | Scoped changes preserve others' access; coherent instances for physical divergence. |
+| Unsupported/ambiguous operations | Atomic rejection with API/context diagnostics. |
 
-Simulate once; scope scripts/spawns per character. Locals/cursors key by character,
-script and stable reference, surviving respawn; reset lifecycle fields separately.
-Scripted combat shares the action path; API coverage establishes mod support.
+**Availability:** server reservations prevent conflicting story control while shared
+simulation continues. Prove release/disconnect/death/restart; script return/package
+completion cannot universally identify quest completion. Release cannot restore
+departed NPCs: safe encounter restoration or instances must preserve progress/rewards.
+Instances cover actors/inventories/collision/combat across affected cells, including
+exterior escorts. Restoration/item-access policies remain open.
 
-**Death/unavailability proposal:** replace shared OnDeath with character/script
-cursors and attributed history, including pre-quest events. Credit survives revival
-for initiators/eligible helpers; define summon/environmental causes. Others receive
-no narrative death. Another's combat/death removes references from personal
-liveness/lookup/enumeration while combat shows corpses. Defer without committing;
-revalidate on lifecycle change. Persist bounded wake dependencies and pause affected
-story deadlines while unavailable/offline. Never disable scripts; scoped removal
-does not wait for respawn.
+**Runtime waits:** discover dependencies during execution; persist bounded wake
+records/revalidate. Personal OnDeath cursors consume attributed history, including
+pre-quest/helper eligibility. Foreign deaths defer until respawn; own consequences
+persist. Pause affected deadlines; never deactivate waiting scripts. Explain waits
+and authoritative respawn clocks/pauses; omit unknown estimates.
+Scoped removal needs an access policy.
 
-**Atomic execution:** stage globals/locals, journal, inventories/references, RNG,
-events/timers and presentation together. Unavailable reads, stale lives, unsupported
-opcodes, exhausted budgets or failed durability discard invocations. Deduplicate
-retries; preserve recurrence/one-time rewards. Isolate Lua tables/closures/callbacks.
+**Atomicity/diagnostics:** stage script state, engine effects, RNG, event consumption,
+timers/presentation; discard on defer/rejection. Deduplicate retries, preserve
+recurrence; isolate Lua tables/closures/callbacks. Bound diagnostics and track
+unresolved waits. Fix generic API semantics from playtests with arbitrary-name
+regressions; no prerequisite graphs/quest handlers.
 
-**Owning seams:** [interpreter context](../../apps/openmw/mwscript/interpretercontext.cpp),
-[dialogue operations](../../apps/openmw/mwscript/dialogueextensions.cpp),
-[actor queries/events](../../apps/openmw/mwscript/statsextensions.cpp),
-[world operations](../../apps/openmw/mwscript/miscextensions.cpp) and
-[script scheduling](../../apps/openmw/mwscript/scriptmanagerimp.cpp).
-Environment/Lua access respects context; preserve engine execution/serialization.
-
-M5 must prove these contracts. Shared loot needs renewable access/transfer rules.
-Preserve v8 until explicit migration.
+**Owning seams:** [context](../../apps/openmw/mwscript/interpretercontext.cpp),
+[dialogue](../../apps/openmw/mwscript/dialogueextensions.cpp),
+[queries](../../apps/openmw/mwscript/statsextensions.cpp),
+[world operations](../../apps/openmw/mwscript/miscextensions.cpp),
+[scheduling](../../apps/openmw/mwscript/scriptmanagerimp.cpp).
+Preserve engine serialization/v8 until explicit migration.
 
 ## Integrity and migration
 
@@ -310,8 +315,8 @@ Direct-IP encryption lacks server identity authentication.
 
 **Native chargen (V78).** Wrap V77 with two bounded profiles/resource signatures
 and winning bodies/custom classes. Durable actor/inventory transactions install stock
-items/stats/spells/resources. Fresh profiles cannot simulate; bootstrap inventories are empty
-with one safe point. Recovery rederives bodies/baselines and validates profiles/resources.
+items/stats/spells/resources. Fresh profiles cannot simulate; optional bounded starters
+grant once at completion. Omission stays empty; one safe point. Recovery validates profiles/resources.
 Replicas preserve NPC copies/winning records/private profiles through gear/cell rebuilds.
 Capabilities 6/36 gate negotiation and established bodies/cell-filtered gear.
 

@@ -773,7 +773,7 @@ namespace
 #define require(value) require(static_cast<bool>(value), __LINE__)
 
 void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false, bool delayedSnapshot = false,
-    bool bodyProgress = false, bool respawnProgress = false)
+    bool bodyProgress = false, bool respawnProgress = false, bool staleInventory = false)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
@@ -788,6 +788,7 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
     const ReconnectConfiguration reconnect{endpoint, timeouts, outbound, testContentManifestId()};
     auto runtime = std::get<std::unique_ptr<ClientSessionRuntime>>(
         ClientSessionRuntime::create(*transport, *clock, timeouts, SessionGeneration::initial(), outbound));
+    auto* runtimeObserver = runtime.get();
     std::vector capabilities{inventoryReplicationCapability()};
     if (bodyProgress) capabilities.push_back(playerAppearanceCapability());
     if (respawnProgress)
@@ -820,18 +821,62 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
             encodeLatestWinsSnapshot(LatestWinsSnapshot(original.header(), std::get<SpatialWorldView>(SpatialWorldView::create(entries)))),
             TransportChannel::LatestWins);
     };
-    const auto sendInventory = [&](uint64_t revision, CellId cell) {
+    const auto sendInventory = [&](uint64_t revision, CellId cell, uint64_t sampledTick = 0) {
+        const auto tick = sampledTick ? sampledTick : revision;
         wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
-            encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(generation, revision, revision)), TransportChannel::ReliableOrdered);
-        auto ground = groundItemBaseline(generation, revision, revision);
+            encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(generation, tick, revision)), TransportChannel::ReliableOrdered);
+        if (staleInventory)
+        {
+            auto container = containerInventoryBaseline(generation, tick, revision);
+            container.cell = cell;
+            wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableContainerInventoryBaseline,
+                encodeReliableContainerInventoryBaseline(container), TransportChannel::ReliableOrdered);
+        }
+        auto ground = groundItemBaseline(generation, tick, revision);
         ground.cell = cell; ground.nativeWorld = true; ground.teleportDoors = {(uint64_t(1) << 63) | revision};
         wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableGroundItemBaseline,
             encodeReliableGroundItemBaseline(ground), TransportChannel::ReliableOrdered);
         wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsEquipmentSnapshot,
-            encodeLatestWinsEquipmentSnapshot(equipmentSnapshot(generation, revision, revision)), TransportChannel::LatestWins);
+            encodeLatestWinsEquipmentSnapshot(equipmentSnapshot(generation, tick, revision)), TransportChannel::LatestWins);
     };
     sendSpatial(1, first); sendInventory(1, first); coordinator->frame(.01f);
     require(presentation.inventories == 1 && presentation.lastGroundCell == first);
+    if (staleInventory)
+    {
+        sendSpatial(2, second); coordinator->frame(.01f);
+        sendInventory(2, second); coordinator->frame(.01f);
+        require(presentation.inventories == 2 && presentation.lastGroundCell == second);
+        sendInventory(1, first); coordinator->frame(.01f);
+        require(presentation.inventories == 2 && presentation.lastGroundCell == second
+            && coordinator->multiplayerState() == MultiplayerState::Ready);
+        sendSpatial(3, first); coordinator->frame(.01f);
+        sendInventory(3, first); coordinator->frame(.01f);
+        require(presentation.inventories == 3 && presentation.lastGroundCell == first
+            && coordinator->multiplayerState() == MultiplayerState::Ready);
+        sendInventory(3, first, 4); coordinator->frame(.01f);
+        require(presentation.lastGroundCell == first && coordinator->multiplayerState() == MultiplayerState::Ready);
+        auto& session = runtimeObserver->session();
+        const auto player = *session.stateMachine().confirmedPlayerInventoryBaseline();
+        const auto container = session.stateMachine().confirmedContainerInventoryBaselines()[0];
+        const auto ground = *session.stateMachine().confirmedGroundItemBaseline();
+        auto sampledPlayer = player; sampledPlayer.header.serverTick = value<ServerTick>(5);
+        auto sampledContainer = container; sampledContainer.header.serverTick = value<ServerTick>(5);
+        auto sampledGround = ground; sampledGround.header.serverTick = value<ServerTick>(5);
+        require(session.receiveReliablePlayerInventoryBaseline(sampledPlayer) == InventoryReplicationReceiveResult::IdenticalDuplicate);
+        require(session.receiveReliableContainerInventoryBaseline(sampledContainer) == InventoryReplicationReceiveResult::IdenticalDuplicate);
+        require(session.receiveReliableGroundItemBaseline(sampledGround) == InventoryReplicationReceiveResult::IdenticalDuplicate);
+        ++sampledPlayer.stacks[0].count;
+        ++sampledContainer.capacityWeight;
+        sampledGround.teleportDoors[0] = (uint64_t(1) << 63) | 99;
+        require(session.receiveReliablePlayerInventoryBaseline(sampledPlayer) == InventoryReplicationReceiveResult::ContradictorySameTick);
+        require(session.receiveReliableContainerInventoryBaseline(sampledContainer) == InventoryReplicationReceiveResult::ContradictorySameTick);
+        require(session.receiveReliableGroundItemBaseline(sampledGround) == InventoryReplicationReceiveResult::ContradictorySameTick);
+        require(*session.stateMachine().confirmedPlayerInventoryBaseline() == player
+            && session.stateMachine().confirmedContainerInventoryBaselines()[0] == container
+            && *session.stateMachine().confirmedGroundItemBaseline() == ground);
+        std::cout << "PASS inventory-stale-baselines: stale/resampled images retain the destination; changed same-revision contents reject atomically\n";
+        return;
+    }
     if (respawnProgress)
     {
         const auto sendCombat = [&](uint64_t tick, bool dead, uint64_t life) {
@@ -1523,6 +1568,7 @@ int main(int argc, char** argv)
         return 0;
     }
     if (argc == 2 && (std::string_view(argv[1]) == "teleport-presentation"
+        || std::string_view(argv[1]) == "inventory-stale-baselines"
         || std::string_view(argv[1]) == "inventory-pickup-barrier"
         || std::string_view(argv[1]) == "native-door-presentation"
         || std::string_view(argv[1]) == "travel-discontinuity-resync"
@@ -1533,7 +1579,8 @@ int main(int argc, char** argv)
             std::string_view(argv[1]) == "native-door-presentation",
             std::string_view(argv[1]) == "travel-discontinuity-resync",
             std::string_view(argv[1]) == "player-appearances",
-            std::string_view(argv[1]) == "player-respawn");
+            std::string_view(argv[1]) == "player-respawn",
+            std::string_view(argv[1]) == "inventory-stale-baselines");
         return 0;
     }
 

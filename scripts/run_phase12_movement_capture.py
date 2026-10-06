@@ -64,6 +64,7 @@ class UdpImpairmentRelay:
 
     MAXIMUM_CLIENTS = 8
     MAXIMUM_PENDING = 4096
+    CLIENT_IDLE_SECONDS = 30
 
     def __init__(self, listen_port: int, server_port: int, profile: str):
         self.listen_port = listen_port
@@ -95,11 +96,25 @@ class UdpImpairmentRelay:
         listener.setblocking(False)
         selector.register(listener, selectors.EVENT_READ, None)
         clients: dict[tuple[str, int], socket.socket] = {}
+        last_client_packet: dict[tuple[str, int], float] = {}
         pending: list[tuple[float, int, socket.socket, bytes, tuple[str, int] | None]] = []
         serial = 0
         try:
             while not self._stop.is_set():
                 now = time.monotonic()
+                expired = {address for address, seen in last_client_packet.items()
+                           if now - seen >= self.CLIENT_IDLE_SECONDS}
+                if expired:
+                    retired = {clients[address] for address in expired}
+                    retained = [entry for entry in pending if entry[2] not in retired and entry[4] not in expired]
+                    self.stats.dropped += len(pending) - len(retained)
+                    pending = retained
+                    heapq.heapify(pending)
+                    for address in expired:
+                        backend = clients.pop(address)
+                        selector.unregister(backend)
+                        backend.close()
+                        del last_client_packet[address]
                 while pending and pending[0][0] <= now:
                     _, _, target, payload, address = heapq.heappop(pending)
                     target.send(payload) if address is None else target.sendto(payload, address)
@@ -123,6 +138,7 @@ class UdpImpairmentRelay:
                             backend.setblocking(False)
                             clients[address] = backend
                             selector.register(backend, selectors.EVENT_READ, address)
+                        last_client_packet[address] = now
                         target, destination, direction = backend, None, "client_to_server"
                     else:
                         target, destination, direction = listener, key.data, "server_to_client"
