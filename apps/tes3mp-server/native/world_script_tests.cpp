@@ -1,4 +1,5 @@
 #include "world_script.hpp"
+#include "personal_script.hpp"
 #include "loadout.hpp"
 
 #include <components/esm3/loadscpt.hpp>
@@ -48,6 +49,81 @@ namespace
         for (const auto& [name, value] : state.runtime.script.mLocals.mVariables)
             if (name == id) return value.getFloat();
         throw std::runtime_error("Missing fixture local");
+    }
+    void personal(CredentialCrypto& crypto)
+    {
+        auto core = std::make_shared<const SharedWorldScript>(pulse(), globals(), "campaign-one", crypto);
+        const std::vector<PersonalScripts::Definition> policy{{11, 31, core}, {22, 31, core}, {11, 32, core}};
+        PersonalScripts runtime(7, policy, crypto);
+        auto state = runtime.initial(); const auto initial = runtime.encode(state);
+        MWWorld::ESMStore content;
+        struct Resolver final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::runtime_error("Core personal invocation unexpectedly resolved a physical reference"); }
+        } resolver;
+        auto invocation = state[0].last; invocation.invocation = 1; invocation.causalEvent = 53;
+        auto first = runtime.prepare(state, invocation, content, resolver);
+        require(first.result.executed && first.result.outcome == SharedWorldScript::Outcome::Committed
+            && first.result.presentation == std::vector<std::string>{"The bell rings."} && runtime.encode(state) == initial,
+            "Personal preparation leaked or lost staged output");
+        state.swap(first.state);
+        require(state[0].runtime.tick == 1 && local(state[0].runtime, "calls") == 1
+            && state[0].runtime.runtime.globals.front().mValue.getInteger() == 1
+            && state[1].runtime.tick == 0 && state[2].runtime.tick == 0, "Characters/stories shared a writer");
+        const auto committed = runtime.encode(state);
+        auto replay = runtime.prepare(state, invocation, content, resolver);
+        require(replay.result.outcome == SharedWorldScript::Outcome::Committed && !replay.result.executed
+            && replay.result.presentation.empty() && replay.image.empty(), "Exact personal replay executed twice");
+        for (int field = 0; field < 8; ++field)
+        {
+            auto invalid = invocation;
+            if (field == 0) ++invalid.campaign;
+            if (field == 1) ++invalid.physicalScope;
+            if (field == 2) invalid.character = 99;
+            if (field == 3) invalid.story = 99;
+            if (field == 4) invalid.sourceReference = invalid.sourceLife = 9;
+            if (field == 5) invalid.invocation = 3;
+            if (field == 6) ++invalid.causalEvent; // Conflicting replay of the same invocation.
+            if (field == 7) { invalid.invocation = 2; } // Already consumed event under a new invocation.
+            auto rejected = runtime.prepare(state, invalid, content, resolver);
+            require(rejected.result.outcome == SharedWorldScript::Outcome::Rejected && !rejected.result.executed
+                && rejected.result.presentation.empty() && runtime.encode(state) == committed, "Invalid personal identity mutated state");
+        }
+        invocation.invocation = 2; invocation.causalEvent = 0;
+        auto next = runtime.prepare(state, invocation, content, resolver);
+        require(next.result.executed && next.state[0].eventCursor == 53, "Event-free call forgot consumed event");
+        state.swap(next.state); invocation.invocation = 3; invocation.causalEvent = 53;
+        require(runtime.prepare(state, invocation, content, resolver).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Old causal event became reusable after event-free call");
+        invocation.causalEvent = 54;
+        state = runtime.prepare(state, invocation, content, resolver).state;
+        auto other = state[1].last; other.invocation = 1; other.causalEvent = 53;
+        state = runtime.prepare(state, other, content, resolver).state;
+        const auto saved = runtime.encode(state);
+        PersonalScripts restarted(7, policy, crypto);
+        require(restarted.encode(restarted.restore(saved)) == saved && state[1].eventCursor == 53
+            && state[2].eventCursor == 0, "Personal cursor/recovery crossed ownership");
+        for (int fault = 0; fault < 5; ++fault)
+        {
+            auto corrupt = saved;
+            if (fault == 0) corrupt.resize(47);
+            if (fault == 1) corrupt.push_back('x');
+            if (fault == 2) corrupt[8] ^= 1;
+            if (fault == 3) std::fill_n(corrupt.begin() + 120, 8, char(-1));
+            if (fault == 4) corrupt[48 + 24] ^= 1;
+            rejects([&] { runtime.restore(corrupt); }, "Malformed personal image accepted");
+        }
+        PersonalScripts foreign(8, policy, crypto);
+        rejects([&] { foreign.restore(saved); }, "Foreign personal campaign restored");
+        auto changed = policy; changed[0].story = 71;
+        PersonalScripts rebound(7, changed, crypto);
+        rejects([&] { rebound.restore(saved); }, "Changed story policy restored");
+        auto duplicate = policy; duplicate.push_back(policy.front());
+        rejects([&] { PersonalScripts invalid(7, duplicate, crypto); }, "Duplicate personal writer admitted");
+        duplicate.assign(PersonalScripts::MaximumInstances + 1, policy.front());
+        rejects([&] { PersonalScripts invalid(7, duplicate, crypto); }, "Personal allocation budget exceeded");
+        std::cout << "personal: isolated stock globals/locals, exact/conflicting replay, event cursor, policy/bounds/recovery\n";
     }
     void shared(CredentialCrypto& crypto)
     {
@@ -238,6 +314,7 @@ int main(int argc, char** argv)
         else if (filter == "rollback") rollback(*crypto);
         else if (filter == "recovery") recovery(*crypto);
         else if (filter == "admission") admission(*crypto);
+        else if (filter == "personal") personal(*crypto);
         else throw std::invalid_argument("Unknown filter");
         std::cout << "PASS shared-world-script " << filter << '\n'; return 0;
     }

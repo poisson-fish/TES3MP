@@ -1515,6 +1515,16 @@ namespace TES3MP::Native
             mSharedScriptState = mBinding.mSharedScript->initial();
             mSharedScriptImage = mBinding.mSharedScript->encode(*mSharedScriptState);
         }
+        if (mBinding.mPersonalScripts)
+        {
+            static_assert(PersonalScripts::MaximumImageBytes == MaximumPersonalScriptImageBytes);
+            if (!mBinding.mSharedScript) throw std::invalid_argument("Personal state requires shared script authority");
+            mPersonalScriptState = mBinding.mPersonalScripts->initial();
+            for (const auto& entry : *mPersonalScriptState)
+                if (std::ranges::none_of(mBinding.mPlayers, [&](PlayerId player) { return player.value() == entry.last.character; }))
+                    throw std::invalid_argument("Personal state has an unbound character");
+            mPersonalScriptImage = mBinding.mPersonalScripts->encode(*mPersonalScriptState);
+        }
         if (mBinding.mPersistentConditions && !mBinding.mPlayerCastLifecycle)
             throw std::invalid_argument("Persistent conditions require the current actor lifecycle");
         if (mBinding.mPlayerCastLifecycle)
@@ -3108,6 +3118,11 @@ namespace TES3MP::Native
         if (mBinding.mNavigatingActor)
         {
             auto decoded = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+            if (bool(mBinding.mPersonalScripts) != !decoded.personalScripts.empty())
+                throw std::invalid_argument("Personal script admission differs from campaign");
+            auto personalState = mBinding.mPersonalScripts
+                ? std::optional{mBinding.mPersonalScripts->restore(decoded.personalScripts)} : std::nullopt;
+            EquipmentBytes personalImage(decoded.personalScripts.begin(), decoded.personalScripts.end());
             if (bool(mBinding.mSharedScript) != !decoded.sharedScript.empty())
                 throw std::invalid_argument("Shared script admission differs from campaign");
             auto scriptState = mBinding.mSharedScript
@@ -4219,6 +4234,7 @@ namespace TES3MP::Native
             mNeighborRespawnInventory.swap(neighborBaselines);
             mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
             mSharedScriptState.swap(scriptState); mSharedScriptImage.swap(scriptImage);
+            mPersonalScriptState.swap(personalState); mPersonalScriptImage.swap(personalImage);
             restoreFrames.accepted = true;
             installActorPosition();
             return;
@@ -4240,7 +4256,8 @@ namespace TES3MP::Native
         std::span<const ActorCampaignProjectile> projectiles,
         std::span<const ActorCampaignTimedEffect> timedEffects,
         const std::optional<ActorCampaignCast>& casting, const DynamicActorSet* dynamicActors,
-        const InventoryServiceBinding* characterBinding, std::span<const char> sharedScript) const
+        const InventoryServiceBinding* characterBinding, std::span<const char> sharedScript,
+        std::span<const char> personalScripts) const
     {
         const auto& resources = characterBinding ? *characterBinding : mBinding;
         const size_t meleeSize = melee ? 8 + (mBinding.mWeaponMelee ? melee->identity() : mBinding.mBoundMelee->mResourceIdentity).size()
@@ -4849,6 +4866,8 @@ namespace TES3MP::Native
         if (mBinding.mPlayerPhysics) result = sealPlayerPhysics(result, mPlayerFrames);
         if (mBinding.mSharedScript)
             result = sealWorldScriptCampaign(result, sharedScript.empty() ? std::span(mSharedScriptImage) : sharedScript);
+        if (mBinding.mPersonalScripts)
+            result = sealPersonalScriptCampaign(result, personalScripts.empty() ? std::span(mPersonalScriptImage) : personalScripts);
         (void)readActorCampaign(result);
         return result;
     }
@@ -5206,6 +5225,9 @@ namespace TES3MP::Native
         std::vector<std::pair<PlayerId, Transform>> relocations;
         EquipmentBytes wornCore, wornInventory, respawnCore;
         std::optional<SharedWorldScript::Prepared> sharedScript;
+        std::optional<PersonalScripts::Prepared> personalScripts;
+        size_t personalInvocations = 0;
+        bool personalInvalid = false;
         uint64_t target;
         bool contact;
         EquipmentBytes before;
@@ -5262,7 +5284,7 @@ namespace TES3MP::Native
         { return relocations; }
         CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
         {
-            if (consumed || service.inventoryImage().empty() || before != service.mActorImage
+            if (consumed || personalInvalid || service.inventoryImage().empty() || before != service.mActorImage
                 || (actor && !membership && !(memberScene ? memberScene : service.mBinding.mNavigatingActor)->canInstall(*actor))
                 || (loot && loot->beforeRevision() != service.mWorld.getPtrRegistryRevision())
                 || (respawn && respawn->revision() != service.mWorld.getPtrRegistryRevision() + 1))
@@ -5295,7 +5317,8 @@ namespace TES3MP::Native
                     sealed = service.sealActor(selected,
                         frameImage, tick, velocity, melee, target, contact, combat, life, neighborLives, projectiles,
                         timedEffects, casting, membership ? &membership->mDynamicActors : nullptr, membership.get(),
-                        sharedScript ? std::span(sharedScript->image) : std::span<const char>{});
+                        sharedScript ? std::span(sharedScript->image) : std::span<const char>{},
+                        personalScripts ? std::span(personalScripts->image) : std::span<const char>{});
                     return persist(std::as_bytes(std::span(sealed)));
                 };
                 const auto result = command ? command->commit(compose) : compose(std::as_bytes(std::span(service.mImage)));
@@ -5363,6 +5386,11 @@ namespace TES3MP::Native
                         swap(*service.mSharedScriptState, sharedScript->state);
                         service.mSharedScriptImage.swap(sharedScript->image);
                     }
+                    if (personalScripts)
+                    {
+                        service.mPersonalScriptState->swap(personalScripts->state);
+                        service.mPersonalScriptImage.swap(personalScripts->image);
+                    }
                     service.mActorImage.swap(sealed);
                     service.installActorPosition();
                     if (service.mBinding.mRetainTraveler)
@@ -5420,11 +5448,14 @@ namespace TES3MP::Native
                 EquipmentBytes sealed;
                 const auto result = native->commit([&](std::span<const std::byte> image) {
                     const auto bytes = std::span(reinterpret_cast<const char*>(image.data()), image.size());
+                    const auto [personal, scripted] = service.mBinding.mPersonalScripts
+                        ? readPersonalScriptCampaign(bytes) : std::pair{std::span<const char>{}, bytes};
                     const auto [script, physics] = service.mBinding.mSharedScript
-                        ? readWorldScriptCampaign(bytes) : std::pair{std::span<const char>{}, bytes};
+                        ? readWorldScriptCampaign(scripted) : std::pair{std::span<const char>{}, scripted};
                     const auto [prior, inner] = readPlayerPhysics(physics);
                     sealed = sealPlayerPhysics(inner, states);
                     if (!script.empty()) sealed = sealWorldScriptCampaign(sealed, script);
+                    if (!personal.empty()) sealed = sealPersonalScriptCampaign(sealed, personal);
                     const auto outcome = persist(std::as_bytes(std::span(sealed)));
                     if (outcome == CanonicalDurabilityResult::Committed)
                         for (size_t i = 0; i < 2; ++i) if (steps[i])
@@ -5449,11 +5480,58 @@ namespace TES3MP::Native
         return physics ? physics->native.get() : candidate;
     }
 
+    SharedWorldScript::Result InventoryService::stagePersonalScript(PreparedNativeInventory& candidate,
+        const MWScript::ExecutionContext& execution)
+    {
+        auto* transaction = dynamic_cast<ActorTransaction*>(&candidate);
+        if (auto* physics = dynamic_cast<PlayerPhysicsTransaction*>(&candidate))
+            transaction = dynamic_cast<ActorTransaction*>(physics->native.get());
+        SharedWorldScript::Result rejected;
+        rejected.invocationTick = execution.invocation;
+        rejected.diagnostic = "Personal invocation lacks a current admitted host transaction";
+        if (!transaction || &transaction->service != this) return rejected;
+        if (transaction->consumed || transaction->personalInvalid || transaction->before != mActorImage
+            || inventoryImage().empty() || !mBinding.mPersonalScripts)
+        { transaction->personalInvalid = true; return rejected; }
+        const auto& binding = transaction->membership ? *transaction->membership : mBinding;
+        const auto player = std::ranges::find_if(binding.mPlayers,
+            [&](PlayerId value) { return value.value() == execution.character; });
+        if (player == binding.mPlayers.end() || !binding.mCharacters[size_t(player - binding.mPlayers.begin())])
+        { transaction->personalInvalid = true; return rejected; }
+        struct RejectUnfinished
+        {
+            bool& invalid;
+            bool finished = false;
+            ~RejectUnfinished() { if (!finished) invalid = true; }
+        } guard{transaction->personalInvalid};
+        // This slice admits only source-free core bytecode. Named/implicit
+        // physical references never borrow a live NPC/player writer.
+        struct Resolver final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::invalid_argument("Personal physical reference services not admitted"); }
+        } resolver;
+        const auto& before = transaction->personalScripts ? transaction->personalScripts->state : *mPersonalScriptState;
+        if (transaction->personalInvocations >= PersonalScripts::MaximumInvocationsPerTransaction
+            && std::ranges::none_of(before, [&](const auto& entry) { return entry.last == execution; })) return rejected;
+        auto prepared = mBinding.mPersonalScripts->prepare(before, execution, mRuntime.mStore, resolver);
+        auto result = prepared.result;
+        if (result.outcome != SharedWorldScript::Outcome::Committed)
+            transaction->personalInvalid = true;
+        else if (result.executed)
+        {
+            ++transaction->personalInvocations;
+            transaction->personalScripts = std::move(prepared);
+        }
+        guard.finished = true;
+        return result;
+    }
+
     std::optional<SharedWorldScript::Result> InventoryService::projectSharedScript(
         const PreparedNativeInventory* candidate) const
     {
         const auto* transaction = dynamic_cast<const ActorTransaction*>(unwrapPlayerPhysics(candidate));
-        if (!transaction || &transaction->service != this || transaction->consumed
+        if (!transaction || &transaction->service != this || transaction->consumed || transaction->personalInvalid
             || transaction->before != mActorImage || !transaction->sharedScript) return {};
         return transaction->sharedScript->result;
     }

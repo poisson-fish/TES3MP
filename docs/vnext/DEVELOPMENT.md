@@ -2,43 +2,41 @@
 
 ## Working loop
 
-1. Read [CURRENT.md](CURRENT.md), this file, [README.md](README.md), active
-   [PLAN.md](PLAN.md), and [DECISIONS.md](DECISIONS.md) for boundary/persistence changes.
-2. Code/tests and `git status` establish behavior. Search history/retired documents
-   only for specific unanswered questions.
-3. Advance bounded slices with one writer, preserved migration, shared handlers/checks
-   and dependencies. No additional plan.
-4. Run the smallest affected check individually; stop, fix and rerun on failure.
-5. Review the diff; update CURRENT's behavior/limitations/evidence and durable
-   decisions. Commit only when authorized; report only run checks.
+1. Read [CURRENT](CURRENT.md), this file, [README](README.md), active [PLAN](PLAN.md),
+   and [DECISIONS](DECISIONS.md) for boundary/persistence changes.
+2. Code/tests/`git status` establish behavior; consult history/retired documents only
+   for specific unanswered questions.
+3. Advance bounded slices: one writer, preserved migration, shared handlers/checks/dependencies.
+   No additional plan.
+4. Run the smallest affected check; stop, fix and rerun failures.
+5. Review diffs; update CURRENT's behavior/limitations/evidence and consequential
+   decisions. Commit only when authorized; report only executed checks.
 
-Use ignored `build/` for measurements/logs. Never track game/mod assets, credentials,
-tokens, user saves or machine-local content paths. Git is the development archive.
+Measurements/logs belong in ignored `build/`. Never track game/mod assets,
+credentials/tokens, saves or machine-local content paths. Git archives development.
 
 ## Dependency and migration rules
 
-Keep `components/tes3mp` independently buildable behind owned interfaces; no OpenMW,
-rendering, OpenXR, OS or public transport-library types. Preserve boundary checks.
+Keep `components/tes3mp` independently buildable behind owned interfaces; forbid
+OpenMW/rendering/OpenXR/OS/public transport-library types. Preserve dependency checks.
 
-App-local `apps/tes3mp-server` may depend on OpenMW. Expose owned
-commands/IDs/results/snapshots/persistence and explicit CMake dependencies.
-Broad probe links cannot prove production headless boundaries.
+`apps/tes3mp-server` may depend on OpenMW through owned commands/IDs/results/snapshots/persistence
+and explicit CMake dependencies. Broad probe links cannot prove production headless boundaries.
 
-Refactor owning engine code to separate context/presentation; share logic with
-single-player. Null UI/listeners must preserve gameplay. Plain items do not prove
-scripts/constants.
+Separate engine context/presentation; share single-player logic. Null UI/listeners
+must preserve gameplay. Plain items cannot prove scripts/constants.
 
-Migration paths cannot share live mutation. After replacement/failure checks,
-remove obsolete implementations, build entries, schemas, configuration, hooks and
-assertions; redirect useful tests. Do not polish retired gameplay before advancing.
+Migration paths cannot share live mutation. After replacement/failure proof,
+remove obsolete implementations/build entries/schemas/configuration/hooks/assertions;
+redirect useful tests. Do not polish retired gameplay.
 
-Update touched proof/JSON tooling inputs. Repair whole-baseline provenance and
-compare baseline patches only when a specific check requires it.
+Update touched proof/JSON inputs. Repair whole-baseline provenance/compare patches
+only when a specific check requires it.
 
 ## Narrow verification
 
 Broad suites/gates/baselines require requested scope. Log to `build/logs`; inspect
-exit codes and short failure tails.
+exit codes/short failure tails.
 Source-contract failures report compact mismatches, never source files.
 
 Run documentation checks separately; stop on first failure:
@@ -51,9 +49,9 @@ python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTest
 ```
 
 Build the owning C++ target in an existing tree; run one executable/filter.
-Add required dependencies only; never aggregate `_tests_run`; update CURRENT evidence.
+Only required dependencies; never aggregate `_tests_run`; update CURRENT evidence.
 
-For shared NPC playtests, bootstrap with the optional final stock navigation settings:
+NPC playtests use optional stock navigation settings:
 
 ```text
 tes3mp_native_bootstrap CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B 1 X:Y:Z NAV_SETTINGS
@@ -71,6 +69,9 @@ Policy changes require fresh campaigns; scripted rewards remain M5.
 Append `shared_script RECORD globals COUNT GLOBAL...` after `player-physics`
 for fresh V80 bootstrap (0–16); admission validates winning content/ownership before
 publication. Omission retains V79; existing saves never upgrade.
+V81 descriptors also require `personal_scripts COUNT story ID script "RECORD" globals COUNT GLOBAL...`
+(1–8 stories, mirrored per character). Native trusted calls stage source-free core
+invocations in prepared host ticks; scheduling/output delivery remain closed. Bootstrap still emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.
 Native desktop captures emit rendered race/head/hair/sex as `player_appearance_sample`.
 Compare distinct profiles through join/reentry/reconnect/restart; creation has no body.

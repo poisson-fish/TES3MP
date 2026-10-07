@@ -1,6 +1,6 @@
 # Current state and next action
 
-**Active: M5 [PLAN.md](PLAN.md), scoped interpreter context proven. M4 closed, 2026-10-06.**
+**Active: M5 [PLAN.md](PLAN.md), durable personal host transactions. M4 closed, 2026-10-06.**
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
@@ -27,9 +27,9 @@ Stock AI excludes powers; WhenUsed needs equipment; passives Self,
 travel players, Soultrap creatures. Two summons are stock placeholders.
 Animated ground rejects. Bind intervention destinations.
 
-**V78:** fresh players cannot simulate; starters are campaign-configured. Durable completion/
-recovery owns stock bodies/stats/spells/resources/safe points; capabilities 6/36.
-Appearances persist. Catalog pairs bound: 8,192/race, 65,536 total.
+**V78:** fresh players cannot simulate; campaign-configured starters. Completion/recovery
+persists stock bodies/stats/spells/resources/safe points/appearances; capabilities 6/36.
+Catalog pairs: 8,192/race, 65,536 total.
 `build/logs/character-{catalog-bounds,appearances-stock,appearances-tr}.log`: ten races/both sexes, stock/TR.
 Starter grant/validation/recovery: `build/logs/character-starters-native.log`.
 Desktop starters: `build/m4-user-acceptance-starters-20261004-210941/starter-installation.json`;
@@ -41,14 +41,14 @@ Synthetic `build/logs/{chargen-installer-15,chargen-installation,chargen-install
 **Synthetic acceptance:**
 `build/character-desktop-fixture-02/{complete-03,restart-02}/result.json`: Breton female/
 Argonian male completion/recovery, empty inventories.
-`build/character-acceptance-02/{drop,pickup-restart,reentry,movement}/result.json`: chest-owned shirt equip,
-longsword drop/replication, three discovered interiors/reentry, durable ground restart,
-pickup/restart, four-heading clips/reconnect; screenshots inspected.
+`build/character-acceptance-02/{drop,pickup-restart,reentry,movement}/result.json`: shirt equip,
+longsword drop/replication, three interiors/reentry, durable ground pickup/restart,
+four-heading clips/reconnect; screenshots inspected.
 `build/character-tr-acceptance/{complete,restart-facing}/result.json`: both Breton sexes/TR heads/hair,
 empty inventory/recovery; appearance-only mods.
 `build/chargen-ui-{pick,generate-03,create}/result.json`: MyGUI pick/questions/custom,
-Back/refresh/birthsign/completion; injected custom names. Refresh retains the modal,
-transitions hide others, resume ignores closed dialogs; physical OS input unverified.
+Back/refresh/birthsign/completion; custom names. Refresh retains the modal;
+transitions/resume respect closed dialogs; physical OS input unverified.
 Resume bounds inactivity, retaining expiry/generation/replay rejection
 (`build/logs/resume-inactivity.log`).
 
@@ -67,16 +67,15 @@ revival/Seyda Neen safe-point respawn, 2026-10-04; unarmed confirmed.
 Single-cell preview disables travel. Excluded scripts/scripted inventory require M5;
 restore only proven content.
 
-**Melee accepted, 2026-10-05:** operator passed Argonian combat after recoil fix.
-Synthetic stock input: recoil stall reproduced; nine swings passed
+**Melee accepted, 2026-10-05:** Argonian recoil fix; reproduced stall, nine stock-input swings
 (`build/logs/melee-recoil-{baseline,fixed}.log`). Fatigue/HUD match (182.25–185).
 Death label added.
 Replica stock bounds/visibility; server rolls. Shieldless creatures need no inventory.
 `build/logs/melee-contact-geometry.log`, `build/melee-contact-validation-01/result.json`:
 crab contact/dagger damage.
 
-**Shared corpse/recovery accepted, 2026-10-05:** operator passed peer visibility,
-opening/transfer and reconnect/restart without duplication.
+**Shared corpse/recovery accepted, 2026-10-05:** peer visibility/opening/transfer/reconnect/restart
+without duplication.
 `build/m4-user-acceptance-peer-loot-20261005-221147/operator-acceptance.json`;
 exact player stacks/bodies: `build/logs/peer-loot-{reconnect-retry,restart}.log`.
 Neighbor-creature/numeric activation/transfer passed
@@ -106,13 +105,11 @@ Fresh campaigns require `player-physics`; V78 retains migration; movement skills
 
 **V79 movement accepted, 2026-10-06:**
 `build/m4-user-acceptance-player-v79-20261006-live-01/operator-acceptance.json`.
-128-input saturation now waits/retries; backpressure/adapter checks passed.
-Both clients quit normally (0); combat/death/loot/respawn acceptance retained.
-Native abort resolved; reopen on recurrence.
+128-input saturation waits/retries; backpressure/adapter passed.
+Clients quit (0); combat/death/loot/respawn retained. Abort resolved; reopen on recurrence.
 
-**M4 closed, 2026-10-06:** owner accepted overlapping two-client/NPC
-melee/ranged/magic, vanilla/TR gear, impairment, interruption/death/loot/respawn
-and recovery/convergence.
+**M4 closed, 2026-10-06:** accepted two-client/NPC melee/ranged/magic, vanilla/TR gear,
+impairment, interruption/death/loot/respawn and recovery/convergence.
 
 **M5 shared execution:** [runtime](../../apps/tes3mp-server/native/world_script.hpp)
 stock compiler/core opcodes, owned globals, staged locals/messages,
@@ -141,8 +138,13 @@ campaign/story/physical/character/source/life/invocation/event identities. Unsta
 reject; waits differ from absence. Personal text uses staged stats.
 Synthetic `build/logs/m5-context-{lookup,rollback,stock}.log`: isolation, stale/bounds
 rejection, stock callers, rollback/retry and named-locals recovery.
-Native personal admission/dialogue/NPC restoration remain closed.
+**V81 personal state:** 1–8 stories/two characters own stock globals/named locals,
+invocations and ordered causal cursors. Source-free core calls use scoped context;
+≤16 trusted invocations join actor/inventory/player-physics commits. Replays are silent;
+invalid calls reject the whole candidate. Content/ownership-bound recovery rejects
+upgrades/downgrades. Synthetic `build/logs/m5-personal-{state,host,shared}.log`:
+isolation, rollback/retry/stale/bounds, exact/uncertain recovery; V80 preserved.
 
-**Next:** bind durable character/story globals/locals/invocations into host transactions,
-then cross-script calls/dialogue under the [M5 contract](DECISIONS.md#m5-implementation-contract).
-Restore NPC operations after proof.
+**Next:** personal scheduling, then cross-script calls/dialogue under the
+[M5 contract](DECISIONS.md#m5-implementation-contract). Personal output delivery,
+physical-reference operations and NPC restoration remain closed.

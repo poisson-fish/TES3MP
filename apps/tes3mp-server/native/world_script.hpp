@@ -47,9 +47,13 @@ namespace TES3MP::Native
         std::vector<char> encode(const State& state) const;
         State restore(std::span<const char> image) const;
         Prepared prepare(const State& committed, uint64_t tick) const;
+        Prepared prepare(const State& committed, const MWScript::ExecutionContext& execution,
+            const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver) const;
         Result transact(State& committed, uint64_t tick, const DurableSink& persist) const;
 
     private:
+        Prepared prepareImpl(const State&, uint64_t, const MWScript::ExecutionContext*,
+            const MWWorld::ESMStore*, const MWScript::ReferenceResolver*) const;
         MWScript::WorldScript mRuntime;
         CredentialDigest mIdentity;
     };

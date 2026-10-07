@@ -6933,7 +6933,7 @@ int main(int argc, char** argv)
                 || std::string_view(argv[1]) == "bound-equipment-lifecycle"
                 || std::string_view(argv[1]).starts_with("summons-integrated")
                 || std::string_view(argv[1]) == "player-respawn"
-                || std::string_view(argv[1]) == "player-lives" || (std::string_view(argv[1]) == "actor-bodies" || std::string_view(argv[1]) == "spell-completeness" || std::string_view(argv[1]) == "target-recipients" || std::string_view(argv[1]) == "cell-actors" || std::string_view(argv[1]) == "chargen-installer" || std::string_view(argv[1]) == "player-physics" || std::string_view(argv[1]) == "shared-script") || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives" || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))
+                || std::string_view(argv[1]) == "player-lives" || (std::string_view(argv[1]) == "actor-bodies" || std::string_view(argv[1]) == "spell-completeness" || std::string_view(argv[1]) == "target-recipients" || std::string_view(argv[1]) == "cell-actors" || std::string_view(argv[1]) == "chargen-installer" || std::string_view(argv[1]) == "player-physics" || std::string_view(argv[1]) == "shared-script" || std::string_view(argv[1]) == "personal-state") || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives" || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))
         {
             const bool combat = std::string_view(argv[1]) != "world-collision";
             TES3MP::Native::Testing::checkNpcDoors(std::filesystem::absolute(argv[2]),

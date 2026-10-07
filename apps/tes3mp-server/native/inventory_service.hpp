@@ -10,6 +10,7 @@
 #include "actor_campaign.hpp"
 #include "dynamic_actor_set.hpp"
 #include "world_script.hpp"
+#include "personal_script.hpp"
 #include "../inventory_command_binding.hpp"
 #include "../inventory_interest_projection.hpp"
 #include "../native_inventory_service.hpp"
@@ -193,6 +194,7 @@ namespace TES3MP::Native
         bool mCharacterCreation = false;
         bool mPlayerPhysics = false;
         std::shared_ptr<const SharedWorldScript> mSharedScript;
+        std::shared_ptr<const PersonalScripts> mPersonalScripts;
         std::vector<StartingItem> mStartingInventory; // Explicit campaign policy, granted once at completion.
         std::array<std::optional<CharacterProfile>, 2> mCharacters;
         std::array<std::string, 2> mCharacterResources;
@@ -231,6 +233,8 @@ namespace TES3MP::Native
         EquipmentBytes mActorImage;
         std::optional<SharedWorldScript::State> mSharedScriptState;
         EquipmentBytes mSharedScriptImage;
+        std::optional<PersonalScripts::State> mPersonalScriptState;
+        EquipmentBytes mPersonalScriptImage;
         std::array<PlayerPhysicsState, 2> mPlayerFrames;
         std::array<std::pair<uint64_t, uint64_t>, 2> mPlayerControlBindings{};
         void bindPhysicsPlayers(InteriorActorScene&, const std::array<PlayerPhysicsState, 2>&,
@@ -312,7 +316,7 @@ namespace TES3MP::Native
             const std::optional<ActorCampaignCast>& casting = {},
             const DynamicActorSet* dynamicActors = nullptr,
             const InventoryServiceBinding* characterBinding = nullptr,
-            std::span<const char> sharedScript = {}) const;
+            std::span<const char> sharedScript = {}, std::span<const char> personalScripts = {}) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
         bool sharesGameplayArea(CellId first, CellId second) const noexcept;
@@ -437,6 +441,9 @@ namespace TES3MP::Native
         std::optional<ReliableAmbientBatch> projectAmbient(const CanonicalServerState&,
             SessionId, ServerTick, CanonicalRevision, const PreparedNativeInventory*) const override;
         const InventoryServiceBinding& characterBinding() const { return mBinding; }
+        // Trusted native calls only. Stage into a prepared host tick; this never
+        // commits separately, schedules scripts, or publishes personal output.
+        SharedWorldScript::Result stagePersonalScript(PreparedNativeInventory&, const MWScript::ExecutionContext&);
         InventoryService(const InventoryService&) = delete;
         InventoryService& operator=(const InventoryService&) = delete;
         PreparedCommand prepare(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command);

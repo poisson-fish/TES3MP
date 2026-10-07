@@ -387,12 +387,26 @@ namespace TES3MP::Native
         bool playerPhysics = false;
         std::array<PlayerPhysicsState, 2> playerFrames;
         std::span<const char> sharedScript;
+        std::span<const char> personalScripts;
     };
     inline ActorCampaign readActorCampaign(std::span<const char> bytes, bool dynamicDomain = false,
         const std::array<ActorCampaignCombat::PlayerLife, 2>* playerLives = nullptr, bool genericTargets = false)
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == PersonalScriptCampaignMagic)
+        {
+            if (genericTargets || dynamicDomain || playerLives)
+                throw std::invalid_argument("Nested personal script envelope");
+            const auto [scripts, inner] = readPersonalScriptCampaign(bytes);
+            size_t at = 0;
+            if (getAreaWord(inner, at) != WorldScriptCampaignMagic)
+                throw std::invalid_argument("Personal scripts require shared script campaign");
+            auto result = readActorCampaign(inner);
+            if (!result.personalScripts.empty()) throw std::invalid_argument("Duplicate personal script envelope");
+            result.personalScripts = scripts;
+            return result;
+        }
         if (magic == WorldScriptCampaignMagic)
         {
             if (genericTargets || dynamicDomain || playerLives)

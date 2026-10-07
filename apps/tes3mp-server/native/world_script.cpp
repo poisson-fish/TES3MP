@@ -1,4 +1,5 @@
 #include "world_script.hpp"
+#include <apps/openmw/mwscript/executioncontext.hpp>
 
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/esmwriter.hpp>
@@ -170,6 +171,16 @@ namespace TES3MP::Native
     }
 
     SharedWorldScript::Prepared SharedWorldScript::prepare(const State& committed, uint64_t tick) const
+    { return prepareImpl(committed, tick, nullptr, nullptr, nullptr); }
+
+    SharedWorldScript::Prepared SharedWorldScript::prepare(const State& committed,
+        const MWScript::ExecutionContext& execution, const MWWorld::ESMStore& content,
+        const MWScript::ReferenceResolver& resolver) const
+    { return prepareImpl(committed, execution.invocation, &execution, &content, &resolver); }
+
+    SharedWorldScript::Prepared SharedWorldScript::prepareImpl(const State& committed, uint64_t tick,
+        const MWScript::ExecutionContext* execution, const MWWorld::ESMStore* content,
+        const MWScript::ReferenceResolver* resolver) const
     {
         Prepared prepared;
         auto& result = prepared.result;
@@ -177,17 +188,24 @@ namespace TES3MP::Native
         result.invocationTick = tick;
         try
         {
+            if (execution) execution->validate();
             mRuntime.validate(committed.runtime);
             if (tick && tick == committed.tick)
             { result.outcome = Outcome::Committed; return prepared; }
             require(tick && committed.tick != std::numeric_limits<uint64_t>::max() && tick == committed.tick + 1);
-            auto invocation = mRuntime.execute(committed.runtime, &result.trace);
+            auto invocation = execution ? mRuntime.execute(committed.runtime, *execution, *content, *resolver, &result.trace)
+                : mRuntime.execute(committed.runtime, &result.trace);
             prepared.state = {tick, std::move(invocation.state)};
             prepared.image = encode(prepared.state);
             result.presentation = std::move(invocation.presentation);
             result.executed = true;
             // Prepared output belongs to the containing transaction until durable.
             result.outcome = Outcome::Committed;
+        }
+        catch (const MWScript::ScriptContextUnavailable& error)
+        {
+            result.outcome = Outcome::Deferred;
+            result.diagnostic = error.what();
         }
         catch (const std::exception& error)
         {

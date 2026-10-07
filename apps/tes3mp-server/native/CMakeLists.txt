@@ -44,7 +44,7 @@ tes3mp_verify_target_includes(tes3mp_native_actor_runtime
     FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
 
 # Concrete application adapter; engine/network types meet only in this leaf.
-add_library(tes3mp_native_world_script STATIC world_script.cpp world_script.hpp)
+add_library(tes3mp_native_world_script STATIC world_script.cpp world_script.hpp personal_script.cpp personal_script.hpp)
 target_compile_features(tes3mp_native_world_script PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_world_script PRIVATE openmw-lib tes3mp_server_core)
 tes3mp_verify_target_dependencies(tes3mp_native_world_script ALLOWED openmw-lib tes3mp_server_core)

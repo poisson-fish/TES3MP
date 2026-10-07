@@ -73,6 +73,9 @@ namespace MWScript
         public:
             Context(Locals& locals, std::vector<ESM::Global>& globals, std::vector<std::string>& presentation)
                 : InterpreterContext(&locals, {}), mGlobals(globals), mPresentation(presentation) {}
+            Context(Locals& locals, std::vector<ESM::Global>& globals, std::vector<std::string>& presentation,
+                const ExecutionContext& execution, const MWWorld::ESMStore& content, const ReferenceResolver& resolver)
+                : InterpreterContext(&locals, execution, content, resolver), mGlobals(globals), mPresentation(presentation) {}
 
             int getGlobalShort(std::string_view id) const override { return global(id).getInteger(); }
             int getGlobalLong(std::string_view id) const override { return global(id).getInteger(); }
@@ -231,16 +234,26 @@ namespace MWScript
     }
 
     WorldScript::Invocation WorldScript::execute(const State& before, Interpreter::ExecutionTrace* trace) const
+    { return executeImpl(before, trace, nullptr, nullptr, nullptr); }
+
+    WorldScript::Invocation WorldScript::execute(const State& before, const ExecutionContext& execution,
+        const MWWorld::ESMStore& content, const ReferenceResolver& resolver, Interpreter::ExecutionTrace* trace) const
+    { return executeImpl(before, trace, &execution, &content, &resolver); }
+
+    WorldScript::Invocation WorldScript::executeImpl(const State& before, Interpreter::ExecutionTrace* trace,
+        const ExecutionContext* execution, const MWWorld::ESMStore* content, const ReferenceResolver* resolver) const
     {
         validate(before);
         Invocation result{before, {}};
         auto locals = Locals::restore(before.script.mLocals, mId, mDeclarations);
-        Context context(locals, result.state.globals, result.presentation);
+        auto context = execution
+            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver)
+            : std::make_unique<Context>(locals, result.state.globals, result.presentation);
         Interpreter::Interpreter interpreter;
         Interpreter::installOpcodes(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
-        interpreter.run(mProgram, context, MaximumExecutedInstructions, trace);
+        interpreter.run(mProgram, *context, MaximumExecutedInstructions, trace);
         result.state.script.mLocals.mVariables.clear();
         require(locals.write(result.state.script.mLocals, mDeclarations), "World script locals unavailable");
         validate(result.state);

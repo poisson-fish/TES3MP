@@ -18,14 +18,14 @@
         "tes3mp_native_script_context_tests rollback",
         "tes3mp_native_script_context_tests stock"
       ],
-      "disposition": "scoped engine context seam; native personal state/durability, dialogue and NPC restoration remain closed",
+      "disposition": "Scoped engine context seam; trusted source-free personal state/durability uses the host transaction. Personal scheduling, dialogue and NPC restoration remain closed.",
       "removal_condition": "OpenMW supplies equivalent explicit transactional script context and scoped reference resolution"
     },
     {
       "id": "M5-001",
       "slice": "context-free shared world script transaction seam",
       "owner": "OpenMW MWScript compiler/interpreter and app-local script transaction",
-      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. V80 explicitly opts fresh campaigns into one winning shared script and 0-16 globals. Preparation composes with actor/inventory/player physics durability; invocation ordinals survive skipped world ticks and observers never execute. Exact and uncertain recovery bind script state with gameplay; V79 images retain their layout. Calendar ownership rejects. Capability 39 carries bounded committed literal messages through atomic reliable admission and the stock client UI. Session/invocation checks suppress duplicate output; baselines and recovery never replay it. Bootstrap shares host admission, emits fresh V80 and retains V79 on omission. Synthetic impaired two-desktop reentry/restart and native-window message captures pass.",
+      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. V80 explicitly opts fresh campaigns into one winning shared script and 0-16 globals. Preparation composes with actor/inventory/player physics durability; invocation ordinals survive skipped world ticks and observers never execute. Exact and uncertain recovery bind script state with gameplay; V79 images retain their layout. Calendar ownership rejects. Capability 39 carries bounded committed literal messages through atomic reliable admission and the stock client UI. Session/invocation checks suppress duplicate output; baselines and recovery never replay it. Bootstrap shares host admission, emits fresh V80 and retains V79 on omission. Synthetic impaired two-desktop reentry/restart and native-window message captures pass. V81 explicitly admits 1-8 source-free personal stories for each bound character. The same compiler/core opcodes execute through scoped InterpreterContext; stock GSCR/GLOB state, ordered causal-event cursors and complete ownership/content policy join existing actor/inventory/player-physics transactions. Trusted calls stage bounded invocations; any rejected call invalidates the containing candidate. Atomic rejection/retry, isolated characters/stories, exact and uncertain recovery and V80 upgrade/downgrade rejection are exercised. Personal scheduling, cross-script calls, dialogue, physical-reference operations and personal output delivery remain closed.",
       "paths": [
         "apps/openmw/mwscript/worldscript.cpp",
         "apps/openmw/mwscript/worldscript.hpp"
@@ -39,9 +39,11 @@
         "tes3mp_native_loadout_tests shared-script NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
         "openmw_tes3mp_adapter_tests ambient",
         "tes3mp_combat_interest_projection_tests ambient",
-        "scripts/capture_native_ambient_desktop.py --runtime RUNTIME --output NEW_OUTPUT --binary DESKTOP_BINARY --server-binary SERVER_BINARY --start CELL [--profiles PROFILES] [--recover-from RESULT]"
+        "scripts/capture_native_ambient_desktop.py --runtime RUNTIME --output NEW_OUTPUT --binary DESKTOP_BINARY --server-binary SERVER_BINARY --start CELL [--profiles PROFILES] [--recover-from RESULT]",
+        "tes3mp_native_world_script_tests personal",
+        "tes3mp_native_loadout_tests personal-state NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
       ],
-      "disposition": "bounded shared execution/delivery and fresh bootstrap admission proven with synthetic two-desktop reentry/restart; personal/reference/dialogue context and NPC restoration remain closed",
+      "disposition": "Shared scheduling/delivery and synthetic desktop reentry/restart proven; trusted source-free personal state composes with host durability. Personal scheduling, dialogue, physical effects and NPC restoration remain closed.",
       "removal_condition": "OpenMW supplies equivalent transactional context-free script execution with explicit ownership and bounded presentation"
     },
     {

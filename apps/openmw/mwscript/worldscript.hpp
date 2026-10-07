@@ -8,9 +8,12 @@
 
 namespace ESM { class Script; }
 namespace Interpreter { struct ExecutionTrace; }
+namespace MWWorld { class ESMStore; }
 
 namespace MWScript
 {
+    struct ExecutionContext;
+    class ReferenceResolver;
     // Context-free subset of the stock compiler/interpreter. Callers supply
     // explicitly owned globals and stage the returned state in their transaction.
     // No player, reference lookup, Environment, UI or script-manager fallback.
@@ -42,8 +45,13 @@ namespace MWScript
         State initial() const;
         void validate(const State& state) const;
         Invocation execute(const State& before, Interpreter::ExecutionTrace* trace = nullptr) const;
+        Invocation execute(const State& before, const ExecutionContext& execution,
+            const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
+            Interpreter::ExecutionTrace* trace = nullptr) const;
 
     private:
+        Invocation executeImpl(const State&, Interpreter::ExecutionTrace*, const ExecutionContext*,
+            const MWWorld::ESMStore*, const ReferenceResolver*) const;
         ESM::RefId mId;
         Compiler::Locals mDeclarations;
         Interpreter::Program mProgram;
