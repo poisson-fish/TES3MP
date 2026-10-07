@@ -10,6 +10,7 @@
 
 #include "globalscripts.hpp"
 #include "executioncontext.hpp"
+#include "scriptstate.hpp"
 
 #include "../mwworld/ptr.hpp"
 
@@ -36,9 +37,17 @@ namespace MWScript
         bool mExplicitPlayer = false;
         std::optional<ExecutionContext> mExecution;
         const ReferenceResolver* mResolver = nullptr;
+        ScriptState* mScriptState = nullptr;
         std::shared_ptr<GlobalScriptDesc> mGlobalScriptDesc;
 
         void requireUnscopedService() const;
+        ScriptState::Binding getScopedScript(const ESM::RefId& id) const;
+        struct ScopedMember
+        {
+            Locals& locals;
+            size_t index;
+        };
+        ScopedMember getScopedMember(const ESM::RefId& id, std::string_view name, char type, bool global) const;
 
         /// If \a id is empty, a reference the script is run from is returned or in case
         /// of a non-local script the reference derived from the target ID.
@@ -67,7 +76,7 @@ namespace MWScript
 
         InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
             const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-            MWMechanics::NpcStats* detachedPlayerStats = nullptr);
+            MWMechanics::NpcStats* detachedPlayerStats = nullptr, ScriptState* scriptState = nullptr);
         ///< Scoped callers supply staged locals/stats. Unprovided services reject;
         ///< no fallback to the stock protagonist, world globals or script manager.
 
@@ -80,6 +89,12 @@ namespace MWScript
         MWMechanics::NpcStats& getPlayerStats() const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
+
+        // Stock script lifecycle calls; scoped calls only change an admitted
+        // source-free instance's staged running flag, never invoke it inline.
+        bool scriptRunning(std::string_view name) const;
+        void startScript(std::string_view name, const MWWorld::Ptr& target);
+        void stopScript(std::string_view name);
 
         ESM::RefId getTarget() const override;
 
@@ -147,6 +162,7 @@ namespace MWScript
         void executeActivation(const MWWorld::Ptr& ptr, const MWWorld::Ptr& actor);
         ///< Execute the activation action for this ptr. If ptr is mActivated, mark activation as handled.
 
+        ESM::RefId getMemberId(std::string_view name) const override;
         int getMemberShort(ESM::RefId id, std::string_view name, bool global) const override;
 
         int getMemberLong(ESM::RefId id, std::string_view name, bool global) const override;

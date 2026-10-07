@@ -26,6 +26,16 @@
 
 namespace MWScript
 {
+    namespace
+    {
+        void scriptStateName(std::string_view name)
+        {
+            if (name.empty() || name.size() > ScriptState::MaximumNameBytes
+                || name.find('\0') != std::string_view::npos)
+                throw std::invalid_argument("Script state name exceeds bounds");
+        }
+    }
+
     const MWWorld::Ptr InterpreterContext::getReferenceImp(const ESM::RefId& id, bool activeOnly, bool doThrow) const
     {
         if (mExecution)
@@ -194,13 +204,14 @@ namespace MWScript
 
     InterpreterContext::InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
         const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-        MWMechanics::NpcStats* detachedPlayerStats)
+        MWMechanics::NpcStats* detachedPlayerStats, ScriptState* scriptState)
         : mLocals(locals)
         , mPlayerStats(detachedPlayerStats)
         , mContent(&content)
         , mExplicitPlayer(execution.ownership == ExecutionContext::Ownership::Character)
         , mExecution(execution)
         , mResolver(&resolver)
+        , mScriptState(scriptState)
     {
         execution.validate();
         if (detachedPlayerStats && execution.ownership != ExecutionContext::Ownership::Character)
@@ -211,6 +222,98 @@ namespace MWScript
     {
         if (mExecution)
             throw std::runtime_error("Script service lacks scoped transaction");
+    }
+
+    ScriptState::Binding InterpreterContext::getScopedScript(const ESM::RefId& id) const
+    {
+        if (!mExecution || !mScriptState)
+            throw std::runtime_error("Script state lacks scoped transaction");
+        if (!id.is<ESM::StringRefId>())
+            throw std::invalid_argument("Script state requires a content identity");
+        scriptStateName(id.getRefIdString());
+        auto binding = mScriptState->resolve(*mExecution, id);
+        const auto& locals = binding.instance.mLocals;
+        const auto* target = std::get_if<MWWorld::Ptr>(&binding.instance.mTarget);
+        if (locals.getScriptId() != id || !target || !target->isEmpty())
+            throw std::invalid_argument("Script state identity/target mismatch");
+        size_t remaining = ScriptState::MaximumLocals;
+        for (const char type : {'s', 'l', 'f'})
+        {
+            const auto& names = binding.declarations.get(type);
+            const auto count = type == 's' ? locals.mShorts.size()
+                : type == 'l' ? locals.mLongs.size() : locals.mFloats.size();
+            if (names.size() > remaining || names.size() != count)
+                throw std::invalid_argument("Script state locals exceed bounds or shape");
+            remaining -= names.size();
+            for (size_t i = 0; i < names.size(); ++i)
+            {
+                scriptStateName(names[i]);
+                if (binding.declarations.getType(names[i]) != type
+                    || binding.declarations.getIndex(names[i]) != static_cast<int>(i))
+                    throw std::invalid_argument("Script state declarations mismatch");
+            }
+        }
+        for (const auto value : locals.mFloats)
+            if (!std::isfinite(value))
+                throw std::invalid_argument("Nonfinite scoped script state");
+        return binding;
+    }
+
+    InterpreterContext::ScopedMember InterpreterContext::getScopedMember(
+        const ESM::RefId& id, std::string_view name, char type, bool global) const
+    {
+        if (!global)
+            throw std::runtime_error("Reference script state is not staged");
+        scriptStateName(name);
+        const auto binding = getScopedScript(id);
+        const auto index = binding.declarations.searchIndex(type, name);
+        if (index < 0)
+            throw std::invalid_argument("Missing or mistyped scoped script member");
+        return {binding.instance.mLocals, static_cast<size_t>(index)};
+    }
+
+    bool InterpreterContext::scriptRunning(std::string_view name) const
+    {
+        if (mExecution) scriptStateName(name); // Before interning an external name.
+        const auto id = ESM::RefId::stringRefId(name);
+        if (mExecution) return getScopedScript(id).instance.mRunning;
+        return MWBase::Environment::get().getScriptManager()->getGlobalScripts().isRunning(id);
+    }
+
+    void InterpreterContext::startScript(std::string_view name, const MWWorld::Ptr& target)
+    {
+        if (mExecution)
+        {
+            scriptStateName(name);
+            if (!target.isEmpty())
+                throw std::runtime_error("Targeted script start is not staged");
+            getScopedScript(ESM::RefId::stringRefId(name)).instance.mRunning = true;
+            return;
+        }
+        const auto id = ESM::RefId::stringRefId(name);
+        if (!MWBase::Environment::get().getESMStore()->get<ESM::Script>().search(id))
+        {
+            report("Failed to start global script '" + id.getRefIdString() + "': script record not found");
+            return;
+        }
+        MWBase::Environment::get().getScriptManager()->getGlobalScripts().addScript(id, target);
+    }
+
+    void InterpreterContext::stopScript(std::string_view name)
+    {
+        if (mExecution)
+        {
+            scriptStateName(name);
+            getScopedScript(ESM::RefId::stringRefId(name)).instance.mRunning = false;
+            return;
+        }
+        const auto id = ESM::RefId::stringRefId(name);
+        if (!MWBase::Environment::get().getESMStore()->get<ESM::Script>().search(id))
+        {
+            report("Failed to stop global script '" + id.getRefIdString() + "': script record not found");
+            return;
+        }
+        MWBase::Environment::get().getScriptManager()->getGlobalScripts().removeScript(id);
     }
 
     MWWorld::Ptr InterpreterContext::resolveReference(const ESM::RefId& id, bool required, bool activeOnly) const
@@ -579,8 +682,19 @@ namespace MWScript
 #endif
     }
 
+    ESM::RefId InterpreterContext::getMemberId(std::string_view name) const
+    {
+        if (mExecution) scriptStateName(name);
+        return ESM::RefId::stringRefId(name);
+    }
+
     int InterpreterContext::getMemberShort(ESM::RefId id, std::string_view name, bool global) const
     {
+        if (mExecution)
+        {
+            const auto member = getScopedMember(id, name, 's', global);
+            return member.locals.mShorts.at(member.index);
+        }
         const Locals& locals = getMemberLocals(global, id);
 
         return locals.mShorts[findLocalVariableIndex(id, name, 's')];
@@ -588,6 +702,11 @@ namespace MWScript
 
     int InterpreterContext::getMemberLong(ESM::RefId id, std::string_view name, bool global) const
     {
+        if (mExecution)
+        {
+            const auto member = getScopedMember(id, name, 'l', global);
+            return member.locals.mLongs.at(member.index);
+        }
         const Locals& locals = getMemberLocals(global, id);
 
         return locals.mLongs[findLocalVariableIndex(id, name, 'l')];
@@ -595,6 +714,11 @@ namespace MWScript
 
     float InterpreterContext::getMemberFloat(ESM::RefId id, std::string_view name, bool global) const
     {
+        if (mExecution)
+        {
+            const auto member = getScopedMember(id, name, 'f', global);
+            return member.locals.mFloats.at(member.index);
+        }
         const Locals& locals = getMemberLocals(global, id);
 
         return locals.mFloats[findLocalVariableIndex(id, name, 'f')];
@@ -602,6 +726,12 @@ namespace MWScript
 
     void InterpreterContext::setMemberShort(ESM::RefId id, std::string_view name, int value, bool global)
     {
+        if (mExecution)
+        {
+            const auto member = getScopedMember(id, name, 's', global);
+            member.locals.mShorts.at(member.index) = static_cast<Interpreter::Type_Short>(value);
+            return;
+        }
         Locals& locals = getMemberLocals(global, id);
 
         locals.mShorts[findLocalVariableIndex(id, name, 's')] = static_cast<Interpreter::Type_Short>(value);
@@ -609,6 +739,12 @@ namespace MWScript
 
     void InterpreterContext::setMemberLong(ESM::RefId id, std::string_view name, int value, bool global)
     {
+        if (mExecution)
+        {
+            const auto member = getScopedMember(id, name, 'l', global);
+            member.locals.mLongs.at(member.index) = value;
+            return;
+        }
         Locals& locals = getMemberLocals(global, id);
 
         locals.mLongs[findLocalVariableIndex(id, name, 'l')] = value;
@@ -616,6 +752,14 @@ namespace MWScript
 
     void InterpreterContext::setMemberFloat(ESM::RefId id, std::string_view name, float value, bool global)
     {
+        if (mExecution)
+        {
+            if (!std::isfinite(value))
+                throw std::invalid_argument("Nonfinite scoped script member");
+            const auto member = getScopedMember(id, name, 'f', global);
+            member.locals.mFloats.at(member.index) = value;
+            return;
+        }
         Locals& locals = getMemberLocals(global, id);
 
         locals.mFloats[findLocalVariableIndex(id, name, 'f')] = value;

@@ -184,17 +184,9 @@ namespace MWScript
             void execute(Interpreter::Runtime& runtime) override
             {
                 MWWorld::Ptr target = R()(runtime, false);
-                ESM::RefId name = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
+                const auto name = runtime.getStringLiteral(runtime[0].mInteger);
                 runtime.pop();
-
-                if (!MWBase::Environment::get().getESMStore()->get<ESM::Script>().search(name))
-                {
-                    runtime.getContext().report(
-                        "Failed to start global script '" + name.getRefIdString() + "': script record not found");
-                    return;
-                }
-
-                MWBase::Environment::get().getScriptManager()->getGlobalScripts().addScript(name, target);
+                static_cast<InterpreterContext&>(runtime.getContext()).startScript(name, target);
             }
         };
 
@@ -203,9 +195,9 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                const ESM::RefId& name = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
+                const auto name = runtime.getStringLiteral(runtime[0].mInteger);
                 runtime.pop();
-                runtime.push(MWBase::Environment::get().getScriptManager()->getGlobalScripts().isRunning(name));
+                runtime.push(static_cast<InterpreterContext&>(runtime.getContext()).scriptRunning(name));
             }
         };
 
@@ -214,17 +206,9 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                const ESM::RefId& name = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
+                const auto name = runtime.getStringLiteral(runtime[0].mInteger);
                 runtime.pop();
-
-                if (!MWBase::Environment::get().getESMStore()->get<ESM::Script>().search(name))
-                {
-                    runtime.getContext().report(
-                        "Failed to stop global script '" + name.getRefIdString() + "': script record not found");
-                    return;
-                }
-
-                MWBase::Environment::get().getScriptManager()->getGlobalScripts().removeScript(name);
+                static_cast<InterpreterContext&>(runtime.getContext()).stopScript(name);
             }
         };
 

@@ -1,15 +1,15 @@
 # Current state and next action
 
-**Active: M5 [PLAN.md](PLAN.md), personal scheduling. M4 closed, 2026-10-06.**
+**Active: M5 [PLAN.md](PLAN.md), cross-script context. M4 closed, 2026-10-06.**
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
 **V77 exploration accepted:** radius 0–7 anchors share 256 cells; caps: 37 actors,
 8,192 references/region, 256 navigation tiles/actor. Connected regions share collision;
-streamed geometry retains state/frozen hulls/contact witnesses. One writer.
+streamed geometry retains state/frozen hulls/contact witnesses.
 Synthetic `build/logs/exploration-{bootstrap-radius2,discovery-03,regions-03,host-07}.log`:
-27-cell export, remote-anchor exhaustion/retry, 12-cell navigation/contact,
-geometry rejection/release, overlapping demand, split/regroup, rollback/retry/recovery.
+27-cell export, exhaustion/retry, 12-cell navigation/contact,
+geometry rejection/release, overlapping demand/split/regroup/rollback/recovery.
 `build/logs/exploration-{cell-actors-02,placed-actors-01,boundary}.log`:
 collision/combat/flight regression, unsupported actor rejection, engine independence.
 Scripts/leveled/corpses reject; full AI packages remain M5.
@@ -38,14 +38,12 @@ Delayed lanes resync; empty inventories clear.
 Gear/angles preserve body/motion.
 Synthetic `build/logs/{chargen-installer-15,chargen-installation,chargen-install-protocol,chargen-install-server-delivery,chargen-install-server-reverse,chargen-install-restart,appearance-protocol,appearance-adapter,appearance-installer,chargen-clock,appearance-clock-adapter,public-outfit-adapter,public-outfit-body-contract,remote-locomotion-coordinates,chargen-control}.log`.
 
-**Synthetic acceptance:**
-`build/character-desktop-fixture-02/{complete-03,restart-02}/result.json`: Breton female/
-Argonian male completion/recovery, empty inventories.
-`build/character-acceptance-02/{drop,pickup-restart,reentry,movement}/result.json`: shirt equip,
-longsword drop/replication, three interiors/reentry, durable ground pickup/restart,
-four-heading clips/reconnect; screenshots inspected.
-`build/character-tr-acceptance/{complete,restart-facing}/result.json`: both Breton sexes/TR heads/hair,
-empty inventory/recovery; appearance-only mods.
+**Synthetic character acceptance:**
+`build/character-desktop-fixture-02/{complete-03,restart-02}/result.json`,
+`build/character-acceptance-02/{drop,pickup-restart,reentry,movement}/result.json`,
+`build/character-tr-acceptance/{complete,restart-facing}/result.json`:
+stock/TR creation/recovery, empty inventories, outfits/drop/pickup,
+interior reentry/facing/reconnect; screenshots inspected. Appearance-only TR mods.
 `build/chargen-ui-{pick,generate-03,create}/result.json`: MyGUI pick/questions/custom,
 Back/refresh/birthsign/completion; custom names. Refresh retains the modal;
 transitions/resume respect closed dialogs; physical OS input unverified.
@@ -67,9 +65,8 @@ revival/Seyda Neen safe-point respawn, 2026-10-04; unarmed confirmed.
 Single-cell preview disables travel. Excluded scripts/scripted inventory require M5;
 restore only proven content.
 
-**Melee accepted, 2026-10-05:** Argonian recoil fix; reproduced stall, nine stock-input swings
-(`build/logs/melee-recoil-{baseline,fixed}.log`). Fatigue/HUD match (182.25–185).
-Death label added.
+**Melee accepted, 2026-10-05:** Argonian recoil fix; fatigue/HUD match; death label.
+`build/logs/melee-recoil-{baseline,fixed}.log`.
 Replica stock bounds/visibility; server rolls. Shieldless creatures need no inventory.
 `build/logs/melee-contact-geometry.log`, `build/melee-contact-validation-01/result.json`:
 crab contact/dagger damage.
@@ -84,9 +81,9 @@ Creature respawn: plain stores/absent destinations.
 
 **Body/door/NPC accepted, 2026-10-06:** `build/m4-user-acceptance-body-door-npc-v78-20261005-230100/{door-pass,restart-pass,door-repro,operator-acceptance}.json`:
 split/regroup/reconnect/restart preserved bodies/inventories/resources/NPC identities.
-Automated doors passed; recorder exhaustion closed clients. Fixed:
+Automated doors passed; recorder exhaustion fixed:
 `build/m4-user-acceptance-body-door-npc-v78-20261005-230100/capture-limit-result.json`
-proves doors/travel/quit after exhaustion.
+doors/travel/quit survive exhaustion.
 Stale/resampled inventory preserves state; contradictions reject atomically
 (`build/logs/door-stale-baseline-fixed.log`). Relay reclaims idle endpoints
 (`build/logs/door-relay-expiry.log`).
@@ -133,9 +130,9 @@ eight-second absences, no missed-output replay, durable continuation, clean clie
 100ms ±25ms/10% loss/reorder. Native-window message screenshots inspected.
 Shared regression: `build/logs/m5-context-shared-regression.log`.
 
-**M5 scoped context:** InterpreterContext scopes both reference paths by
+**M5 scoped context:** InterpreterContext scopes references by
 campaign/story/physical/character/source/life/invocation/event identities. Unstaged services
-reject; waits differ from absence. Personal text uses staged stats.
+reject; waits differ from absence. Personal text: staged stats.
 Synthetic `build/logs/m5-context-{lookup,rollback,stock}.log`: isolation, stale/bounds
 rejection, stock callers, rollback/retry and named-locals recovery.
 **V81 personal state:** 1–8 stories/two characters own stock globals/locals/invocations/causal cursors.
@@ -150,6 +147,12 @@ Synthetic
 isolation, late-failure rollback/retry/stale, exact/uncertain physics recovery,
 future-marker and V81 upgrade/downgrade rejection.
 
-**Next:** cross-script state/calls, then dialogue under the
-[M5 contract](DECISIONS.md#m5-implementation-contract). Personal output delivery,
+**M5 cross-script seam:** staged owned banks route stock typed members,
+StartScript/StopScript/ScriptRunning; ≤64 locals/128-byte names. Targets reject.
+Synthetic `build/logs/m5-cross-script-{context,rollback,stock,lookup-regression}.log`:
+character/story isolation, identity/bounds/waits, late-failure/durability rollback/retry,
+stock GSCR locals/running recovery and stock callers. V82 single-script admission remains.
+
+**Next:** wire native multi-script admission/state/scheduling/durability, then dialogue
+([M5 contract](DECISIONS.md#m5-implementation-contract)). Personal output delivery,
 physical-reference operations and NPC restoration remain closed.

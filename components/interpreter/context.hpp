@@ -79,6 +79,10 @@ namespace Interpreter
 
         virtual std::string_view getCurrentCellName() const = 0;
 
+        // Callers with bounded external names validate before RefId interning.
+        // Stock contexts retain their existing conversion and name policy.
+        virtual ESM::RefId getMemberId(std::string_view name) const { return ESM::RefId::stringRefId(name); }
+
         virtual int getMemberShort(ESM::RefId id, std::string_view name, bool global) const = 0;
 
         virtual int getMemberLong(ESM::RefId id, std::string_view name, bool global) const = 0;
