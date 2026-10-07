@@ -1,6 +1,6 @@
 # Current state and next action
 
-**Active: M5 [PLAN.md](PLAN.md), shared-script delivery/proof implemented. M4 closed, 2026-10-06.**
+**Active: M5 [PLAN.md](PLAN.md), scoped interpreter context proven. M4 closed, 2026-10-06.**
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
@@ -107,19 +107,18 @@ Fresh campaigns require `player-physics`; V78 retains migration; movement skills
 **V79 movement accepted, 2026-10-06:**
 `build/m4-user-acceptance-player-v79-20261006-live-01/operator-acceptance.json`.
 128-input saturation now waits/retries; backpressure/adapter checks passed.
-Both fixed clients quit normally (0); combat/death/loot/respawn acceptance retained.
-Native abort resolved for now; reopen on recurrence.
+Both clients quit normally (0); combat/death/loot/respawn acceptance retained.
+Native abort resolved; reopen on recurrence.
 
 **M4 closed, 2026-10-06:** owner accepted overlapping two-client/NPC
 melee/ranged/magic, vanilla/TR gear, impairment, interruption/death/loot/respawn
-and recovery/convergence. Retain accepted bounds and M5/M7 work.
+and recovery/convergence.
 
 **M5 shared execution:** [runtime](../../apps/tes3mp-server/native/world_script.hpp)
-uses stock compiler/core opcodes, explicit globals, staged locals/messages,
-committed/deferred/rejected outcomes and bound GSCR/GLOB recovery.
+stock compiler/core opcodes, owned globals, staged locals/messages,
+committed/deferred/rejected outcomes, bound GSCR/GLOB recovery.
 Synthetic `build/logs/m5-world-script-{shared,rollback,recovery,admission,content}.log`:
-retry/failure/bounds/source/content checks; Fargoth declaration locals pass,
-Vodunius/chargen reject. Strict warnings reject skipped APIs.
+Fargoth declarations pass; Vodunius/chargen/skipped APIs reject.
 
 **V80 scheduling/delivery:** fresh bootstrap binds one script/0–16 globals;
 calendar ownership rejects. World-tick invocations join gameplay durability;
@@ -128,15 +127,22 @@ scripts. Background ticks continue.
 Capability 39 delivers ≤8 literal messages of ≤256 bytes through atomic reliable admission
 and stock UI; session/invocation checks suppress duplicates. Baselines/recovery never replay output.
 Synthetic `build/logs/m5-ambient-{host,adapter,delivery,bootstrap,bootstrap-admission,bootstrap-zero}.log`:
-rollback/retry/stale, offline/reentry, exact/uncertain restart, malformed images,
-ownership/source/budget rejection, V79 recovery and upgrade/downgrade rejection.
-Inherited `build/logs/m5-world-script-host-{shared,rollback}.log` and
-`build/logs/m5-player-physics-regression.log` retain seam/movement recovery.
+atomic failure/retry/stale, offline/reentry/exact/uncertain restart,
+malformed/budget/ownership rejection, V79 recovery/upgrade/downgrade rejection.
+Inherited seam/movement recovery: `build/logs/m5-world-script-host-{shared,rollback}.log`,
+`build/logs/m5-player-physics-regression.log`.
 `build/m5-ambient-desktop-{02,restart-01,ui-01}/result.json`: paired occurrences,
 eight-second absences, no missed-output replay, durable continuation, clean client exits;
 100ms ±25ms/10% loss/reorder. Native-window message screenshots inspected.
-NPC restoration/personal context/dialogue remain closed.
+Shared regression: `build/logs/m5-context-shared-regression.log`.
 
-**Next:** explicit character/story context for InterpreterContext/reference lookup;
-prove personal script isolation/rollback and stock callers under the
-[M5 contract](DECISIONS.md#m5-implementation-contract). Restore excluded NPC operations only after proof.
+**M5 scoped context:** InterpreterContext scopes both reference paths by
+campaign/story/physical/character/source/life/invocation/event identities. Unstaged services
+reject; waits differ from absence. Personal text uses staged stats.
+Synthetic `build/logs/m5-context-{lookup,rollback,stock}.log`: isolation, stale/bounds
+rejection, stock callers, rollback/retry and named-locals recovery.
+Native personal admission/dialogue/NPC restoration remain closed.
+
+**Next:** bind durable character/story globals/locals/invocations into host transactions,
+then cross-script calls/dialogue under the [M5 contract](DECISIONS.md#m5-implementation-contract).
+Restore NPC operations after proof.

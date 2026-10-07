@@ -2,12 +2,14 @@
 #define GAME_SCRIPT_INTERPRETERCONTEXT_H
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 
 #include <components/esm/refid.hpp>
 #include <components/interpreter/context.hpp>
 
 #include "globalscripts.hpp"
+#include "executioncontext.hpp"
 
 #include "../mwworld/ptr.hpp"
 
@@ -32,7 +34,11 @@ namespace MWScript
         MWMechanics::NpcStats* mPlayerStats = nullptr;
         const MWWorld::ESMStore* mContent = nullptr;
         bool mExplicitPlayer = false;
+        std::optional<ExecutionContext> mExecution;
+        const ReferenceResolver* mResolver = nullptr;
         std::shared_ptr<GlobalScriptDesc> mGlobalScriptDesc;
+
+        void requireUnscopedService() const;
 
         /// If \a id is empty, a reference the script is run from is returned or in case
         /// of a non-local script the reference derived from the target ID.
@@ -58,6 +64,17 @@ namespace MWScript
             const MWWorld::Ptr& player, const MWWorld::ESMStore& content,
             MWMechanics::NpcStats* detachedPlayerStats = nullptr);
         ///< Execute player-facing opcodes for this character. An empty player is invalid.
+
+        InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
+            const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
+            MWMechanics::NpcStats* detachedPlayerStats = nullptr);
+        ///< Scoped callers supply staged locals/stats. Unprovided services reject;
+        ///< no fallback to the stock protagonist, world globals or script manager.
+
+        const ExecutionContext* getExecutionContext() const
+        { return mExecution ? &*mExecution : nullptr; }
+        MWWorld::Ptr resolveReference(const ESM::RefId& id, bool required = true, bool activeOnly = false) const;
+        MWWorld::Ptr resolveReferenceName(std::string_view name, bool required = true, bool activeOnly = false) const;
 
         MWWorld::Ptr getPlayer() const;
         MWMechanics::NpcStats& getPlayerStats() const;

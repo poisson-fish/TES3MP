@@ -4,10 +4,10 @@
 
 1. Read [CURRENT.md](CURRENT.md), this file, [README.md](README.md), active
    [PLAN.md](PLAN.md), and [DECISIONS.md](DECISIONS.md) for boundary/persistence changes.
-2. Inspect owning code/tests and `git status`; they establish behavior. Search
-   history/retired documents only for specific unanswered questions.
-3. Advance bounded slices with one writer; preserve migration, share handlers/checks
-   and follow dependencies. No additional plan.
+2. Code/tests and `git status` establish behavior. Search history/retired documents
+   only for specific unanswered questions.
+3. Advance bounded slices with one writer, preserved migration, shared handlers/checks
+   and dependencies. No additional plan.
 4. Run the smallest affected check individually; stop, fix and rerun on failure.
 5. Review the diff; update CURRENT's behavior/limitations/evidence and durable
    decisions. Commit only when authorized; report only run checks.
@@ -20,9 +20,9 @@ tokens, user saves or machine-local content paths. Git is the development archiv
 Keep `components/tes3mp` independently buildable behind owned interfaces; no OpenMW,
 rendering, OpenXR, OS or public transport-library types. Preserve boundary checks.
 
-App-local `apps/tes3mp-server` runtime targets may depend on OpenMW. Expose owned
-commands/IDs/results/snapshots/persistence; declare CMake dependencies explicitly.
-Broad probe links do not establish production headless boundaries.
+App-local `apps/tes3mp-server` may depend on OpenMW. Expose owned
+commands/IDs/results/snapshots/persistence and explicit CMake dependencies.
+Broad probe links cannot prove production headless boundaries.
 
 Refactor owning engine code to separate context/presentation; share logic with
 single-player. Null UI/listeners must preserve gameplay. Plain items do not prove

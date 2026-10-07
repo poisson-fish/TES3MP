@@ -3,6 +3,25 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M5-002",
+      "slice": "explicit script execution context and scoped reference lookup",
+      "owner": "OpenMW MWScript InterpreterContext and stock reference callers",
+      "purpose": "Carry bounded stable campaign/story/physical-scope/character/source/life/invocation/causal-event identities through explicit and implicit reference lookup. Scoped callers supply an authoritative resolver and staged character stats; unavailable dependencies propagate separately from actual absence, stale references reject, and unprovided globals/member locals/activation/presentation services cannot fall back to Environment. Bound external reference names before RefId allocation. Personal text uses explicit character/content/stats while stock local callers and detached migration bindings remain supported. A filtered synthetic harness exercises stock core/faction opcodes with isolated staged locals/stats/output, rejection, failed durability, dependency deferral, retry and stock named-locals recovery. This seam does not admit personal scripts into the native scheduler or implement a live story resolver.",
+      "paths": [
+        "apps/openmw/mwscript/executioncontext.hpp",
+        "apps/openmw/mwscript/interpretercontext.cpp",
+        "apps/openmw/mwscript/interpretercontext.hpp",
+        "apps/openmw/mwscript/ref.cpp"
+      ],
+      "tests": [
+        "tes3mp_native_script_context_tests lookup",
+        "tes3mp_native_script_context_tests rollback",
+        "tes3mp_native_script_context_tests stock"
+      ],
+      "disposition": "scoped engine context seam; native personal state/durability, dialogue and NPC restoration remain closed",
+      "removal_condition": "OpenMW supplies equivalent explicit transactional script context and scoped reference resolution"
+    },
+    {
       "id": "M5-001",
       "slice": "context-free shared world script transaction seam",
       "owner": "OpenMW MWScript compiler/interpreter and app-local script transaction",
@@ -645,8 +664,6 @@
         "apps/openmw/mwworld/localscripts.hpp",
         "apps/openmw/mwworld/refdata.cpp",
         "apps/openmw/mwworld/refdata.hpp",
-        "apps/openmw/mwscript/interpretercontext.cpp",
-        "apps/openmw/mwscript/interpretercontext.hpp",
         "apps/openmw/mwscript/statsextensions.cpp"
       ],
       "tests": [
