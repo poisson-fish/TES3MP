@@ -138,6 +138,7 @@ namespace TES3MP::Native
         size_t mStaticContainers = 0, mStaticNeighbors = 0;
         std::map<uint64_t, BoundCastAnimations> mDynamicCasts;
         std::function<std::shared_ptr<InteriorActorScene>(std::span<const DynamicActorBody>)> mCreateActorSet;
+        std::function<void(InteriorActorScene&, std::span<const DynamicActorBody>)> mBindPhysicsPlayers;
         std::vector<CellId> mCollisionCells;
         bool mObjectTravelFamily = false; // V69 intervention, interaction reach and life-bound soul capture.
         std::function<std::optional<Transform>(const Transform&, ESM::RefId)> mIntervention;
@@ -189,6 +190,7 @@ namespace TES3MP::Native
         std::function<void(const std::vector<bool>&, const DynamicActorSet&,
             const ActorSceneWorld&, std::span<const ActorSceneDoor>)> mGeometryActivity;
         bool mCharacterCreation = false;
+        bool mPlayerPhysics = false;
         std::vector<StartingItem> mStartingInventory; // Explicit campaign policy, granted once at completion.
         std::array<std::optional<CharacterProfile>, 2> mCharacters;
         std::array<std::string, 2> mCharacterResources;
@@ -225,6 +227,12 @@ namespace TES3MP::Native
         std::string magicVisualRecord(uint64_t sourceKind, uint64_t effectSource) const;
         EquipmentBytes mImage;
         EquipmentBytes mActorImage;
+        std::array<PlayerPhysicsState, 2> mPlayerFrames;
+        std::array<std::pair<uint64_t, uint64_t>, 2> mPlayerControlBindings{};
+        void bindPhysicsPlayers(InteriorActorScene&, const std::array<PlayerPhysicsState, 2>&,
+            std::span<const uint64_t> removed = {}) const;
+        class PlayerPhysicsTransaction;
+        const PreparedNativeInventory* unwrapPlayerPhysics(const PreparedNativeInventory*) const;
         class Transaction;
         class EquipmentTransaction;
         class WorldTransaction;
@@ -462,6 +470,9 @@ namespace TES3MP::Native
         bool streamsPlayerAreas() const noexcept override { return mBinding.mStreamExteriors; }
         bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
         bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
+        bool ownsPlayerPhysics() const noexcept override { return mBinding.mPlayerPhysics; }
+        std::optional<PlayerPhysicsBaseline> projectPlayerPhysics(const CanonicalServerState&, PlayerId,
+            const PreparedNativeInventory* = nullptr) const override;
         bool hasNativeCombat() const noexcept override { return mBinding.mCombatResolution; }
         bool hasNativeMagicUse() const noexcept override { return mBinding.mMagicUse; }
         std::optional<ServerApp::NativeTravelDiagnostics> travelDiagnostics() const override;
@@ -508,6 +519,10 @@ namespace TES3MP::Native
         std::unique_ptr<PreparedNativeInventory> prepareNativeScheduledTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             const CanonicalWorldState* world, std::optional<WaitRestRequest> waitRest) override;
+        std::unique_ptr<PreparedNativeInventory> prepareNativePlayerTick(const CanonicalServerState& players,
+            ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
+            const CanonicalWorldState* world, std::optional<WaitRestRequest> waitRest,
+            std::span<const ServerCommandProposal> controls) override;
         std::unique_ptr<PreparedNativeInventory> prepareNativeTick(const CanonicalServerState& players,
             ServerTick tick, float seconds, std::unique_ptr<PreparedNativeInventory> command,
             std::optional<ActorMagicCast> actorCast, const CanonicalWorldState* world = nullptr,
@@ -515,7 +530,8 @@ namespace TES3MP::Native
             std::span<const PlayerSocialAction> socialActions = {},
             std::optional<FactionScriptRequest> factionScript = {},
             std::optional<MovementRuleScriptRequest> movementRuleScript = {},
-            std::optional<WaitRestRequest> waitRest = {});
+            std::optional<WaitRestRequest> waitRest = {},
+            std::span<const std::pair<size_t, ActorSceneSnapshot>> controlledPlayers = {});
         void bindSunDamageScale(std::function<float(const CanonicalWorldState&, ESM::RefId)> callback)
         { mSunDamageScale = std::move(callback); }
         bool allowsPlayerMovement(PlayerId player) const override;

@@ -439,6 +439,7 @@ namespace TES3MP::OpenMWAdapter
 
             MultiplayerState multiplayerState() const noexcept override { return mState; }
             bool ownsPlayerLives() const noexcept override { return mSession && mSession->ownsPlayerLives(); }
+            bool ownsPlayerMovement() const noexcept override { return mSession && mSession->ownsPlayerMovement(); }
             bool canRespawn() const noexcept override { return mSession && mSession->canRespawn(); }
             bool submitRespawn() noexcept override { return mSession && mSession->submitRespawn(); }
 

@@ -56,13 +56,20 @@ namespace TES3MP::OpenMWAdapter
 
     void MotionIntentTracker::sample(LocomotionIntent intent, MonotonicInstant sampledAt) noexcept
     {
-        if (!mDesired || mDesired->intent != intent)
+        if (intent.controls())
+        {
+            if (intent.controls()->jump && !mLastSampleJump) mJumpPending = true;
+            mLastSampleJump = intent.controls()->jump;
+        }
+        if (!mDesired || mDesired->intent != intent || intent.controls())
             mDesired.emplace(DesiredIntent{ intent, sampledAt });
     }
 
     void MotionIntentTracker::observeAcknowledgement(
         std::optional<CommandSequence> acknowledgement, MonotonicInstant observedAt) noexcept
     {
+        if (mJumpQueuedSequence && acknowledgement && *acknowledgement >= *mJumpQueuedSequence)
+        { mJumpQueuedSequence.reset(); mJumpPending = false; }
         if (mPending && acknowledgement && *acknowledgement >= mPending->sequence)
         {
             if (mMetrics && observedAt >= mPending->queuedAt)
@@ -79,7 +86,20 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<LocomotionIntent> MotionIntentTracker::next(LinearVelocity3 authoritativeVelocity) const noexcept
     {
-        if (mPending || !mDesired)
+        if (!mDesired) return std::nullopt;
+        if (mDesired->intent.controls())
+        {
+            if (!mLastQueuedAt || (mDesired->sampledAt >= *mLastQueuedAt
+                && mDesired->sampledAt.nanoseconds() - mLastQueuedAt->nanoseconds() >= 33'333'334))
+            {
+                auto controls = *mDesired->intent.controls();
+                controls.jump |= mJumpPending;
+                return LocomotionIntent(mDesired->intent.mode(), mDesired->intent.rootFacing(), LinearVelocity3(0,0,0),
+                    {}, {}, controls);
+            }
+            return std::nullopt;
+        }
+        if (mPending)
             return std::nullopt;
 
         if (mDesired->intent.position().has_value())
@@ -97,14 +117,20 @@ namespace TES3MP::OpenMWAdapter
     bool MotionIntentTracker::markQueued(
         CommandSequence sequence, LocomotionIntent intent, MonotonicInstant queuedAt) noexcept
     {
-        if (mPending)
+        if (mPending && !intent.controls())
             return false;
         std::optional<MonotonicInstant> stopObservedAt;
-        if (intent.desiredVelocity() == LinearVelocity3(0, 0, 0) && mDesired
+        const bool stopped = intent.controls()
+            ? (intent.controls()->right == 0 && intent.controls()->forward == 0 && intent.controls()->vertical == 0 && !intent.controls()->jump)
+            : intent.desiredVelocity() == LinearVelocity3(0, 0, 0);
+        if (stopped && mDesired
             && mDesired->intent.desiredVelocity() == intent.desiredVelocity())
             stopObservedAt = mDesired->sampledAt;
-        mPending.emplace(PendingIntent{ sequence, queuedAt, stopObservedAt });
+        if (!mPending || (stopObservedAt && !mPending->stopObservedAt))
+            mPending.emplace(PendingIntent{ sequence, queuedAt, stopObservedAt });
         mLastQueued = intent;
+        mLastQueuedAt = queuedAt;
+        if (intent.controls() && intent.controls()->jump && !mJumpQueuedSequence) mJumpQueuedSequence = sequence;
         return true;
     }
 
@@ -113,6 +139,9 @@ namespace TES3MP::OpenMWAdapter
         mDesired.reset();
         mPending.reset();
         mLastQueued.reset();
+        mLastQueuedAt.reset();
+        mJumpQueuedSequence.reset();
+        mJumpPending = mLastSampleJump = false;
     }
 
     void PoseEvidenceTracker::observe(EntityId source, AuthorityEpoch epoch, PoseSampleSequence sequence,

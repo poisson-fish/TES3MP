@@ -6,10 +6,15 @@
 #include <components/esm3/loadlevlist.hpp>
 #include "movement_mapping.hpp"
 #include "engine_coordinator.hpp"
+#include "../mwphysics/movementdata.hpp"
+#include "../mwmechanics/movement.hpp"
+#include "../mwclass/npcmovement.hpp"
+#include <components/settings/values.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/inputmanager.hpp"
 #include "../mwbase/journal.hpp"
+#include "../mwbase/luamanager.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
@@ -48,6 +53,7 @@
 #include "../mwworld/worldmodel.hpp"
 
 #include <components/debug/debuglog.hpp>
+#include <components/misc/constants.hpp>
 #include <components/esm/position.hpp>
 #include <components/esm/refid.hpp>
 #include <components/esm3/loadcell.hpp>
@@ -923,6 +929,42 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
+    std::optional<LocomotionIntent> DesktopSemanticInput::samplePlayerControls() noexcept
+    {
+        try
+        {
+            auto world = MWBase::Environment::get().getWorld();
+            auto input = MWBase::Environment::get().getInputManager();
+            const auto player = world->getPlayerPtr();
+            const auto& position = player.getRefData().getPosition();
+            auto controls = PlayerMovementControls{};
+            if (!input->controlsDisabled() && input->getControlSwitch("playercontrols"))
+            {
+                const auto axis = [](float value) {
+                    return int16_t(std::isfinite(value) ? std::lround(std::clamp(value, -1.f, 1.f) * 1024) : 0);
+                };
+                // CharacterController clears MovementSettings after consuming
+                // them. Stock Lua controls retain the input axes before that.
+                if (const auto* raw = MWBase::Environment::get().getLuaManager()->getActorControls(player))
+                {
+                    controls.right = axis(raw->mSideMovement); controls.forward = axis(raw->mMovement);
+                    controls.vertical = raw->mJump ? 1024 : 0; controls.jump = raw->mJump;
+                }
+            }
+            if (!std::isfinite(position.rot[0]) || !std::isfinite(position.rot[2])) return {};
+            controls.pitch = turnFromOpenMW(position.rot[0]);
+            auto mechanics = MWBase::Environment::get().getMechanicsManager();
+            const auto mode = mechanics->isSneaking(player) ? LocomotionMode::Sneak
+                : mechanics->isRunning(player) ? LocomotionMode::Run : LocomotionMode::Walk;
+            const auto* raw = MWBase::Environment::get().getLuaManager()->getActorControls(player);
+            const bool flying = world->isFlying(player), swimming = world->isSwimming(player);
+            const auto stance = raw ? (raw->mSneak && !flying && !swimming ? LocomotionMode::Sneak
+                : raw->mRun && !flying ? LocomotionMode::Run : LocomotionMode::Walk) : mode;
+            return LocomotionIntent(stance, turnFromOpenMW(position.rot[2]), LinearVelocity3(0, 0, 0), {}, {}, controls);
+        }
+        catch (...) { return {}; }
+    }
+
     std::optional<LocomotionIntent> DesktopSemanticInput::sampleCurrentIntent() noexcept
     {
         try
@@ -1079,6 +1121,7 @@ namespace TES3MP::OpenMWAdapter
             MWWorld::Ptr source;
             std::vector<ESM::RefId> equipment;
             uint64_t tick = 0;
+            std::optional<NativeActorMotion> physicalMotion;
         };
         std::map<uint64_t, NativeRemote> nativeRemotes;
         MWWorld::InventoryRecordMap nativeActorRecords;
@@ -1107,9 +1150,11 @@ namespace TES3MP::OpenMWAdapter
         std::optional<std::string> predictedMagicSource;
         using ReflectionKey = std::tuple<uint8_t, uint64_t, uint64_t, uint8_t, uint64_t, uint64_t, uint64_t, std::string>;
         std::vector<ReflectionKey> presentedReflections;
+        std::optional<uint64_t> playerPhysicsCorrection;
 
         void clear() noexcept
         {
+            playerPhysicsCorrection.reset();
             characterBodies = false;
             playerAppearances.clear();
             playerBodies.clear();
@@ -1405,6 +1450,7 @@ namespace TES3MP::OpenMWAdapter
                         {
                             if (!remote->second.motion.observe(*motion, area->cell, receivedAt)) return ProviderResult::PresentationFailed;
                             remote->second.tick = motion->tick;
+                            remote->second.physicalMotion = *motion;
                         }
                         continue;
                     }
@@ -1508,6 +1554,7 @@ namespace TES3MP::OpenMWAdapter
                     {
                         if (!remote->second.motion.observe(*motion,*cell,receivedAt)) return ProviderResult::PresentationFailed;
                         remote->second.tick=motion->tick;
+                        remote->second.physicalMotion = *motion;
                     }
                     continue;
                 }
@@ -1569,6 +1616,7 @@ namespace TES3MP::OpenMWAdapter
                 return ProviderResult::PresentationFailed;
 
             const Transform& localRoot = localReconciliation ? localReconciliation->root : self->transform();
+            playerPhysicsCorrection.reset();
             auto* targetCell = resolveCell(localRoot.cell(), content);
             if (!targetCell)
                 return ProviderResult::ContentMappingFailed;
@@ -1609,11 +1657,90 @@ namespace TES3MP::OpenMWAdapter
                     sessionBootstrapPending = false;
                 }
                 const auto& local = player.getRefData().getPosition();
-                (void)metrics.tryRecord({ MovementMetricKey::LocalCorrectionDistanceQuanta,
+                if (!localReconciliation || !localReconciliation->physics)
+                    (void)metrics.tryRecord({ MovementMetricKey::LocalCorrectionDistanceQuanta,
                     movementCorrectionDistanceQuanta(localRoot.position(),
                         static_cast<double>(local.pos[0]) * PositionScale,
                         static_cast<double>(local.pos[1]) * PositionScale,
                         static_cast<double>(local.pos[2]) * PositionScale) });
+            }
+
+            if (localReconciliation && localReconciliation->physics)
+            {
+                const auto& physics = *localReconciliation->physics;
+                const auto& root = localReconciliation->root.position();
+                float correctionDistance = 0.f;
+                MWPhysics::ActorReplayState frame{
+                    {float(double(root.x()) / PositionScale), float(double(root.y()) / PositionScale), float(double(root.z()) / PositionScale)},
+                    {physics.inertia[0], physics.inertia[1], physics.inertia[2]},
+                    {physics.lastStuckPosition[0], physics.lastStuckPosition[1], physics.lastStuckPosition[2]},
+                    physics.stuckFrames, physics.grounded, physics.slope, physics.walkingOnWater,
+                    localReconciliation->hardDiscontinuity, &correctionDistance};
+                auto& stats = player.getClass().getNpcStats(player);
+                stats.setTimeToStartDrowning(physics.breath);
+                const auto& effects = stats.getMagicEffects();
+                const auto magnitude = [&](ESM::RefId id) { return effects.getOrDefault(id).getMagnitude(); };
+                const auto setting = [&](const char* id) { return world->getStore().get<ESM::GameSetting>().find(id)->mValue.getFloat(); };
+                const float strength = stats.getAttribute(ESM::Attribute::Strength).getModified();
+                const float weight = std::max(0.f, player.getClass().getInventoryStore(player).getWeight()
+                    - magnitude(ESM::MagicEffect::Feather) + magnitude(ESM::MagicEffect::Burden));
+                const float encumbrance = MWClass::normalizedEncumbrance(weight, strength * setting("fEncumbranceStrMult"));
+                const bool inert = physics.blocked || encumbrance > 1.f || stats.isParalyzed() || stats.getKnockedDown() || stats.isDead();
+                float xyScale = player.getCellRef().getScale();
+                if (!Settings::game().mNormaliseRaceSpeed)
+                {
+                    const auto& npc = *player.get<ESM::NPC>()->mBase;
+                    const auto& race = *world->getStore().get<ESM::Race>().find(npc.mRace);
+                    xyScale *= npc.isMale() ? race.mData.mMaleWeight : race.mData.mFemaleWeight;
+                }
+                std::vector<MWPhysics::ActorReplayInput> replay;
+                replay.reserve(localReconciliation->physicsReplay.size());
+                bool jumpLatched = physics.jumpHeld;
+                for (const auto& input : localReconciliation->physicsReplay)
+                {
+                    const auto& intent = input.intent();
+                    const auto& controls = *intent.controls();
+                    const bool jumpRequested = controls.jump && (!jumpLatched || controls.vertical > 0);
+                    jumpLatched = controls.jump;
+                    const bool running = intent.mode() == LocomotionMode::Run, sneaking = intent.mode() == LocomotionMode::Sneak;
+                    const auto speeds = MWClass::npcMovementProfile(stats.getAttribute(ESM::Attribute::Speed).getModified(),
+                        stats.getSkill(ESM::Skill::Athletics).getModified(), stats.getSkill(ESM::Skill::Acrobatics).getModified(),
+                        encumbrance, stats.getFatigueTerm(world->getStore()), magnitude(ESM::MagicEffect::SwiftSwim),
+                        magnitude(ESM::MagicEffect::Levitate), magnitude(ESM::MagicEffect::Jump), running, sneaking,
+                        stats.isWerewolf() && running && stats.getDrawState() == MWMechanics::DrawState::Nothing, inert, setting,
+                        Constants::GravityConst * Constants::UnitsPerMeter);
+                    const auto radians = [](Turn32 turn) { return float(-double(std::bit_cast<int32_t>(turn.value()))
+                        / 4294967296.0 * 6.283185307179586); };
+                    replay.push_back({{float(controls.right) / 1024, float(controls.forward) / 1024, float(controls.vertical) / 1024},
+                        {radians(controls.pitch), radians(intent.rootFacing())}, speeds.walk, speeds.swim, speeds.fly,
+                        speeds.jump, speeds.airControl, jumpRequested, sneaking, xyScale});
+                }
+                std::vector<MWPhysics::ActorReplayBody> bodies;
+                const auto sameWorld = [&](const MWWorld::Ptr& body) {
+                    return body.getCell() == player.getCell()
+                        || (body.getCell() && body.getCell()->isExterior() && player.getCell()->isExterior());
+                };
+                for (const auto& [id, remote] : remotes) if (remote.actor && remote.lastObserved && sameWorld(remote.actor->ptr()))
+                {
+                    const auto latest = std::ranges::find(snapshot.view().entries(), remote.lastObserved->playerId(),
+                        &SpatialEntitySnapshot::playerId);
+                    if (latest == snapshot.view().entries().end()) continue;
+                    const auto pose = toOpenMW(latest->transform());
+                    bodies.push_back({&remote.actor->ptr(), pose.asVec3(), pose.rot[2]});
+                }
+                for (const auto& [id, remote] : nativeRemotes)
+                    if (remote.actor && remote.physicalMotion && sameWorld(remote.actor->ptr()))
+                    {
+                        const auto& motion = *remote.physicalMotion;
+                        bodies.push_back({&remote.actor->ptr(), {motion.position[0], motion.position[1], motion.position[2]}, motion.yaw});
+                    }
+                frame.bodies = bodies;
+                if (!world->reconcilePlayerMovement(frame, replay)) return ProviderResult::PresentationFailed;
+                if (!localReconciliation->hardDiscontinuity)
+                {
+                    playerPhysicsCorrection = uint64_t(std::llround(double(correctionDistance) * PositionScale));
+                    (void)metrics.tryRecord({MovementMetricKey::LocalCorrectionDistanceQuanta, *playerPhysicsCorrection});
+                }
             }
 
             std::array<std::optional<EntityId>, MWRender::MaximumReplicatedActors> desired;
@@ -3776,6 +3903,9 @@ namespace TES3MP::OpenMWAdapter
         : mImpl(std::make_unique<Impl>(metrics))
     {
     }
+
+    std::optional<uint64_t> DesktopPresentation::playerPhysicsCorrection() const
+    { return mImpl->playerPhysicsCorrection; }
 
     std::optional<std::array<float, 3>> DesktopPresentation::renderedPlayerPosition(PlayerId player) const
     {

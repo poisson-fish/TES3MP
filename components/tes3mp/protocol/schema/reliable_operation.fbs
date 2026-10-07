@@ -44,6 +44,14 @@ enum LocomotionMode : ubyte {
   Jump = 4
 }
 
+struct PlayerMovementControls {
+  right:short;
+  forward:short;
+  vertical:short;
+  pitch:uint;
+  jump:bool;
+}
+
 table PlayerLocomotionInput {
   input_tick:ulong (id: 0);
   input_sequence:ulong (id: 1);
@@ -52,6 +60,7 @@ table PlayerLocomotionInput {
   desired_velocity:LinearVelocity3 (id: 4);
   position:Position3 (id: 5);
   orientation:Orientation3 (id: 6);
+  controls:PlayerMovementControls (id: 7);
 }
 
 enum CellKind : ubyte {

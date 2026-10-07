@@ -5591,7 +5591,8 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool characterCreation = effectFamily == "chargen-installer";
+        const bool playerPhysics = effectFamily == "player-physics";
+        const bool characterCreation = playerPhysics || effectFamily == "chargen-installer";
         const bool cellActors = characterCreation || effectFamily == "cell-actors";
         const bool worldCollision = effectFamily == "world-collision";
         const bool sneakDetection = effectFamily == "sneak-detection";
@@ -9154,7 +9155,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (playerPhysics ? "native-inventory-79\nmanifest " : characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -9355,6 +9356,232 @@ namespace TES3MP::Native::Testing
             require(gameplay && gameplay->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
                 "Completed native characters could not enter simulation");
             const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+            if (playerPhysics)
+            {
+                require(native.ownsPlayerPhysics(), "V79 did not own player physics");
+                auto placed = std::vector(authority.players().begin(), authority.players().end());
+                for (size_t i = 0; i < 2; ++i)
+                    placed[i] = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(placed[i], id<ServerTick>(4),
+                        Transform(placed[i].transform().cell(), Position3((i ? 350 : -350) * 1024, -400 * 1024, 1024),
+                            placed[i].transform().orientation()), LinearVelocity3(0, 0, 0)));
+                auto movingPlayers = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
+                const auto input = [&](size_t i, int right) {
+                    const auto& player = movingPlayers.players()[i];
+                    return ServerCommandProposal(id<SessionId>(i + 1), SessionGeneration::initial(),
+                        CommandSequence::initial(), id<CommandId>(i + 1), CanonicalRevision::initial(),
+                        EntityPrecondition(player.entityId(), player.entityRevision(), player.authorityEpoch()),
+                        PlayerLocomotionCommandProposal(id<LocomotionInputTick>(5), id<LocomotionInputSequence>(1),
+                            LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0), {}, {},
+                                PlayerMovementControls{int16_t(right), 0, 0})));
+                };
+                const std::array controls{input(0, 1024), input(1, -1024)};
+                NullMetricSink metrics; NullStructuredEventSink events; Observability observability(metrics, events);
+                struct RejectPort final : CanonicalDurabilityPort
+                {
+                    CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&,
+                        CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
+                        const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*,
+                        const CanonicalWorldState*, const CanonicalScriptState*, std::span<const std::byte>) noexcept override
+                    { return CanonicalDurabilityResult::Rejected; }
+                } port;
+                const auto admitted = [&](const ServerCommandProposal& proposal) {
+                    CanonicalCommandReducer reducer(movingPlayers, observability, manifest);
+                    auto stagedWorld = world;
+                    require(reducer.configureDurability(port, nullptr, nullptr, nullptr, nullptr, &stagedWorld, nullptr, &native),
+                        "Physics reducer authority configuration failed");
+                    Clock clock;
+                    ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(5), IngressOrdinal::initial());
+                    require(intake.submit(proposal) == CommandSubmissionResult::Accepted, "Physics command intake failed");
+                    clock.value += 5 * 33'333'334;
+                    const auto batches = intake.pump();
+                    require(batches && batches.batches().size() == 1, "Physics command batch failed");
+                    auto pending = reducer.prepareTick(batches.batches().front());
+                    require(pending.result() && pending.result().dispositions().size() == 1, "Physics command reduction failed");
+                    const auto disposition = pending.result().dispositions().front().disposition();
+                    require(pending.candidateState().findPlayer(id<PlayerId>(1))->transform() == movingPlayers.players()[0].transform(),
+                        "Movement command wrote a pose before native physics");
+                    if (disposition == CommandDisposition::Applied)
+                    {
+                        require(reducer.stageNativeDoorStep(pending, id<ServerTick>(5), 1.f/30), "Physics reducer composition failed");
+                        require(pending.candidateState().findPlayer(id<PlayerId>(1))->transform().position().x()
+                            > movingPlayers.players()[0].transform().position().x(), "Physics reducer did not publish its solved root");
+                    }
+                    return disposition;
+                };
+                require(admitted(controls[0]) == CommandDisposition::Applied, "Valid controls rejected by reducer");
+                const auto& player = movingPlayers.players()[0];
+                const auto proposal = [&](ServerCommandPayload payload) {
+                    return std::visit([&](auto value) {
+                        return ServerCommandProposal(id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                            id<CommandId>(1), CanonicalRevision::initial(),
+                            EntityPrecondition(player.entityId(), player.entityRevision(), player.authorityEpoch()), std::move(value));
+                    }, std::move(payload));
+                };
+                require(admitted(proposal(PlayerMotionCommandProposal(LinearVelocity3(4096, 0, 0)))) == CommandDisposition::MotionOutOfRange,
+                    "V79 accepted legacy velocity authority");
+                require(admitted(proposal(CellTransitionCommandProposal(CellId::interior(id<CellSpaceId>(2)))))
+                    == CommandDisposition::ObjectInteractionRejected, "V79 accepted a client-authored cell change");
+                require(admitted(proposal(PlayerLocomotionCommandProposal(id<LocomotionInputTick>(5), id<LocomotionInputSequence>(1),
+                    LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0),
+                        Position3(100000, 100000, 100000), player.transform().orientation())))) == CommandDisposition::MotionOutOfRange,
+                    "V79 accepted a client-authored pose");
+                const auto beforeMovement = image(service);
+                auto pendingMovement = native.prepareNativePlayerTick(movingPlayers, id<ServerTick>(5), 1.f/30, {}, &world, {}, controls);
+                require(pendingMovement && pendingMovement->playerMotions().size() == 2 && image(service) == beforeMovement,
+                    "Player controls failed to stage isolated motion");
+                auto retryMovement = native.prepareNativePlayerTick(movingPlayers, id<ServerTick>(5), 1.f/30, {}, &world, {}, controls);
+                require(retryMovement && pendingMovement->playerMotions()[0].root == retryMovement->playerMotions()[0].root,
+                    "Player physics retry diverged");
+                std::vector<ServerCommandProposal> burst(32, controls[0]);
+                burst.push_back(controls[1]);
+                auto burstMovement = native.prepareNativePlayerTick(movingPlayers, id<ServerTick>(5), 1.f/30, {}, &world, {}, burst);
+                require(burstMovement && burstMovement->playerMotions()[0].root == pendingMovement->playerMotions()[0].root
+                    && burstMovement->playerMotions()[1].root == pendingMovement->playerMotions()[1].root,
+                    "Control burst bought extra simulation time");
+                const auto physicsBaseline = native.projectPlayerPhysics(movingPlayers, id<PlayerId>(1), pendingMovement.get());
+                require(physicsBaseline && physicsBaseline->valid() && physicsBaseline->consumedCommand == 1,
+                    "Candidate lost its acknowledged solver frame");
+                require(pendingMovement->commit([](auto) { return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && image(service) == beforeMovement, "Rejected player physics leaked a frame");
+                require(bool(native.projectInventory(movingPlayers, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), pendingMovement.get())),
+                    "Player physics wrapper lost staged inventory projection");
+                std::vector<std::byte> durableMovement;
+                require(pendingMovement->commit([&](auto bytes) { durableMovement.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                    && durableMovement == image(service), "Player physics durability did not install the exact image");
+                for (const auto& motion : pendingMovement->playerMotions())
+                {
+                    auto found = std::ranges::find(placed, motion.player, &CanonicalPlayerEntityState::playerId);
+                    *found = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(*found, id<ServerTick>(5),
+                        motion.root, motion.velocity, motion.mode));
+                }
+                movingPlayers = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
+                const auto& jumper = movingPlayers.players()[0];
+                const std::array turnedControls{ServerCommandProposal(id<SessionId>(1), SessionGeneration::initial(),
+                    id<CommandSequence>(2), id<CommandId>(3), CanonicalRevision::initial(),
+                    EntityPrecondition(jumper.entityId(), jumper.entityRevision(), jumper.authorityEpoch()),
+                    PlayerLocomotionCommandProposal(id<LocomotionInputTick>(6), id<LocomotionInputSequence>(2),
+                        LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0x40000000), LinearVelocity3(0, 0, 0), {}, {},
+                            PlayerMovementControls{0, 1024, 0})))};
+                auto turned = native.prepareNativePlayerTick(movingPlayers, id<ServerTick>(6), 1.f/30, {}, &world, {}, turnedControls);
+                require(turned && turned->playerMotions()[0].root.position().x() < jumper.transform().position().x()
+                    && turned->playerMotions()[0].root.position().y() == jumper.transform().position().y(),
+                    "Player controls mirrored OpenMW's clockwise facing");
+                const std::array jumpControls{ServerCommandProposal(id<SessionId>(1), SessionGeneration::initial(),
+                    id<CommandSequence>(2), id<CommandId>(3), CanonicalRevision::initial(),
+                    EntityPrecondition(jumper.entityId(), jumper.entityRevision(), jumper.authorityEpoch()),
+                    PlayerLocomotionCommandProposal(id<LocomotionInputTick>(6), id<LocomotionInputSequence>(2),
+                        LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0), {}, {},
+                            PlayerMovementControls{0, 0, 1024, Turn32::fromValue(0), true})))};
+                auto jumping = native.prepareNativePlayerTick(movingPlayers, id<ServerTick>(6), 1.f/30, {}, &world, {}, jumpControls);
+                require(jumping && jumping->playerMotions()[0].mode == LocomotionMode::Jump
+                    && jumping->playerMotions()[0].root.position().z() > jumper.transform().position().z(),
+                    "Solved player jump lost remote locomotion presentation");
+                auto expired = native.prepareNativePlayerTick(movingPlayers, id<ServerTick>(17), 1.f/30, {}, &world, {}, {});
+                require(expired && expired->playerMotions().size() == 2
+                    && expired->playerMotions()[0].root.position().x() == placed[0].transform().position().x(),
+                    "Expired controls continued horizontal movement");
+                const auto absent = std::get<CanonicalServerState>(createCanonicalServerState(placed, {}));
+                auto resetPlayers = placed;
+                const auto& reset = resetPlayers[0];
+                resetPlayers[0] = CanonicalPlayerEntityState(reset.playerId(), reset.entityId(), reset.appearanceId(),
+                    reset.transform(), LinearVelocity3(0, 0, 0), reset.entityRevision(), reset.authorityEpoch().next().value(),
+                    reset.lastSpatialChangeTick(), reset.locomotionMode());
+                const auto newEpoch = std::get<CanonicalServerState>(createCanonicalServerState(resetPlayers, movingPlayers.activeSessions()));
+                auto stale = native.prepareNativePlayerTick(newEpoch, id<ServerTick>(6), 1.f/30, {}, &world, {}, controls);
+                require(stale && stale->playerMotions()[0].root.position().x() == resetPlayers[0].transform().position().x(),
+                    "Pre-discontinuity controls moved a new authority epoch");
+                auto disconnected = native.prepareNativePlayerTick(absent, id<ServerTick>(6), 1.f/30, {}, &world, {}, {});
+                require(disconnected && disconnected->playerMotions().empty(), "Disconnected players advanced physics");
+                if (!(placed[0].transform().position().x() > -350 * 1024 && placed[1].transform().position().x() < 350 * 1024))
+                {
+                    const auto campaign = readActorCampaign({reinterpret_cast<const char*>(beforeMovement.data()), beforeMovement.size()});
+                    throw std::runtime_error("Player controls did not move independently: x="
+                        + std::to_string(placed[0].transform().position().x()) + "," + std::to_string(placed[1].transform().position().x())
+                        + " knocked=" + std::to_string(campaign.combat->knockedDown[0]) + ","
+                        + std::to_string(campaign.combat->knockedDown[1]));
+                }
+                for (size_t i = 0; i < 2; ++i) { records[i].characterProfile = completed[i]; records[i].savedPlayer = placed[i]; }
+                auto establishedPhysics = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
+                InventoryHost restoredPhysics(descriptor, manifest, *establishedPhysics, *crypto, durableMovement);
+                require(image(restoredPhysics.service()) == durableMovement, "Player physics recovery changed durable frames");
+                auto frozen = restoredPhysics.service().prepareNativePlayerTick(movingPlayers, id<ServerTick>(6), 1.f/30, {}, &world, {}, {});
+                require(frozen && frozen->playerMotions().empty(), "Recovered controls moved before new authenticated input");
+                auto continuation = native.prepareNativePlayerTick(movingPlayers, id<ServerTick>(6), 1.f/30, {}, &world, {}, controls);
+                auto recovered = restoredPhysics.service().prepareNativePlayerTick(movingPlayers, id<ServerTick>(6), 1.f/30, {}, &world, {}, controls);
+                std::vector<std::byte> continued, resumed;
+                require(continuation && recovered
+                    && continuation->commit([&](auto bytes) { continued.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && recovered->commit([&](auto bytes) { resumed.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                    && continued == resumed, "Player physics recovery replay diverged");
+                const auto noPlayers = std::get<CanonicalServerState>(createCanonicalServerState({}, {}));
+                auto vanished = restoredPhysics.service().prepareNativePlayerTick(noPlayers, id<ServerTick>(6), 1.f/30, {}, &world, {}, {});
+                require(vanished && vanished->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                    == CanonicalDurabilityResult::Rejected && image(restoredPhysics.service()) == durableMovement,
+                    "Rejected player expiration removed live collision frames");
+                require(vanished->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                    == CanonicalDurabilityResult::Committed, "Player expiration did not retire physical hulls");
+                const auto retiredImage = image(restoredPhysics.service());
+                const auto retired = readActorCampaign({reinterpret_cast<const char*>(retiredImage.data()), retiredImage.size()});
+                require(!retired.playerFrames[0].root && !retired.playerFrames[1].root,
+                    "Expired canonical players retained invisible collision hulls");
+                auto rejoined = restoredPhysics.service().prepareNativePlayerTick(movingPlayers, id<ServerTick>(7), 1.f/30, {}, &world, {}, controls);
+                require(rejoined && rejoined->playerMotions().size() == 2,
+                    "Rejoined players could not rebuild retired collision hulls");
+                require(rejoined->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                    == CanonicalDurabilityResult::Committed, "Rejoined player frame installation failed");
+                const auto installMotions = [&](const PreparedNativeInventory& frame, uint64_t time) {
+                    for (const auto& motion : frame.playerMotions())
+                    {
+                        const auto found = std::ranges::find(placed, motion.player, &CanonicalPlayerEntityState::playerId);
+                        require(found != placed.end(), "Jump frame named an unknown player");
+                        auto& current = *found;
+                        current = std::get<CanonicalPlayerEntityState>(advanceCanonicalSpatialState(current,
+                            id<ServerTick>(time), motion.root, motion.velocity, motion.mode));
+                    }
+                    movingPlayers = std::get<CanonicalServerState>(createCanonicalServerState(placed, authority.activeSessions()));
+                };
+                installMotions(*rejoined, 7);
+                const auto pulse = [&](uint64_t time, bool held) {
+                    const auto& current = movingPlayers.players()[0];
+                    return ServerCommandProposal(id<SessionId>(1), SessionGeneration::initial(),
+                        id<CommandSequence>(time - 6), id<CommandId>(time - 6), CanonicalRevision::initial(),
+                        EntityPrecondition(current.entityId(), current.entityRevision(), current.authorityEpoch()),
+                        PlayerLocomotionCommandProposal(id<LocomotionInputTick>(time), id<LocomotionInputSequence>(time - 6),
+                            LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0,0,0), {}, {},
+                                PlayerMovementControls{0,0,int16_t(held ? 1024 : 0),Turn32::fromValue(0),true})));
+                };
+                bool landed = false;
+                uint64_t time = 8;
+                const auto groundHeight = placed[0].transform().position().z();
+                for (; time < 68; ++time)
+                {
+                    const std::array repeated{pulse(time, false)};
+                    auto frame = restoredPhysics.service().prepareNativePlayerTick(movingPlayers, id<ServerTick>(time),
+                        1.f/30, {}, &world, {}, repeated);
+                    require(frame && frame->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                        == CanonicalDurabilityResult::Committed, "Repeated jump pulse preparation failed");
+                    if (time == 8) require(frame->playerMotions()[0].root.position().z() > groundHeight,
+                        "First latched jump pulse was lost");
+                    installMotions(*frame, time);
+                    if (time > 8 && frame->playerMotions()[0].physics.grounded) { landed = true; ++time; break; }
+                }
+                require(landed, "Latched jump did not land within the bounded fixture");
+                const std::array repeated{pulse(time, false)};
+                auto repeat = restoredPhysics.service().prepareNativePlayerTick(movingPlayers, id<ServerTick>(time),
+                    1.f/30, {}, &world, {}, repeated);
+                require(repeat && repeat->playerMotions()[0].root.position().z() == groundHeight
+                    && repeat->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                    "Unacknowledged jump pulse jumped again after landing");
+                installMotions(*repeat, time++);
+                const std::array held{pulse(time, true)};
+                auto heldJump = restoredPhysics.service().prepareNativePlayerTick(movingPlayers, id<ServerTick>(time),
+                    1.f/30, {}, &world, {}, held);
+                require(heldJump && heldJump->playerMotions()[0].root.position().z() > groundHeight,
+                    "Held jump axis lost stock repeat behavior");
+                std::cout << "player physics: controls/hulls, two players, rejected durability/retry, coherent image/restart (synthetic)\n";
+                return;
+            }
             service.synchronizeCells(offline);
             require(native.activeActorCollisionBodies() == 0, "Completed characters kept offline simulation loaded");
             const auto& weapon = *source.store().get<ESM::Weapon>().find(ESM::RefId::stringRefId("iron shortsword"));

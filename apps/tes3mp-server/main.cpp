@@ -685,6 +685,8 @@ int main(int argc, char** argv)
             optionalCapabilities.push_back(TES3MP::authoritativeSecurityCapability());
     }
     std::vector<TES3MP::CapabilityId> requiredCapabilities;
+    if (nativeInventory && nativeInventory->ownsPlayerPhysics())
+        requiredCapabilities.push_back(TES3MP::playerPhysicsCapability());
     if (nativeInventory && characterContent)
     {
         requiredCapabilities.push_back(TES3MP::characterCreationCapability());
@@ -775,10 +777,11 @@ int main(int argc, char** argv)
         std::cerr << "canonical persistence composition failed\n";
         return 3;
     }
-    // Native environment initialization already represents tick zero. Its first
-    // simulation step must advance to tick one, just like recovered campaigns.
-    const auto nextTick = (persistenceFile->restoredCheckpointTick() || nativeEnvironment)
-        ? restoredTick.next()
+    // Lifecycle persistence can checkpoint the next intake tick before simulation
+    // runs. Resume the native clock from its completed world step, not that barrier.
+    const auto nextTick = nativeEnvironment
+        ? worldContent.world.time().lastAdvanceTick.next()
+        : persistenceFile->restoredCheckpointTick() ? restoredTick.next()
         : std::optional<TES3MP::ServerTick>(TES3MP::ServerTick::initial());
     if (!nextTick)
     {

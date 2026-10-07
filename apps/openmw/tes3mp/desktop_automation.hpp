@@ -65,6 +65,7 @@ namespace TES3MP::OpenMWAdapter
         bool valid() const noexcept { return mOutput.is_open(); }
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
+        std::optional<LocomotionIntent> samplePlayerControls() noexcept override;
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
         std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept override;
         std::optional<MagicUseCapture> captureMagicUse() noexcept override;

@@ -1872,10 +1872,39 @@ namespace TES3MP::Native
         std::erase_if(removed, [&](uint64_t id) {
             return std::ranges::any_of(world.objects, [id](const auto& entry) { return entry.first == id; });
         });
+        if (mBinding.mPlayerPhysics) bindPhysicsPlayers(*fresh, mPlayerFrames, removed);
         auto restored = fresh->prepareRestore(image, doors, removed);
         fresh->install(*restored);
         if (replan) fresh->rebuildTravel();
         return fresh;
+    }
+
+    void InventoryService::bindPhysicsPlayers(InteriorActorScene& scene,
+        const std::array<PlayerPhysicsState, 2>& states, std::span<const uint64_t> removed) const
+    {
+        if (!mBinding.mBindPhysicsPlayers) throw std::invalid_argument("Player collision factory unavailable");
+        std::vector<DynamicActorBody> bodies;
+        for (size_t i = 0; i < states.size(); ++i) if (states[i].root)
+        {
+            const auto& root = *states[i].root;
+            const auto& position = root.position();
+            auto body = mBinding.mActors[i].mCharacterBody;
+            if (!body) throw std::invalid_argument("Player physics requires committed character body");
+            const auto cell = mBinding.mEngineCells.find(root.cell());
+            if (cell == mBinding.mEngineCells.end()) throw std::invalid_argument("Player physics cell is unbound");
+            bodies.push_back({PlayerHullBase + i, mBinding.mActors[i].mBase,
+                {float(double(position.x()) / 1024), float(double(position.y()) / 1024), float(double(position.z()) / 1024)},
+                float(-double(std::bit_cast<int32_t>(root.orientation().z().value()))
+                    / 4294967296.0 * 6.283185307179586), cell->second, body});
+        }
+        mBinding.mBindPhysicsPlayers(scene, bodies);
+        const auto doors = actorDoorFrames();
+        for (size_t i = 0; i < states.size(); ++i) if (states[i].root && !states[i].image.empty())
+        {
+            auto& player = scene.forPlayer(PlayerHullBase + i);
+            auto restored = player.prepareRestore(states[i].image, doors, removed);
+            player.install(*restored);
+        }
     }
 
     void InventoryService::synchronizeCells(const CanonicalServerState& players)
@@ -2440,6 +2469,7 @@ namespace TES3MP::Native
     void InventoryService::reportDoorObstruction(
         const CanonicalServerState& players, const ClientDoorObstruction& report, ServerTick tick)
     {
+        if (mBinding.mPlayerPhysics) return;
         if (mBinding.mStreamExteriors)
         {
             const auto* session = players.findActiveSession(report.session);
@@ -3046,7 +3076,11 @@ namespace TES3MP::Native
             if (!std::isfinite(direction.length2()) || direction.length2() < 1.f
                 || direction.length2() > 16384.f * 16384.f) return {};
         }
-        if (!bow && !MWMechanics::isInMeleeReach(origin, target, 0, 0,
+        const float playerHull = mBinding.mPlayerPhysics && mBinding.mNavigatingActor->hasPlayer(PlayerHullBase + owner)
+            ? mBinding.mNavigatingActor->forPlayer(PlayerHullBase + owner).selectedActorHalfExtentY() : 0.f;
+        const float targetHull = mBinding.mPlayerPhysics
+            ? mBinding.mNavigatingActor->forActor(scene.mActor).selectedActorHalfExtentY() : 0.f;
+        if (!bow && !MWMechanics::isInMeleeReach(origin, target, playerHull, targetHull,
                 MWMechanics::getMeleeWeaponReach(mRuntime.mStore, weapon, true)))
             return {};
         return std::make_unique<AttackTransaction>(attack, player->playerId(), mCombat->playerLives[actor(player->playerId())].generation);
@@ -3066,8 +3100,23 @@ namespace TES3MP::Native
         if (mBinding.mNavigatingActor)
         {
             auto decoded = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
-            if (decoded.characters != mBinding.mCharacterCreation)
+            struct RestorePlayerFrames
+            {
+                std::array<PlayerPhysicsState, 2>& frames;
+                std::array<PlayerPhysicsState, 2> previous;
+                bool accepted = false;
+                ~RestorePlayerFrames() { if (!accepted) frames.swap(previous); }
+            } restoreFrames{mPlayerFrames, mPlayerFrames};
+            if (decoded.characters != mBinding.mCharacterCreation || decoded.playerPhysics != mBinding.mPlayerPhysics)
                 throw std::invalid_argument("Native character campaign version mismatch");
+            if (mBinding.mPlayerPhysics)
+            {
+                for (size_t i = 0; i < 2; ++i)
+                    if (decoded.playerFrames[i].root && (decoded.playerFrames[i].player != mBinding.mPlayers[i].value()
+                        || !mBinding.mCharacters[i] || !worldDomain(decoded.playerFrames[i].root->cell())))
+                        throw std::invalid_argument("Recovered player physics binding invalid");
+                mPlayerFrames = decoded.playerFrames;
+            }
             if (decoded.characters) for (size_t i = 0; i < 2; ++i)
             {
                 if (decoded.characterPlayers[i] != mBinding.mPlayers[i].value()
@@ -4154,6 +4203,7 @@ namespace TES3MP::Native
             mRespawnInventory.swap(baseline);
             mNeighborRespawnInventory.swap(neighborBaselines);
             mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
+            restoreFrames.accepted = true;
             installActorPosition();
             return;
         }
@@ -4780,6 +4830,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Character campaign exceeds image budget");
             wrapped.insert(wrapped.end(), result.begin(), result.end()); result.swap(wrapped);
         }
+        if (mBinding.mPlayerPhysics) result = sealPlayerPhysics(result, mPlayerFrames);
         (void)readActorCampaign(result);
         return result;
     }
@@ -4867,10 +4918,12 @@ namespace TES3MP::Native
             const auto position = player->transform().position();
             const osg::Vec3f target(float(double(position.x()) / 1024),
                 float(double(position.y()) / 1024), float(double(position.z()) / 1024));
-            // The inherited player mover supplies a server position, but no
-            // authoritative player hull yet. Center-to-center reach is
-            // conservative until the M4 movement cutover supplies that hull.
-            if (!MWMechanics::isInMeleeReach(origin, target, 0, 0, reach)) continue;
+            const float sourceHull = mBinding.mPlayerPhysics
+                ? mBinding.mNavigatingActor->forActor(actor.mActor).selectedActorHalfExtentY() : 0.f;
+            const size_t index = size_t(std::ranges::find(mBinding.mPlayers, player->playerId()) - mBinding.mPlayers.begin());
+            const float playerHull = mBinding.mPlayerPhysics && mBinding.mNavigatingActor->hasPlayer(PlayerHullBase + index)
+                ? mBinding.mNavigatingActor->forPlayer(PlayerHullBase + index).selectedActorHalfExtentY() : 0.f;
+            if (!MWMechanics::isInMeleeReach(origin, target, sourceHull, playerHull, reach)) continue;
             const float distance = (target - origin).length2();
             if (distance < nearest || (distance == nearest && player->playerId().value() < result))
             { nearest = distance; result = player->playerId().value(); }
@@ -5312,6 +5365,363 @@ namespace TES3MP::Native
         }
     };
 
+    class InventoryService::PlayerPhysicsTransaction final : public PreparedNativeInventory
+    {
+    public:
+        InventoryService& service;
+        std::unique_ptr<PreparedNativeInventory> native;
+        std::shared_ptr<InteriorActorScene> scene;
+        std::array<std::unique_ptr<InteriorActorScene::Prepared>, 2> steps;
+        std::array<PlayerPhysicsState, 2> states;
+        std::array<std::pair<uint64_t, uint64_t>, 2> bindings{};
+        std::vector<NativePlayerMotion> motions;
+        EquipmentBytes before;
+        PlayerPhysicsTransaction(InventoryService& owner) : service(owner), before(owner.mActorImage) {}
+        bool changesInventory() const noexcept override { return native->changesInventory(); }
+        bool waitRestApplied() const noexcept override { return native->waitRestApplied(); }
+        std::span<const NativePlayerMotion> playerMotions() const override { return motions; }
+        std::span<const std::pair<PlayerId, Transform>> playerRelocations() const override
+        { return native->playerRelocations(); }
+        CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
+        {
+            if (before != service.mActorImage || !native || !scene) return CanonicalDurabilityResult::Rejected;
+            try
+            {
+                for (size_t i = 0; i < 2; ++i)
+                    if (steps[i] && (!scene->hasPlayer(PlayerHullBase + i)
+                            || !scene->forPlayer(PlayerHullBase + i).canInstall(*steps[i])))
+                        return CanonicalDurabilityResult::Rejected;
+                EquipmentBytes sealed;
+                const auto result = native->commit([&](std::span<const std::byte> image) {
+                    const auto bytes = std::span(reinterpret_cast<const char*>(image.data()), image.size());
+                    const auto [prior, inner] = readPlayerPhysics(bytes);
+                    sealed = sealPlayerPhysics(inner, states);
+                    const auto outcome = persist(std::as_bytes(std::span(sealed)));
+                    if (outcome == CanonicalDurabilityResult::Committed)
+                        for (size_t i = 0; i < 2; ++i) if (steps[i])
+                            scene->forPlayer(PlayerHullBase + i).install(*steps[i]);
+                    return outcome;
+                });
+                if (result == CanonicalDurabilityResult::Committed)
+                {
+                    service.mPlayerFrames.swap(states);
+                    service.mPlayerControlBindings = bindings;
+                    service.mActorImage.swap(sealed);
+                }
+                return result;
+            }
+            catch (...) { service.mRuntime.mFailedClosed = true; return CanonicalDurabilityResult::Failed; }
+        }
+    };
+
+    const PreparedNativeInventory* InventoryService::unwrapPlayerPhysics(const PreparedNativeInventory* candidate) const
+    {
+        const auto* physics = dynamic_cast<const PlayerPhysicsTransaction*>(candidate);
+        return physics ? physics->native.get() : candidate;
+    }
+
+    std::optional<PlayerPhysicsBaseline> InventoryService::projectPlayerPhysics(
+        const CanonicalServerState& players, PlayerId player, const PreparedNativeInventory* candidate) const
+    {
+        if (!mBinding.mPlayerPhysics) return {};
+        if (candidate)
+        {
+            for (const auto& motion : candidate->playerMotions())
+                if (motion.player == player) return motion.physics;
+            const auto* prepared = dynamic_cast<const PlayerPhysicsTransaction*>(candidate);
+            const size_t index = actor(player);
+            if (!prepared || !prepared->states[index].root || !prepared->scene
+                || !prepared->scene->hasPlayer(PlayerHullBase + index)) return {};
+            const auto frame = prepared->steps[index] ? prepared->steps[index]->snapshot()
+                : prepared->scene->forPlayer(PlayerHullBase + index).snapshot();
+            const auto* native = dynamic_cast<const ActorTransaction*>(prepared->native.get());
+            const bool blocked = native && native->combat
+                && (native->combat->actors[index][8][2] <= 0 || native->combat->knockedDown[index]
+                    || native->combat->hitRecoveryTicks[index] || hasParalysis(native->timedEffects, index));
+            return PlayerPhysicsBaseline{frame.mInertia, frame.mLastStuckPosition, frame.mFallHeight, frame.mBreath,
+                frame.mStuckFrames, frame.mGrounded, frame.mSlope, frame.mWalkingOnWater, prepared->states[index].sequence,
+                prepared->states[index].controls.jump, blocked};
+        }
+        const size_t index = actor(player);
+        const auto& state = mPlayerFrames[index];
+        const auto* canonical = players.findPlayer(player);
+        if (!state.root || !canonical || state.root != canonical->transform() || state.epoch != canonical->authorityEpoch().value()
+            || !mBinding.mNavigatingActor->hasPlayer(PlayerHullBase + index)) return {};
+        const auto frame = mBinding.mNavigatingActor->forPlayer(PlayerHullBase + index).snapshot();
+        const auto session = std::ranges::find_if(players.activeSessions(),
+            [&](const auto& entry) { return entry.playerId() == player; });
+        const uint64_t sequence = session != players.activeSessions().end()
+            && session->sessionId().value() == state.session && session->sessionGeneration().value() == state.generation
+            ? state.sequence : 0;
+        return PlayerPhysicsBaseline{frame.mInertia, frame.mLastStuckPosition, frame.mFallHeight, frame.mBreath,
+            frame.mStuckFrames, frame.mGrounded, frame.mSlope, frame.mWalkingOnWater, sequence, state.controls.jump,
+            mCombat && (mCombat->actors[index][8][2] <= 0 || mCombat->knockedDown[index]
+                || mCombat->hitRecoveryTicks[index] || hasParalysis(mTimedEffects, index))};
+    }
+
+    std::unique_ptr<PreparedNativeInventory> InventoryService::prepareNativePlayerTick(
+        const CanonicalServerState& inputPlayers, ServerTick tick, float seconds,
+        std::unique_ptr<PreparedNativeInventory> command, const CanonicalWorldState* world,
+        std::optional<WaitRestRequest> waitRest, std::span<const ServerCommandProposal> controls)
+    {
+        if (!mBinding.mPlayerPhysics)
+            return prepareNativeScheduledTick(inputPlayers, tick, seconds, std::move(command), world, waitRest);
+        if (!mBinding.mNavigatingActor || !mCombat || controls.size() > MaximumServerCommandsPerTick
+            || !std::isfinite(seconds) || std::abs(seconds - 1.f / 30.f) > 1e-6f)
+            throw std::invalid_argument("Player physics authority unavailable");
+        auto transaction = std::make_unique<PlayerPhysicsTransaction>(*this);
+        transaction->states = mPlayerFrames;
+        transaction->bindings = mPlayerControlBindings;
+        auto players = std::vector(inputPlayers.players().begin(), inputPlayers.players().end());
+        bool rebuild = false;
+        std::vector<uint64_t> removedPlayers;
+        for (size_t i = 0; i < 2; ++i)
+        {
+            const auto* player = inputPlayers.findPlayer(mBinding.mPlayers[i]);
+            auto& state = transaction->states[i];
+            if (!player || !mBinding.mCharacters[i])
+            {
+                if (state.root)
+                {
+                    state = {};
+                    transaction->bindings[i] = {};
+                    removedPlayers.push_back(PlayerHullBase + i);
+                    rebuild = true;
+                }
+                continue;
+            }
+            if (!state.root || state.epoch != player->authorityEpoch().value()
+                || state.root->cell() != player->transform().cell()
+                || !mBinding.mNavigatingActor->hasPlayer(PlayerHullBase + i))
+            {
+                state = PlayerPhysicsState{};
+                state.player = player->playerId().value(); state.epoch = player->authorityEpoch().value();
+                state.root = player->transform(); rebuild = true;
+            }
+        }
+        // Factories and temporary candidates see the same staged player frame
+        // domain. Neither this scope nor preparation installs live gameplay.
+        struct Restore
+        {
+            InventoryService& owner;
+            std::shared_ptr<InteriorActorScene> scene;
+            std::array<PlayerPhysicsState, 2> frames;
+            ~Restore() { owner.mBinding.mNavigatingActor = std::move(scene); owner.mPlayerFrames.swap(frames); }
+        } restore{*this, mBinding.mNavigatingActor, mPlayerFrames};
+        mPlayerFrames = transaction->states;
+        auto scene = mBinding.mNavigatingActor;
+        if (rebuild)
+        {
+            std::vector<DynamicActorBody> bodies;
+            for (const auto& body : mBinding.mDynamicActors.bodies) bodies.push_back(body.collision);
+            scene = mBinding.mCreateActorSet(bodies);
+            scene->replaceWorld(collisionWorld());
+            bindPhysicsPlayers(*scene, transaction->states, removedPlayers);
+            auto actors = scene->prepareRestore(mBinding.mNavigatingActor->image(), actorDoorFrames(), removedPlayers);
+            scene->install(*actors);
+            mBinding.mNavigatingActor = scene;
+        }
+        if (const auto* transfer = dynamic_cast<const WorldTransaction*>(areaDoorCommand(command.get())))
+        {
+            scene = prepareCollisionWorld(collisionWorld(&transfer->prepared), scene->image(),
+                actorDoorFrames(command.get()));
+            mBinding.mNavigatingActor = scene;
+            rebuild = true;
+        }
+        std::vector<std::pair<uint64_t, const InteriorActorScene::Prepared*>> hulls;
+        std::vector<std::pair<size_t, ActorSceneSnapshot>> controlledFrames;
+        for (size_t i = 0; i < 2; ++i)
+        {
+            const auto* player = inputPlayers.findPlayer(mBinding.mPlayers[i]);
+            auto& state = transaction->states[i];
+            if (!state.root || !player) continue;
+            const auto session = std::ranges::find_if(inputPlayers.activeSessions(),
+                [&](const auto& value) { return value.playerId() == player->playerId(); });
+            if (session == inputPlayers.activeSessions().end())
+            { state.controls = {}; state.image = scene->forPlayer(PlayerHullBase + i).image(); continue; }
+            const auto binding = std::pair{session->sessionId().value(), session->sessionGeneration().value()};
+            if (state.session != binding.first || state.generation != binding.second
+                || transaction->bindings[i] != binding)
+            {
+                state.session = session->sessionId().value(); state.generation = session->sessionGeneration().value();
+                state.controls = {}; state.inputTick = 0; state.sequence = 0;
+            }
+            bool jump = false;
+            for (const auto& proposal : controls) if (proposal.sessionId() == session->sessionId())
+            {
+                if (proposal.sessionGeneration() != session->sessionGeneration()
+                    || proposal.entityPrecondition().entityId() != player->entityId()
+                    || proposal.entityPrecondition().expectedAuthorityEpoch() != player->authorityEpoch()) continue;
+                const auto* input = std::get_if<PlayerLocomotionCommandProposal>(&proposal.payload());
+                if (!input || !input->intent().controls()) throw std::invalid_argument("Player control shape invalid");
+                jump |= input->intent().controls()->jump && !state.controls.jump;
+                state.controls = *input->intent().controls(); state.facing = input->intent().rootFacing();
+                state.mode = input->intent().mode(); state.inputTick = tick.value();
+                state.sequence = proposal.commandSequence().value();
+                transaction->bindings[i] = binding;
+            }
+            if (transaction->bindings[i] != binding)
+            { state.image = scene->forPlayer(PlayerHullBase + i).image(); continue; }
+            if (mCombat->actors[i][8][2] <= 0)
+            { state.controls = {}; state.image = scene->forPlayer(PlayerHullBase + i).image(); continue; }
+            if (tick.value() < state.inputTick) throw std::invalid_argument("Player input clock reversed");
+            if (!state.sequence || tick.value() - state.inputTick >= PlayerControlExpiryTicks)
+            { state.controls.right = state.controls.forward = state.controls.vertical = 0; state.controls.jump = false; jump = false; }
+            const auto stats = loadCombatStats(mRuntime.mStore, mCombat->actors[i], mTimedEffects, i, true);
+            const auto magnitude = [&](ESM::RefId id) {
+                if (id == ESM::MagicEffect::Levitate && !mCombat->levitationEnabled) return 0.f;
+                const auto index = uint64_t(ESM::MagicEffect::refIdToIndex(id));
+                float result = 0.f;
+                for (const auto& effect : mTimedEffects)
+                    if (effect.actor == i && effect.effectIndex == index) result += effect.magnitude;
+                return result;
+            };
+            const auto setting = [&](const char* id) { return mRuntime.mStore.get<ESM::GameSetting>().find(id)->mValue.getFloat(); };
+            const float strength = stats.getAttribute(ESM::Attribute::Strength).getModified();
+            const float speed = stats.getAttribute(ESM::Attribute::Speed).getModified();
+            const float athletics = stats.getSkill(ESM::Skill::Athletics).getModified();
+            const float acrobatics = stats.getSkill(ESM::Skill::Acrobatics).getModified();
+            const auto* equipmentCommand = areaDoorCommand(command.get());
+            const auto inventoryWeight = [&] {
+                if (const auto* transfer = dynamic_cast<const Transaction*>(equipmentCommand))
+                    return mRuntime.preparedWeight(transfer->prepared.mTransfer, i);
+                if (const auto* equipment = dynamic_cast<const EquipmentTransaction*>(equipmentCommand))
+                    return mRuntime.preparedWeight(equipment->prepared, i);
+                if (const auto* ground = dynamic_cast<const WorldTransaction*>(equipmentCommand))
+                    return mRuntime.preparedWeight(ground->prepared, i);
+                return mRuntime.storage(i).getWeight();
+            };
+            const float weight = std::max(0.f, inventoryWeight()
+                - magnitude(ESM::MagicEffect::Feather) + magnitude(ESM::MagicEffect::Burden));
+            const float encumbrance = MWClass::normalizedEncumbrance(weight, strength * setting("fEncumbranceStrMult"));
+            const bool inert = encumbrance > 1.f || hasParalysis(mTimedEffects, i)
+                || mCombat->knockedDown[i] || mCombat->hitRecoveryTicks[i] != 0;
+            const bool running = state.mode == LocomotionMode::Run;
+            const auto profile = MWClass::npcMovementProfile(speed, athletics, acrobatics, encumbrance,
+                stats.getFatigueTerm(mRuntime.mStore), magnitude(ESM::MagicEffect::SwiftSwim),
+                magnitude(ESM::MagicEffect::Levitate), magnitude(ESM::MagicEffect::Jump), running,
+                state.mode == LocomotionMode::Sneak, mCombat->players[i].werewolf && running
+                    && mCombat->players[i].drawState == uint64_t(MWMechanics::DrawState::Nothing), inert, setting,
+                Constants::GravityConst * Constants::UnitsPerMeter);
+            ActorMovement movement{.enabled = true, .walkSpeed = profile.walk, .swimSpeed = profile.swim,
+                .flySpeed = profile.fly, .jumpSpeed = profile.jump,
+                .slowFall = MWClass::npcSlowFall(magnitude(ESM::MagicEffect::SlowFall)),
+                .levitating = magnitude(ESM::MagicEffect::Levitate) > 0,
+                .waterWalking = magnitude(ESM::MagicEffect::WaterWalking) > 0,
+                .waterBreathing = magnitude(ESM::MagicEffect::WaterBreathing) > 0,
+                // A retained short-press pulse fires once; a held up/jump axis
+                // preserves stock held-button jumping.
+                .unconscious = mCombat->knockedDown[i],
+                .jumpRequested = (jump || (state.controls.jump && state.controls.vertical > 0)) && !inert,
+                .airControl = profile.airControl, .xyScale = scene->playerMovementScale(PlayerHullBase + i)};
+            const auto radians = [](Turn32 turn) { return float(-double(std::bit_cast<int32_t>(turn.value()))
+                / 4294967296.0 * 6.283185307179586); };
+            auto& body = scene->forPlayer(PlayerHullBase + i);
+            const auto previous = body.snapshot();
+            std::unique_ptr<InteriorActorScene::Prepared> step;
+            scene->withPlayerHulls(hulls, [&] {
+                step = body.prepareControlled(movement,
+                    {float(state.controls.right) / 1024, float(state.controls.forward) / 1024, float(state.controls.vertical) / 1024},
+                    radians(state.controls.pitch), radians(state.facing), actorDoorFrames(command.get()));
+            });
+            auto after = step->snapshot();
+            const bool swimming = body.isSwimming(PlayerHullBase + i);
+            const float vertical = swimming || movement.levitating ? float(state.controls.vertical) : 0.f;
+            const float speedFactor = std::min(1.f, std::sqrt(float(state.controls.right) * state.controls.right
+                + float(state.controls.forward) * state.controls.forward + vertical * vertical) / 1024.f);
+            after.mFatigueCost = inert ? 0.f : MWClass::movementFatigueCost(encumbrance,
+                state.mode == LocomotionMode::Sneak, swimming, running,
+                speedFactor, seconds, setting);
+            if (movement.jumpRequested && previous.mGrounded && !movement.levitating
+                && !swimming && movement.jumpSpeed > 0.f)
+                after.mFatigueCost += MWClass::jumpFatigueCost(encumbrance, setting);
+            controlledFrames.emplace_back(i, after);
+            const auto quanta = [](float value) { return int64_t(std::llround(double(value) * 1024)); };
+            const Position3 position(quanta(after.mPosition[0]), quanta(after.mPosition[1]), quanta(after.mPosition[2]));
+            const auto cell = movementCell(state.root->cell(), position);
+            if (!cell) throw std::invalid_argument("Player moved outside bound exploration domain");
+            state.root = Transform(*cell, position, Orientation3(state.controls.pitch, Turn32::fromValue(0), state.facing));
+            if (*cell != player->transform().cell()) ++state.epoch;
+            state.image.assign(step->image().begin(), step->image().end());
+            const LinearVelocity3 velocity(quanta(after.mPosition[0] - previous.mPosition[0]),
+                quanta(after.mPosition[1] - previous.mPosition[1]), quanta(after.mPosition[2] - previous.mPosition[2]));
+            const auto physicalMode = !after.mGrounded && !movement.levitating && !swimming
+                ? LocomotionMode::Jump : state.mode;
+            transaction->motions.push_back({player->playerId(), *state.root, velocity, physicalMode,
+                {after.mInertia, after.mLastStuckPosition, after.mFallHeight, after.mBreath,
+                    after.mStuckFrames, after.mGrounded, after.mSlope, after.mWalkingOnWater, state.sequence, state.controls.jump, inert}});
+            auto found = std::ranges::find(players, player->playerId(), &CanonicalPlayerEntityState::playerId);
+            *found = CanonicalPlayerEntityState(player->playerId(), player->entityId(), player->appearanceId(),
+                *state.root, velocity, player->entityRevision(), player->authorityEpoch(), tick, physicalMode);
+            hulls.emplace_back(PlayerHullBase + i, step.get());
+            transaction->steps[i] = std::move(step);
+        }
+        mPlayerFrames = transaction->states;
+        const auto staged = createCanonicalServerState(players, inputPlayers.activeSessions());
+        if (!std::holds_alternative<CanonicalServerState>(staged)) throw std::invalid_argument("Player motion state invalid");
+        scene->withPlayerHulls(hulls, [&] {
+            transaction->native = prepareNativeTick(std::get<CanonicalServerState>(staged), tick, seconds,
+                std::move(command), {}, world, {}, {}, {}, {}, waitRest, controlledFrames);
+        });
+        auto* native = dynamic_cast<ActorTransaction*>(transaction->native.get());
+        if (!native) throw std::invalid_argument("Player physics tick requires actor transaction");
+        if (native->combat)
+            for (auto& motion : transaction->motions)
+            {
+                const size_t index = actor(motion.player);
+                motion.physics.blocked |= native->combat->actors[index][8][2] <= 0
+                    || native->combat->knockedDown[index] || native->combat->hitRecoveryTicks[index]
+                    || hasParalysis(native->timedEffects, index);
+            }
+        if (!native->memberScene && rebuild) native->memberScene = scene;
+        transaction->scene = native->memberScene ? native->memberScene : scene;
+        // Resource swaps restore the candidate player images before durability.
+        if (transaction->scene != scene)
+            for (size_t i = 0; i < 2; ++i) if (transaction->steps[i])
+                transaction->steps[i] = transaction->scene->forPlayer(PlayerHullBase + i)
+                    .prepareRestore(transaction->states[i].image, actorDoorFrames());
+        for (const auto& relocation : native->relocations)
+        {
+            const size_t index = actor(relocation.first);
+            auto& state = transaction->states[index];
+            state = {};
+            state.player = relocation.first.value();
+            state.epoch = inputPlayers.findPlayer(relocation.first)->authorityEpoch().value() + 1;
+            state.root = relocation.second;
+            transaction->bindings[index] = {};
+            transaction->steps[index].reset();
+            std::erase_if(transaction->motions, [&](const auto& motion) { return motion.player == relocation.first; });
+        }
+        if (!native->relocations.empty())
+        {
+            // Teleports and death/respawn relocate physical hulls in the same
+            // durable transaction as their canonical epoch and life changes.
+            const auto priorScene = transaction->scene;
+            const auto& binding = native->membership ? *native->membership : mBinding;
+            std::vector<DynamicActorBody> bodies;
+            for (const auto& body : binding.mDynamicActors.bodies) bodies.push_back(body.collision);
+            auto fresh = binding.mCreateActorSet(bodies);
+            const auto* transfer = dynamic_cast<const WorldTransaction*>(areaDoorCommand(native->command.get()));
+            fresh->replaceWorld(collisionWorld(transfer ? &transfer->prepared : nullptr));
+            std::vector<uint64_t> removed;
+            for (const auto& relocation : native->relocations) removed.push_back(PlayerHullBase + actor(relocation.first));
+            bindPhysicsPlayers(*fresh, transaction->states, removed);
+            const auto image = native->actor && priorScene->canInstall(*native->actor)
+                ? EquipmentBytes(native->actor->image().begin(), native->actor->image().end()) : priorScene->image();
+            native->actor = fresh->prepareRestore(image, actorDoorFrames(native->command.get()), removed);
+            fresh->prepareSceneryDoors(*native->actor, actorDoorFrames(native->command.get()));
+            for (size_t i = 0; i < 2; ++i) if (transaction->states[i].root)
+            {
+                auto& player = fresh->forPlayer(PlayerHullBase + i);
+                transaction->states[i].image = player.image();
+                transaction->steps[i] = player.prepareRestore(transaction->states[i].image, actorDoorFrames());
+            }
+            native->memberScene = fresh;
+            transaction->scene = std::move(fresh);
+        }
+        return transaction;
+    }
+
     std::unique_ptr<PreparedNativeInventory> InventoryService::preparePlayerRespawn(
         const CanonicalServerState& players, const ServerCommandProposal& proposal)
     {
@@ -5442,7 +5852,8 @@ namespace TES3MP::Native
         std::span<const PlayerAiUpdate> playerAiUpdates,
         std::span<const PlayerSocialAction> socialActions,
         std::optional<FactionScriptRequest> factionScript,
-        std::optional<MovementRuleScriptRequest> movementRuleScript, std::optional<WaitRestRequest> waitRest)
+        std::optional<MovementRuleScriptRequest> movementRuleScript, std::optional<WaitRestRequest> waitRest,
+        std::span<const std::pair<size_t, ActorSceneSnapshot>> controlledPlayers)
     try
     {
         std::optional<CanonicalServerState> establishedPlayers;
@@ -6575,6 +6986,12 @@ namespace TES3MP::Native
                     --combat->hitRecoveryTicks[index];
                 auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index, mBinding.mCharacterCreation);
                 MWMechanics::restoreCombatFatigue(stats, mRuntime.mStore, seconds);
+                for (const auto& [owner, frame] : controlledPlayers) if (owner == index)
+                {
+                    auto fatigue = stats.getFatigue();
+                    fatigue.setCurrent(fatigue.getCurrent() - frame.mFatigueCost, fatigue.getCurrent() < 0.f);
+                    stats.setFatigue(fatigue);
+                }
                 if (mBinding.mKnockoutAnimation && combat->knockedDown[index] && !hasParalysis(timedEffects, index))
                 {
                     const auto& bound = (*mBinding.mBoundHits)[index];
@@ -7102,6 +7519,13 @@ namespace TES3MP::Native
             return index == 2 ? *life : neighborLives.at(index - 3);
         };
         const auto victimScene = [&](size_t index) -> ActorSceneSnapshot {
+            if (index < 2)
+            {
+                const auto* player = players.findPlayer(mBinding.mPlayers[index]);
+                const auto& position = player->transform().position();
+                return {player->playerId().value(), {float(double(position.x()) / 1024),
+                    float(double(position.y()) / 1024), float(double(position.z()) / 1024)}};
+            }
             return index == 2 ? after : mBinding.mNavigatingActor->neighborSnapshots().at(index - 3);
         };
         const auto distanceSquared = [](const std::array<float, 3>& a, const std::array<float, 3>& b) {
@@ -7740,8 +8164,12 @@ namespace TES3MP::Native
                         saveCombatStats(combat->actors[owner], attacker, timedEffects, owner);
                         continue;
                     }
+                    const float playerHull = mBinding.mPlayerPhysics && mBinding.mNavigatingActor->hasPlayer(PlayerHullBase + owner)
+                        ? mBinding.mNavigatingActor->forPlayer(PlayerHullBase + owner).selectedActorHalfExtentY() : 0.f;
+                    const float targetHull = mBinding.mPlayerPhysics
+                        ? mBinding.mNavigatingActor->forActor(targetScene.mActor).selectedActorHalfExtentY() : 0.f;
                     const bool contact = MWMechanics::isInMeleeReach(origin,
-                        osg::Vec3f(targetScene.mPosition[0], targetScene.mPosition[1], targetScene.mPosition[2]), 0, 0,
+                        osg::Vec3f(targetScene.mPosition[0], targetScene.mPosition[1], targetScene.mPosition[2]), playerHull, targetHull,
                         MWMechanics::getMeleeWeaponReach(mRuntime.mStore, weapon, true));
                     playerContacts.push_back({owner, victim, MeleeAttackType(swing.direction), swing.strength, contact});
                 }
@@ -7778,10 +8206,13 @@ namespace TES3MP::Native
                         endpoint[axis] = arrow.position[axis] + velocity[axis] / 60;
                     }
                     const auto hit = (arrow.cell ? collisionScene(*arrow.cell) : *mBinding.mNavigatingActor).projectileContact(arrow.position, endpoint,
-                        arrow.casterKind == 2 ? arrow.caster : 0);
+                        arrow.casterKind == 2 ? arrow.caster : mBinding.mPlayerPhysics
+                            ? PlayerHullBase + actor(PlayerId::fromValue(arrow.caster).value()) : 0);
                     std::optional<size_t> playerImpact;
                     std::array<float, 3> playerPosition{};
-                    if (arrow.casterKind == 2)
+                    if (mBinding.mPlayerPhysics && hit && hit->actor >= PlayerHullBase && hit->actor < PlayerHullBase + 2)
+                    { playerImpact = size_t(hit->actor - PlayerHullBase); playerPosition = hit->position; }
+                    if (arrow.casterKind == 2 && !mBinding.mPlayerPhysics)
                     {
                         const osg::Vec3f from(arrow.position[0], arrow.position[1], arrow.position[2]);
                         const osg::Vec3f to(endpoint[0], endpoint[1], endpoint[2]);
@@ -7818,7 +8249,7 @@ namespace TES3MP::Native
                     if (playerImpact)
                     {
                         arrow.terminal = 1;
-                        npcProjectileContacts.emplace_back(arrow, *playerImpact);
+                        if (arrow.casterKind == 2) npcProjectileContacts.emplace_back(arrow, *playerImpact);
                     }
                     else if (hit)
                     {
@@ -9641,10 +10072,14 @@ namespace TES3MP::Native
                 const size_t eventCount = spellCasts.size();
                 std::array<float, 3> endpoint;
                 for (size_t i = 0; i < 3; ++i) endpoint[i] = pending.position[i] + pending.step[i];
-                auto hit = (pending.cell ? collisionScene(*pending.cell) : *mBinding.mNavigatingActor).projectileContact(pending.position, endpoint, pending.casterKind == 2 ? pending.caster : 0);
+                auto hit = (pending.cell ? collisionScene(*pending.cell) : *mBinding.mNavigatingActor).projectileContact(pending.position, endpoint,
+                    pending.casterKind == 2 ? pending.caster : mBinding.mPlayerPhysics
+                        ? PlayerHullBase + actor(PlayerId::fromValue(pending.caster).value()) : 0);
                 size_t hitIndex = hit && hit->actor ? npcVictim(hit->actor) : combat->actors.size();
                 if (hit && hit->actor && !hitIndex) hitIndex = combat->actors.size();
-                if (mBinding.mMagicPlayerTarget)
+                if (mBinding.mPlayerPhysics && hit && hit->actor >= PlayerHullBase && hit->actor < PlayerHullBase + 2)
+                    hitIndex = size_t(hit->actor - PlayerHullBase);
+                if (mBinding.mMagicPlayerTarget && !mBinding.mPlayerPhysics)
                 {
                     const float length2 = pending.step[0] * pending.step[0]
                         + pending.step[1] * pending.step[1] + pending.step[2] * pending.step[2];
@@ -10091,6 +10526,20 @@ namespace TES3MP::Native
         }
         const auto waterBreathingIndex
             = uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::WaterBreathing));
+        if (combat) for (const auto& [index, frame] : controlledPlayers)
+        {
+            if (!frame.mDrowning || combat->actors[index][8][2] <= 0.f
+                || std::ranges::any_of(timedEffects, [&](const auto& effect) {
+                    return effect.actor == index && effect.effectIndex == waterBreathingIndex && effect.magnitude > 0.f;
+                })) continue;
+            auto stats = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index, mBinding.mCharacterCreation);
+            auto health = stats.getHealth();
+            health.setCurrent(health.getCurrent() - mRuntime.mStore.get<ESM::GameSetting>()
+                .find("fSuffocationDamage")->mValue.getFloat() * seconds);
+            stats.setHealth(health);
+            saveCombatStats(combat->actors[index], stats, timedEffects, index);
+            if (health.getCurrent() <= 0.f) recordActorDeath(index, {}, true);
+        }
         if (combat && step && step->snapshot().mDrowning && combat->actors[2][8][2] > 0
             && std::ranges::none_of(timedEffects, [waterBreathingIndex](const auto& effect) {
                 return effect.actor == 2 && effect.effectIndex == waterBreathingIndex && effect.magnitude > 0;
@@ -10535,7 +10984,7 @@ namespace TES3MP::Native
                     recordActorDeath(index, {adjacent[i].mActor, 2, neighborLives[i].generation});
             }
         }
-        if (mBinding.mMovementEffects && combat && step)
+        if (mBinding.mMovementEffects && combat && (step || !controlledPlayers.empty()))
         {
             const auto land = [&](size_t index, const ActorSceneSnapshot& source) {
                 if (source.mLandingFall <= 0.f || combat->actors[index][8][2] <= 0.f) return;
@@ -10557,7 +11006,8 @@ namespace TES3MP::Native
                 MWMechanics::adjustDynamicStatValue(stats, 0, -damage * (1.f - .25f * fatigue), false, false, &deathTime);
                 saveCombatStats(combat->actors[index], stats, timedEffects, index);
                 if (stats.getHealth().getCurrent() <= 0.f)
-                    recordActorDeath(index, {source.mActor, 2, index == 2 ? life->generation : neighborLives[index - 3].generation}, true);
+                    recordActorDeath(index, index < 2 ? ActorCasterIdentity{} : ActorCasterIdentity{
+                        source.mActor, 2, index == 2 ? life->generation : neighborLives[index - 3].generation}, true);
                 else if (damage > acrobatics * fatigue)
                 {
                     combat->knockedDown[index] = true;
@@ -10568,11 +11018,14 @@ namespace TES3MP::Native
                 }
             };
             // Landing consequences and the grounded frame share the actor commit.
-            const auto primary = step->snapshot();
-            const auto neighbors = step->neighborSnapshots();
-            land(2, primary);
-            if (mBinding.mNeighborCombat)
-                for (size_t i = 0; i < neighbors.size(); ++i) land(i + 3, neighbors[i]);
+            if (step)
+            {
+                land(2, step->snapshot());
+                const auto neighbors = step->neighborSnapshots();
+                if (mBinding.mNeighborCombat)
+                    for (size_t i = 0; i < neighbors.size(); ++i) land(i + 3, neighbors[i]);
+            }
+            for (const auto& [index, frame] : controlledPlayers) land(index, frame);
         }
         if (mBinding.mNeighborCombat && combat && step)
         {
@@ -11175,6 +11628,7 @@ namespace TES3MP::Native
                     for (const auto& body : actors.bodies) collision.push_back(body.collision);
                     memberScene = mBinding.mCreateActorSet(collision);
                     memberScene->replaceWorld(collisionWorld(worldTransfer ? &worldTransfer->prepared : nullptr));
+                    if (mBinding.mPlayerPhysics) bindPhysicsPlayers(*memberScene, mPlayerFrames);
                     actors.collisionResources = DynamicActorSet::resources(*memberScene);
                     const auto selected = step ? step->selectedImage() : std::span<const char>(life->spawnActor);
                     // Current selected state is retained even when no navigation ran.
@@ -11361,6 +11815,7 @@ namespace TES3MP::Native
         const CanonicalServerState& players, SessionId target, ServerTick tick, CanonicalRevision revision,
         const PreparedNativeInventory* candidate) const
     {
+        candidate = unwrapPlayerPhysics(candidate);
         const auto* moving = dynamic_cast<const ActorTransaction*>(candidate);
         if (moving && (&moving->service != this || moving->consumed || moving->before != mActorImage
             || (moving->actor && !moving->membership
@@ -11445,7 +11900,7 @@ namespace TES3MP::Native
         const auto* session = players.findActiveSession(target);
         const auto* player = session ? players.findPlayer(session->playerId()) : nullptr;
         if (!player) return {};
-        const auto* moving = dynamic_cast<const ActorTransaction*>(candidate);
+        const auto* moving = dynamic_cast<const ActorTransaction*>(unwrapPlayerPhysics(candidate));
         const auto& binding = moving && moving->membership ? *moving->membership : mBinding;
         if (candidate && (!moving || &moving->service != this || moving->consumed || moving->before != mActorImage))
             return {};
@@ -11734,7 +12189,7 @@ namespace TES3MP::Native
     try
     {
         if (!mBinding.mCombatResolution || !candidate) return {};
-        const auto* staged = dynamic_cast<const ActorTransaction*>(candidate);
+        const auto* staged = dynamic_cast<const ActorTransaction*>(unwrapPlayerPhysics(candidate));
         const auto* session = players.findActiveSession(target);
         if (!staged || &staged->service != this || staged->consumed || staged->before != mActorImage
             || !session || staged->tick != tick.value()

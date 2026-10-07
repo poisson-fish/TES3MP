@@ -55,6 +55,9 @@ namespace TES3MP::OpenMWAdapter
         std::optional<DesiredIntent> mDesired;
         std::optional<PendingIntent> mPending;
         std::optional<LocomotionIntent> mLastQueued;
+        std::optional<MonotonicInstant> mLastQueuedAt;
+        std::optional<CommandSequence> mJumpQueuedSequence;
+        bool mJumpPending = false, mLastSampleJump = false;
     };
 
     inline constexpr std::size_t MaximumPoseEvidenceSources = 256;

@@ -34,6 +34,8 @@ struct SpatialEntitySnapshot;
 struct SpatialWorldView;
 struct SpatialWorldViewBuilder;
 
+struct PlayerPhysicsBaseline;
+
 struct LatestWinsSnapshot;
 struct LatestWinsSnapshotBuilder;
 
@@ -363,6 +365,121 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) SpatialEntitySnapshot FLATBUFFERS_FINAL_C
 };
 FLATBUFFERS_STRUCT_END(SpatialEntitySnapshot, 136);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PlayerPhysicsBaseline FLATBUFFERS_FINAL_CLASS {
+ private:
+  float inertia_x_;
+  float inertia_y_;
+  float inertia_z_;
+  float stuck_x_;
+  float stuck_y_;
+  float stuck_z_;
+  float fall_height_;
+  float breath_;
+  uint32_t stuck_frames_;
+  uint8_t grounded_;
+  uint8_t slope_;
+  uint8_t walking_on_water_;
+  int8_t padding0__;
+  uint64_t consumed_command_;
+  uint8_t jump_held_;
+  uint8_t blocked_;
+  int16_t padding1__;  int32_t padding2__;
+
+ public:
+  PlayerPhysicsBaseline()
+      : inertia_x_(0),
+        inertia_y_(0),
+        inertia_z_(0),
+        stuck_x_(0),
+        stuck_y_(0),
+        stuck_z_(0),
+        fall_height_(0),
+        breath_(0),
+        stuck_frames_(0),
+        grounded_(0),
+        slope_(0),
+        walking_on_water_(0),
+        padding0__(0),
+        consumed_command_(0),
+        jump_held_(0),
+        blocked_(0),
+        padding1__(0),
+        padding2__(0) {
+    (void)padding0__;
+    (void)padding1__;
+    (void)padding2__;
+  }
+  PlayerPhysicsBaseline(float _inertia_x, float _inertia_y, float _inertia_z, float _stuck_x, float _stuck_y, float _stuck_z, float _fall_height, float _breath, uint32_t _stuck_frames, bool _grounded, bool _slope, bool _walking_on_water, uint64_t _consumed_command, bool _jump_held, bool _blocked)
+      : inertia_x_(::flatbuffers::EndianScalar(_inertia_x)),
+        inertia_y_(::flatbuffers::EndianScalar(_inertia_y)),
+        inertia_z_(::flatbuffers::EndianScalar(_inertia_z)),
+        stuck_x_(::flatbuffers::EndianScalar(_stuck_x)),
+        stuck_y_(::flatbuffers::EndianScalar(_stuck_y)),
+        stuck_z_(::flatbuffers::EndianScalar(_stuck_z)),
+        fall_height_(::flatbuffers::EndianScalar(_fall_height)),
+        breath_(::flatbuffers::EndianScalar(_breath)),
+        stuck_frames_(::flatbuffers::EndianScalar(_stuck_frames)),
+        grounded_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_grounded))),
+        slope_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_slope))),
+        walking_on_water_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_walking_on_water))),
+        padding0__(0),
+        consumed_command_(::flatbuffers::EndianScalar(_consumed_command)),
+        jump_held_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_jump_held))),
+        blocked_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_blocked))),
+        padding1__(0),
+        padding2__(0) {
+    (void)padding0__;
+    (void)padding1__;
+    (void)padding2__;
+  }
+  float inertia_x() const {
+    return ::flatbuffers::EndianScalar(inertia_x_);
+  }
+  float inertia_y() const {
+    return ::flatbuffers::EndianScalar(inertia_y_);
+  }
+  float inertia_z() const {
+    return ::flatbuffers::EndianScalar(inertia_z_);
+  }
+  float stuck_x() const {
+    return ::flatbuffers::EndianScalar(stuck_x_);
+  }
+  float stuck_y() const {
+    return ::flatbuffers::EndianScalar(stuck_y_);
+  }
+  float stuck_z() const {
+    return ::flatbuffers::EndianScalar(stuck_z_);
+  }
+  float fall_height() const {
+    return ::flatbuffers::EndianScalar(fall_height_);
+  }
+  float breath() const {
+    return ::flatbuffers::EndianScalar(breath_);
+  }
+  uint32_t stuck_frames() const {
+    return ::flatbuffers::EndianScalar(stuck_frames_);
+  }
+  bool grounded() const {
+    return ::flatbuffers::EndianScalar(grounded_) != 0;
+  }
+  bool slope() const {
+    return ::flatbuffers::EndianScalar(slope_) != 0;
+  }
+  bool walking_on_water() const {
+    return ::flatbuffers::EndianScalar(walking_on_water_) != 0;
+  }
+  uint64_t consumed_command() const {
+    return ::flatbuffers::EndianScalar(consumed_command_);
+  }
+  bool jump_held() const {
+    return ::flatbuffers::EndianScalar(jump_held_) != 0;
+  }
+  bool blocked() const {
+    return ::flatbuffers::EndianScalar(blocked_) != 0;
+  }
+};
+FLATBUFFERS_STRUCT_END(PlayerPhysicsBaseline, 56);
+
 struct LatestWinsSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef LatestWinsSnapshotHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -536,7 +653,8 @@ struct LatestWinsSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_HEADER = 4,
     VT_BODY_TYPE = 6,
-    VT_BODY = 8
+    VT_BODY = 8,
+    VT_PLAYER_PHYSICS = 10
   };
   const TES3MP::Protocol::Schema::Snapshot::LatestWinsSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::Snapshot::LatestWinsSnapshotHeader *>(VT_HEADER);
@@ -551,6 +669,9 @@ struct LatestWinsSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
   const TES3MP::Protocol::Schema::Snapshot::SpatialWorldView *body_as_SpatialWorldView() const {
     return body_type() == TES3MP::Protocol::Schema::Snapshot::LatestWinsSnapshotBody::SpatialWorldView ? static_cast<const TES3MP::Protocol::Schema::Snapshot::SpatialWorldView *>(body()) : nullptr;
   }
+  const TES3MP::Protocol::Schema::Snapshot::PlayerPhysicsBaseline *player_physics() const {
+    return GetStruct<const TES3MP::Protocol::Schema::Snapshot::PlayerPhysicsBaseline *>(VT_PLAYER_PHYSICS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -559,6 +680,7 @@ struct LatestWinsSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
            VerifyField<uint8_t>(verifier, VT_BODY_TYPE, 1) &&
            VerifyOffset(verifier, VT_BODY) &&
            VerifyLatestWinsSnapshotBody(verifier, body(), body_type()) &&
+           VerifyField<TES3MP::Protocol::Schema::Snapshot::PlayerPhysicsBaseline>(verifier, VT_PLAYER_PHYSICS, 8) &&
            verifier.EndTable();
   }
 };
@@ -580,6 +702,9 @@ struct LatestWinsSnapshotBuilder {
   void add_body(::flatbuffers::Offset<void> body) {
     fbb_.AddOffset(LatestWinsSnapshot::VT_BODY, body);
   }
+  void add_player_physics(const TES3MP::Protocol::Schema::Snapshot::PlayerPhysicsBaseline *player_physics) {
+    fbb_.AddStruct(LatestWinsSnapshot::VT_PLAYER_PHYSICS, player_physics);
+  }
   explicit LatestWinsSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -595,8 +720,10 @@ inline ::flatbuffers::Offset<LatestWinsSnapshot> CreateLatestWinsSnapshot(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::Snapshot::LatestWinsSnapshotHeader> header = 0,
     TES3MP::Protocol::Schema::Snapshot::LatestWinsSnapshotBody body_type = TES3MP::Protocol::Schema::Snapshot::LatestWinsSnapshotBody::NONE,
-    ::flatbuffers::Offset<void> body = 0) {
+    ::flatbuffers::Offset<void> body = 0,
+    const TES3MP::Protocol::Schema::Snapshot::PlayerPhysicsBaseline *player_physics = nullptr) {
   LatestWinsSnapshotBuilder builder_(_fbb);
+  builder_.add_player_physics(player_physics);
   builder_.add_body(body);
   builder_.add_header(header);
   builder_.add_body_type(body_type);

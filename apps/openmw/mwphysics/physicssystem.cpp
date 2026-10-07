@@ -38,6 +38,8 @@
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/movement.hpp"
+#include "../mwmechanics/npcstats.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
 
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/esmstore.hpp"
@@ -69,22 +71,23 @@ namespace
         if (ptr.getClass().getMovementSettings(ptr).mPosition[2] == 0)
             return;
         const bool isPlayer = (ptr == MWMechanics::getPlayer());
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        const bool authoritativeMovement = isPlayer && multiplayer && multiplayer->ownsPlayerMovement();
         // Advance acrobatics and set flag for GetPCJumping
         if (isPlayer)
         {
-            ptr.getClass().skillUsageSucceeded(ptr, ESM::Skill::Acrobatics, ESM::Skill::Acrobatics_Jump);
+            if (!authoritativeMovement)
+                ptr.getClass().skillUsageSucceeded(ptr, ESM::Skill::Acrobatics, ESM::Skill::Acrobatics_Jump);
             MWBase::Environment::get().getWorld()->getPlayer().setJumping(true);
         }
 
         // Decrease fatigue
-        if (!isPlayer || !MWBase::Environment::get().getWorld()->getGodModeState())
+        if (!authoritativeMovement && (!isPlayer || !MWBase::Environment::get().getWorld()->getGodModeState()))
         {
             const MWWorld::Store<ESM::GameSetting>& gmst
                 = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
-            const float fFatigueJumpBase = gmst.find("fFatigueJumpBase")->mValue.getFloat();
-            const float fFatigueJumpMult = gmst.find("fFatigueJumpMult")->mValue.getFloat();
-            const float normalizedEncumbrance = std::min(1.f, ptr.getClass().getNormalizedEncumbrance(ptr));
-            const float fatigueDecrease = fFatigueJumpBase + normalizedEncumbrance * fFatigueJumpMult;
+            const float fatigueDecrease = MWClass::jumpFatigueCost(ptr.getClass().getNormalizedEncumbrance(ptr),
+                [&](const char* id) { return gmst.find(id)->mValue.getFloat(); });
             MWMechanics::DynamicStat<float> fatigue = ptr.getClass().getCreatureStats(ptr).getFatigue();
             fatigue.setCurrent(fatigue.getCurrent() - fatigueDecrease);
             ptr.getClass().getCreatureStats(ptr).setFatigue(fatigue);
@@ -140,6 +143,7 @@ namespace MWPhysics
 
     PhysicsSystem::~PhysicsSystem()
     {
+        clearPredictionBodies();
         mResourceSystem->removeResourceManager(mShapeManager.get());
 
         if (mWaterCollisionObject)
@@ -461,6 +465,7 @@ namespace MWPhysics
 
     void PhysicsSystem::remove(const MWWorld::Ptr& ptr)
     {
+        if (ptr.mRef == mPredictionOwner) clearPredictionBodies();
         if (auto foundObject = mObjects.find(ptr.mRef); foundObject != mObjects.end())
         {
             mAnimatedObjects.erase(foundObject->second.get());
@@ -482,6 +487,7 @@ namespace MWPhysics
 
     void PhysicsSystem::updatePtr(const MWWorld::Ptr& old, const MWWorld::Ptr& updated)
     {
+        if (old.mRef == mPredictionOwner) mPredictionOwner = updated.mRef;
         if (auto foundObject = mObjects.find(old.mRef); foundObject != mObjects.end())
             foundObject->second->updatePtr(updated);
         else if (auto foundActor = mActors.find(old.mRef); foundActor != mActors.end())
@@ -714,12 +720,15 @@ namespace MWPhysics
                                               ->get<ESM::GameSetting>()
                                               .find("fSwimHeightScale")
                                               ->mValue.getFloat();
+            const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+            const float swimHalfHeight = isPlayer && multiplayer && multiplayer->ownsPlayerMovement()
+                ? physicActor->getHalfExtents().z() : physicActor->getRenderingHalfExtents().z();
             simulations.emplace_back(ActorSimulation{ physicActor,
                 ActorFrameData{ .mIsOnGround = physicActor->getOnGround(),
                     .mIsOnSlope = physicActor->getOnSlope(),
                     .mInert = inert,
                     .mCollisionObject = physicActor->getCollisionObject(),
-                    .mSwimLevel = waterlevel - (physicActor->getRenderingHalfExtents().z() * 2 * swimHeightScale),
+                    .mSwimLevel = waterlevel - (swimHalfHeight * 2 * swimHeightScale),
                     .mSlowFall = slowFall,
                     .mMovement = physicActor->velocity(),
                     .mWaterlevel = waterlevel,
@@ -742,9 +751,106 @@ namespace MWPhysics
         }
     }
 
+    std::optional<osg::Vec3f> PhysicsSystem::reconcileActorMovement(const MWWorld::Ptr& ptr,
+        const ActorReplayState& state, std::span<const ActorReplayInput> inputs)
+    {
+        const auto found = mActors.find(ptr.mRef);
+        if (found == mActors.end() || inputs.size() > 128 || state.bodies.size() > 39) return {};
+        const auto bounded = [](float value) { return std::isfinite(value) && std::abs(value) <= 1e7f; };
+        for (int axis = 0; axis < 3; ++axis)
+            if (!bounded(state.position[axis]) || !bounded(state.inertia[axis]) || !bounded(state.lastStuckPosition[axis])) return {};
+        for (const auto& input : inputs)
+        {
+            for (int axis = 0; axis < 3; ++axis)
+                if (!bounded(input.axes[axis]) || std::abs(input.axes[axis]) > 1.f) return {};
+            for (float value : {input.walkSpeed, input.swimSpeed, input.flySpeed, input.jumpSpeed})
+                if (!std::isfinite(value) || value < 0.f || value > 4096.f) return {};
+            if (!std::isfinite(input.airControl) || input.airControl < 0.f || input.airControl > 1.f
+                || !std::isfinite(input.xyScale) || input.xyScale <= 0.f || input.xyScale > 100.f
+                || !bounded(input.rotation.x()) || !bounded(input.rotation.y())) return {};
+        }
+        const auto& actor = found->second;
+        auto world = MWBase::Environment::get().getWorld();
+        const auto& effects = ptr.getClass().getCreatureStats(ptr).getMagicEffects();
+        const auto& cell = *ptr.getCell();
+        const float water = cell.getCell()->hasWater() ? cell.getWaterLevel() : -std::numeric_limits<float>::max();
+        const float swimScale = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>()
+            .find("fSwimHeightScale")->mValue.getFloat();
+        const bool waterWalking = effects.getOrDefault(ESM::MagicEffect::WaterWalking).getMagnitude() > 0;
+        ActorFrameData frame{.mPosition = state.position, .mInertia = state.inertia,
+            .mIsOnGround = state.grounded, .mIsOnSlope = state.slope, .mWalkingOnWater = state.walkingOnWater,
+            .mCollisionObject = actor->getCollisionObject(),
+            .mSwimLevel = water - actor->getHalfExtents().z() * 2.f * swimScale,
+            .mSlowFall = MWClass::npcSlowFall(effects.getOrDefault(ESM::MagicEffect::SlowFall).getMagnitude()),
+            .mRotation = {ptr.getRefData().getPosition().rot[0], ptr.getRefData().getPosition().rot[2]},
+            .mLastStuckPosition = state.lastStuckPosition, .mWaterlevel = water,
+            .mHalfExtentsZ = actor->getHalfExtents().z(), .mStuckFrames = state.stuckFrames,
+            .mFlying = world->isFlying(ptr), .mWasOnGround = state.grounded,
+            .mWaterCollision = waterWalking, .mIsPlayer = true};
+        std::vector<std::unique_ptr<btCollisionShape>> hulls;
+        std::vector<std::unique_ptr<btCollisionObject>> obstacles;
+        std::vector<btCollisionObject*> bodies;
+        for (const auto& body : state.bodies)
+        {
+            if (!body.actor || body.actor->isEmpty() || !body.actor->getClass().isActor()
+                || !bounded(body.position.length()) || !bounded(body.yaw)) return {};
+            if (mActors.contains(body.actor->mRef)) continue;
+            const auto shape = actorModelShape(*body.actor,
+                VFS::Path::Normalized(body.actor->getClass().getCorrectedModel(*body.actor)));
+            if (!shape) return {};
+            const auto box = actorCollisionBox(*shape, body.actor->getClass().isNpc());
+            auto hull = makeActorShape(box.mExtents, box.mCenter, DetourNavigator::CollisionShapeType::Cylinder);
+            const float scale = body.actor->getCellRef().getScale();
+            osg::Vec3f collisionScale(scale, scale, scale);
+            body.actor->getClass().adjustScale(*body.actor, collisionScale, false);
+            for (int axis = 0; axis < 3; ++axis)
+                if (!std::isfinite(collisionScale[axis]) || collisionScale[axis] <= 0.f || collisionScale[axis] > 100.f) return {};
+            hull.mShape->setLocalScaling(Misc::Convert::toBullet(collisionScale));
+            const auto rotation = hull.mRotationallyInvariant ? osg::Quat() : osg::Quat(body.yaw, osg::Vec3f(0,0,1));
+            auto object = std::make_unique<btCollisionObject>();
+            object->setCollisionShape(hull.mShape.get());
+            object->setWorldTransform(btTransform(Misc::Convert::toBullet(rotation),
+                Misc::Convert::toBullet(body.position + rotation * osg::componentMultiply(box.mCenter, collisionScale))));
+            object->setCollisionFlags(btCollisionObject::CF_KINEMATIC_OBJECT);
+            bodies.push_back(object.get()); obstacles.push_back(std::move(object)); hulls.push_back(std::move(hull.mShape));
+        }
+        actor->setCanWaterWalk(waterWalking);
+        // The same inert hulls constrain replay and subsequent live prediction.
+        // Replace them after workers finish, before releasing their old shapes.
+        mTaskScheduler->replacePredictionBodies(mPredictionBodies, bodies);
+        mPredictionObjects = std::move(obstacles);
+        mPredictionShapes = std::move(hulls);
+        mPredictionBodies = std::move(bodies);
+        mPredictionOwner = ptr.mRef;
+        mPredictionCell = ptr.getCell();
+        mTaskScheduler->replayMovement(frame, inputs, actor->getCollisionOffset());
+        if (state.correctionDistance) *state.correctionDistance = (frame.mPosition - actor->getPosition()).length();
+        actor->installPredictionFrame(frame, state.discontinuity);
+        mTaskScheduler->updateSingleAabb(actor, true);
+        return actor->getSimulationPosition();
+    }
+
+    void PhysicsSystem::clearPredictionBodies()
+    {
+        if (!mPredictionBodies.empty()) mTaskScheduler->replacePredictionBodies(mPredictionBodies, {});
+        mPredictionBodies.clear();
+        mPredictionObjects.clear();
+        mPredictionShapes.clear();
+        mPredictionOwner = nullptr;
+        mPredictionCell = nullptr;
+    }
+
     void PhysicsSystem::stepSimulation(
         float dt, bool skipSimulation, osg::Timer_t frameStart, unsigned int frameNumber, osg::Stats& stats)
     {
+        if (mPredictionOwner)
+        {
+            const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+            const auto owner = mActors.find(mPredictionOwner);
+            if (!multiplayer || !multiplayer->ownsPlayerMovement() || owner == mActors.end()
+                || owner->second->getPtr().getCell() != mPredictionCell)
+                clearPredictionBodies();
+        }
         for (auto& [animatedObject, changed] : mAnimatedObjects)
         {
             if (animatedObject->animateCollisionShapes())

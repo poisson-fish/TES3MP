@@ -71,9 +71,28 @@ union LatestWinsSnapshotBody {
   SpatialWorldView = 1
 }
 
+struct PlayerPhysicsBaseline {
+  inertia_x:float;
+  inertia_y:float;
+  inertia_z:float;
+  stuck_x:float;
+  stuck_y:float;
+  stuck_z:float;
+  fall_height:float;
+  breath:float;
+  stuck_frames:uint;
+  grounded:bool;
+  slope:bool;
+  walking_on_water:bool;
+  consumed_command:ulong;
+  jump_held:bool;
+  blocked:bool;
+}
+
 table LatestWinsSnapshot {
   header:LatestWinsSnapshotHeader (id: 0);
   body:LatestWinsSnapshotBody (id: 2);
+  player_physics:PlayerPhysicsBaseline (id: 3);
 }
 
 root_type LatestWinsSnapshot;

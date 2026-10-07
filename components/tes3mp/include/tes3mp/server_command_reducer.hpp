@@ -180,6 +180,7 @@ namespace TES3MP
             std::vector<PlayerId> mClientAuthoritativePlayers;
             std::vector<DurableCommandOrder> mDurableCommands;
             std::unique_ptr<PreparedNativeInventory> mNativeInventory;
+            std::vector<ServerCommandProposal> mPlayerMovementCommands;
         };
 
         class PreparedJoin
@@ -291,7 +292,8 @@ namespace TES3MP
             std::optional<CanonicalActorWorld> actors, const CanonicalWorldState* baseWorld = nullptr,
             std::optional<CanonicalWorldState> world = std::nullopt) noexcept;
         bool stageNativeDoorStep(PreparedBatch& prepared, ServerTick tick, float seconds,
-            std::optional<WaitRestRequest> waitRest = {}) noexcept;
+            std::optional<WaitRestRequest> waitRest = {},
+            std::span<const ServerCommandProposal> playerControls = {}) noexcept;
         bool commit(PreparedBatch&& prepared);
         bool commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects);
         bool commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory);

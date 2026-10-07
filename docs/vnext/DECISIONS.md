@@ -15,8 +15,7 @@ resources to campaign identity. Python packages/hashes, never reinterprets ESM.
 Unsupported behavior rejects.
 
 **One server authority.** Own actors/objects/resources/time/outcomes. Clients submit
-authenticated intent and present commits. Validate inherited movement; schedule areas
-independently of menus, without NPC client leases.
+authenticated intent and present commits. Schedule independently of menus; no NPC leases.
 
 **M3 doors:** stock activation/reversal; session/placement/sequence/tick-bound contact
 expires after ten ticks or reconnect/reversal. Contacts supplement physics until cutover.
@@ -84,9 +83,15 @@ M4 collision/combat acceptance precedes movement cutover.
 pursues its living, life-matched caster. Expiry restores authored travel atomically;
 rejection preserves path/position. Dialogue retains its owning context.
 
-**Movement smoothness (target).** After unified collision, use stock physics,
-interpolation and bounded extrapolation. Restore acknowledged physics and replay
-input. Reset on teleport, respawn or cell change; measure jitter.
+**V79 player physics.** Capability 38 admits independently sequenced latest-wins
+controls/acknowledgements; inventory/combat remain reliable. Two stock 60 Hz steps
+per 30 Hz commit; bursts buy no simulation. Inputs expire after 12 ticks.
+Recovery uses completed world ticks. Hulls/frames transact with combat/resources;
+authentication stays ephemeral. Clients restore frames/replay bounded input through
+stock physics. Inert peer/NPC hulls also constrain live prediction. Blend 67ms;
+snap at 256 units/epoch changes. Older campaigns retain inherited movement;
+movement skills await M5. At 100ms ±25ms/10% loss, corrections allow max 35/mean 8
+units with one fixed-step tolerance; exclude discontinuities.
 
 ## Cooperative progression design
 
@@ -129,11 +134,9 @@ instance across player interest; separate ambient presentation. Classify support
 operations, not names; object/NPC/door scripts may require personal context.
 Prove services before removing guards.
 
-**Context:** world or explicit character/story identity, source reference/life and
-causal event; personal access without identity rejects. Background/cross-script/Lua
-calls and timers retain scope through contextual services. Party membership/credit/
-progress-merging rules remain deferred. Locals/cursors bind story/script/reference
-and survive respawn.
+**Context:** world or character/story identity, source reference/life and causal
+event. Personal access without identity rejects. Calls/timers retain scope;
+locals/cursors survive respawn. Party/credit/merging rules remain deferred.
 
 | Operation/state | Rule |
 |---|---|
@@ -143,12 +146,11 @@ and survive respawn.
 | Scripted removal/relocation, inventory/AI edits, spawns | Scoped changes preserve others' access; coherent instances for physical divergence. |
 | Unsupported/ambiguous operations | Atomic rejection with API/context diagnostics. |
 
-**Availability:** server reservations prevent conflicting story control while shared
-simulation continues. Prove release/disconnect/death/restart; script return/package
-completion cannot universally identify quest completion. Release cannot restore
-departed NPCs: safe encounter restoration or instances must preserve progress/rewards.
-Instances cover actors/inventories/collision/combat across affected cells, including
-exterior escorts. Restoration/item-access policies remain open.
+**Availability:** reservations prevent conflicting story control while shared simulation
+continues. Prove release/disconnect/death/restart. Package completion cannot universally
+identify quest completion. Encounter restoration or instances must preserve departed
+NPCs/progress/rewards, covering inventories/collision/combat and exterior escorts.
+Restoration/item-access policies remain open.
 
 **Runtime waits:** discover dependencies during execution; persist bounded wake
 records/revalidate. Personal OnDeath cursors consume attributed history, including
@@ -157,11 +159,9 @@ persist. Pause affected deadlines; never deactivate waiting scripts. Explain wai
 and authoritative respawn clocks/pauses; omit unknown estimates.
 Scoped removal needs an access policy.
 
-**Atomicity/diagnostics:** stage script state, engine effects, RNG, event consumption,
-timers/presentation; discard on defer/rejection. Deduplicate retries, preserve
-recurrence; isolate Lua tables/closures/callbacks. Bound diagnostics and track
-unresolved waits. Fix generic API semantics from playtests with arbitrary-name
-regressions; no prerequisite graphs/quest handlers.
+**Atomicity/diagnostics:** stage scripts/effects/RNG/events/timers/presentation; discard
+on defer/rejection. Deduplicate retries; preserve recurrence and Lua isolation.
+Bound diagnostics/waits. Fix generic APIs with arbitrary-name regressions; no quest handlers.
 
 **Owning seams:** [context](../../apps/openmw/mwscript/interpretercontext.cpp),
 [dialogue](../../apps/openmw/mwscript/dialogueextensions.cpp),
@@ -213,9 +213,8 @@ Dispel groups temporary spells by source/caster/life/launch, leaving enchanted
 items and constants intact. T3C6/capability 24 carries authoritative paralysis;
 inherited movement cannot bypass it. Existing campaigns do not silently upgrade.
 
-**Detached movement (V56).** Stock rules/physics commit NPC water, inventory,
-stats/effects. Inherited player movement awaits M4 cutover. The death schema uses
-the NPC's life for drowning; generalization must distinguish environmental causes.
+**Detached movement.** Stock physics commits water, inventory/stats/effects and
+landing/drowning damage. Player environmental deaths have no actor killer.
 
 **V65 movement rules.** Bounded trusted EnableLevitation/DisableLevitation requests
 commit world rules/effect removal; recovery validates sources. Shared solvers use
@@ -295,30 +294,23 @@ results with caster/target lives through stock helpers. Snapshots own loops/clea
 bounded chunks commit atomically once. Reconnect restores loops without transient replay.
 Capability 33 retains legacy cues; presentation never persists.
 
-**Shared cell combat (V77).** Connected exteriors share physics/navigation;
-interiors/disconnected regions stay separate. Merge domains before allocation.
-Startup bounds: 256 cells, 37 actors/summons, 8,192 references/region; navigation
-follows actors within 256 cached tiles. Radius 0–7 start/door-exit anchors share
-the cell budget; discovered cells never recursively grow exterior neighborhoods.
-Stream the demanded union plus adjacent collision geometry, preserving frozen
-actor hulls/support/contact witnesses. Rebuild derived resources on a detached,
-fingerprint-validated scene before swapping; this bounds peak work by the full
-startup domain. Adjacent exterior combat/visibility uses current actor cells.
-One campaign transaction simulates occupancy once; empty-cell clocks freeze.
-Retain flight collision; unload without demand. Persist flight cells/static cast clocks/dynamic spawn cells.
-Unsupported script/leveled/corpse services reject at startup; full AI packages remain M5.
+**Shared cell combat (V77).** Connected exteriors share physics/navigation; other
+regions isolate. Bound startup to 256 cells, 37 actors/summons, 8,192 references/region
+and 256 navigation tiles/actor. Radius 0–7 anchors share the cell budget without
+recursive discovery. Stream demand plus adjacent geometry; preserve frozen hulls/
+contacts/support. Fingerprint-validate detached resource swaps. Combat/visibility follows
+actor cells; occupancy simulates once, empty cells freeze. Persist flight/cast/spawn
+cells. Unsupported scripts/leveled/corpses reject; full AI packages remain M5.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,
 identities, stale/retry rejection, bounded traffic and secret-free evidence.
 Direct-IP encryption lacks server identity authentication.
 
-**Native chargen (V78).** Wrap V77 with two bounded profiles/resource signatures
-and winning bodies/custom classes. Durable actor/inventory transactions install stock
-items/stats/spells/resources. Fresh profiles cannot simulate; optional bounded starters
-grant once at completion. Omission stays empty; one safe point. Recovery validates profiles/resources.
-Replicas preserve NPC copies/winning records/private profiles through gear/cell rebuilds.
-Capabilities 6/36 gate negotiation and established bodies/cell-filtered gear.
+**Native chargen (V78).** Persist two profiles/winning bodies/custom classes/resource
+signatures with stock inventory/stats/spells. Fresh profiles cannot simulate; bounded
+starters grant once. Omission stays empty; one safe point. Recovery validates resources.
+Gear/cell rebuilds preserve bodies/profiles; capabilities 6/36 gate creation and public gear.
 
 **Character installation:** committed profile revisions bind coherent installation;
 newer motion cannot raise inventory floors. Delayed lanes resync; public equipment

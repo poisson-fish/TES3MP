@@ -58,6 +58,8 @@ namespace MWPhysics
     class Actor;
     class PhysicsTaskScheduler;
     class Projectile;
+    struct ActorReplayState;
+    struct ActorReplayInput;
     enum ScriptedCollisionType : char;
 
     using ActorMap = std::unordered_map<const MWWorld::LiveCellRefBase*, std::shared_ptr<Actor>>;
@@ -132,6 +134,8 @@ namespace MWPhysics
         void updatePtr(const MWWorld::Ptr& old, const MWWorld::Ptr& updated);
 
         Actor* getActor(const MWWorld::Ptr& ptr);
+        std::optional<osg::Vec3f> reconcileActorMovement(const MWWorld::Ptr&, const ActorReplayState&,
+            std::span<const ActorReplayInput>);
         const Actor* getActor(const MWWorld::ConstPtr& ptr) const;
         // Read-only geometry for rendered replicas; never registers a simulated actor.
         osg::Vec3f getActorModelHalfExtents(const MWWorld::ConstPtr& ptr, bool rendering) const;
@@ -274,6 +278,12 @@ namespace MWPhysics
         std::map<Object*, bool> mAnimatedObjects; // stores pointers to elements in mObjects
 
         ActorMap mActors;
+        void clearPredictionBodies();
+        const MWWorld::LiveCellRefBase* mPredictionOwner = nullptr;
+        const MWWorld::CellStore* mPredictionCell = nullptr;
+        std::vector<std::unique_ptr<btCollisionShape>> mPredictionShapes;
+        std::vector<std::unique_ptr<btCollisionObject>> mPredictionObjects;
+        std::vector<btCollisionObject*> mPredictionBodies;
 
         using ProjectileMap = std::map<int, std::shared_ptr<Projectile>>;
         ProjectileMap mProjectiles;

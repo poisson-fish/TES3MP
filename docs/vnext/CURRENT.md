@@ -1,14 +1,11 @@
 # Current state and next action
 
-**M4 in [PLAN.md](PLAN.md) is active.** [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
-60 Hz NPC/door substeps, 30 Hz commits.
+**M4 [PLAN.md](PLAN.md):** [host](../../apps/tes3mp-server/native/inventory_host.hpp):
+60 Hz NPC/door substeps; 30 Hz commits.
 
-**V77 bounded exploration accepted:** radius 0–7 start/door-exit discovery shares
-256 cells; remote exits add bounded anchors. Startup caps 37 actors/summons,
-8,192 collision references/region and 256 cached navigation tiles/actor.
-Connected exteriors share collision; regions isolate. Demand streams geometry,
-retaining state/frozen hulls/contact witnesses; staged resource swaps preserve bounds.
-Movement/combat/visibility follows actor cells; one writer.
+**V77 exploration accepted:** radius 0–7 anchors share 256 cells; caps: 37 actors,
+8,192 references/region, 256 navigation tiles/actor. Connected regions share collision;
+streamed geometry retains state/frozen hulls/contact witnesses. One writer.
 Synthetic `build/logs/exploration-{bootstrap-radius2,discovery-03,regions-03,host-07}.log`:
 27-cell export, remote-anchor exhaustion/retry, 12-cell navigation/contact,
 geometry rejection/release, overlapping demand, split/regroup, rollback/retry/recovery.
@@ -91,7 +88,23 @@ Automated doors passed; recorder exhaustion closed clients. Fixed:
 proves doors/travel/quit after exhaustion.
 Stale/resampled inventory preserves state; contradictions reject atomically
 (`build/logs/door-stale-baseline-fixed.log`). Relay reclaims idle endpoints
-(`build/logs/door-relay-expiry.log`). Native abort unresolved.
+(`build/logs/door-relay-expiry.log`). Client shutdown abort remains unresolved.
 
-**Next:** player physics cutover; investigate native abort.
-Full M4 open; M5 unstarted.
+**V79 player cutover:** capability 38; latest-wins controls/acknowledgements, fixed
+stock physics/shared player/NPC/door hulls, durable frames/resources and bounded replay.
+Retry/hold/expiry/epoch/rollback/restart/ground regression:
+`build/logs/player-{physics-native,physics-scene,physics-world,controls-protocol,controls-queue,controls-server,physics-adapter,physics-angles}.log`.
+Two-desktop heading/jump/stop/contact/reconnect:
+`build/player-physics-desktop-impaired-16/result.json`; screenshots inspected.
+Direct bootstrap, then 100ms ±25ms/10% loss/reorder: corrections max 19.3/23.7,
+mean 1.3/1.5 units (budgets 35/8).
+Exact stopped positions/reconnect: `build/player-physics-desktop-restart-04/result.json`.
+Clock recovery: `build/logs/player-physics-clock.log`.
+Fresh campaigns require `player-physics`; V78 retains migration; movement skills await M5.
+
+**V79 movement accepted, 2026-10-06:**
+`build/m4-user-acceptance-player-v79-20261006-live-01/operator-acceptance.json`.
+128-input saturation now waits/retries; backpressure/adapter checks passed.
+Both fixed clients quit normally (0); combat/death/loot/respawn acceptance retained.
+Earlier native abort unreplicated.
+**Next:** remaining M4 PLAN exit gaps; M5 unstarted.

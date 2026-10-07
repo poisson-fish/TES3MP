@@ -286,6 +286,7 @@ namespace TES3MP::ServerApp
             }
             if (const auto* locomotion = std::get_if<PlayerLocomotionInput>(&operation->body()))
             {
+                if (mNativeInventory && mNativeInventory->ownsPlayerPhysics()) return ConnectionSessionResult::ProtocolRejected;
                 if (negotiated.major != 1 || negotiated.minor < 3)
                     return ConnectionSessionResult::ProtocolRejected;
                 auto& connectionState = mConnections.find(connection)->second;

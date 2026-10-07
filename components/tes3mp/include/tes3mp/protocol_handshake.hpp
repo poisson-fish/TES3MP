@@ -14,7 +14,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::size_t MaximumOptionalCapabilityCount = 32;
+    inline constexpr std::size_t MaximumOptionalCapabilityCount = 33;
     inline constexpr std::size_t MaximumRequiredCapabilityCount = 32;
     inline constexpr std::size_t MaximumNegotiatedCapabilityCount
         = MaximumOptionalCapabilityCount + MaximumRequiredCapabilityCount;
@@ -54,6 +54,7 @@ namespace TES3MP
     inline constexpr std::uint32_t ExtendedSpellSourcesCapabilityValue = 35;
     inline constexpr std::uint32_t PlayerAppearanceCapabilityValue = 36;
     inline constexpr std::uint32_t PlayerRespawnCapabilityValue = 37;
+    inline constexpr std::uint32_t PlayerPhysicsCapabilityValue = 38;
 
     class CapabilityId
     {
@@ -171,6 +172,8 @@ namespace TES3MP
     }
     inline constexpr CapabilityId playerRespawnCapability() noexcept
     { return *CapabilityId::fromValue(PlayerRespawnCapabilityValue); }
+    inline constexpr CapabilityId playerPhysicsCapability() noexcept
+    { return *CapabilityId::fromValue(PlayerPhysicsCapabilityValue); }
 
     inline constexpr CapabilityId dialogueChoiceCapability() noexcept
     {

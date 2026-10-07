@@ -78,6 +78,42 @@ namespace
             && !LocomotionInputSequence::fromValue(MaximumLocomotionInputOrdinal + 1);
     }
 
+    SpatialEntitySnapshot goldenEntry();
+    bool player_controls_round_trip_and_reject_pose_or_unbounded_axes()
+    {
+        const auto header = operation(value<SessionId>(1), value<SessionGeneration>(1)).header();
+        const auto create = [&](PlayerMovementControls controls, std::optional<Position3> position = {},
+                                LocomotionMode mode = LocomotionMode::Run) {
+            return ReliableOperation::create(header, PlayerLocomotionInput(value<LocomotionInputTick>(1),
+                value<LocomotionInputSequence>(1), LocomotionIntent(mode,
+                    Turn32::fromValue(42), LinearVelocity3(0, 0, 0), position, {}, controls)));
+        };
+        const auto original = create({-1024, 1024, 0, Turn32::fromValue(123), true});
+        if (!std::holds_alternative<ReliableOperation>(original)) return false;
+        const auto decoded = decodeReliableOperation(encodeReliableOperation(std::get<ReliableOperation>(original)));
+        const auto spatial = goldenEntry();
+        const auto world = std::get<SpatialWorldView>(SpatialWorldView::create(std::span(&spatial, 1)));
+        PlayerPhysicsBaseline physics{{1, 2, -3}, {4, 5, 6}, 7, 8, 9, true, false, true, 5, true, true};
+        const LatestWinsSnapshot snapshot(LatestWinsSnapshotHeader(value<SessionId>(1), value<SessionGeneration>(1),
+            spatial.playerId(), spatial.entityId(), value<CanonicalRevision>(1), value<CommandSequence>(1)), world, physics);
+        const auto restored = decodeLatestWinsSnapshot(encodeLatestWinsSnapshot(snapshot));
+        const auto controlFrame = encodeProtocolFrame(MessageClass::PlayerControlSample, MessageKind::ClientPlayerControls,
+            encodeReliableOperation(std::get<ReliableOperation>(original)));
+        if (!std::holds_alternative<std::vector<std::byte>>(controlFrame)
+            || !std::holds_alternative<DecodedFrame>(decodeProtocolFrame(std::get<std::vector<std::byte>>(controlFrame)))) return false;
+        physics.inertia[0] = std::numeric_limits<float>::infinity();
+        const LatestWinsSnapshot invalid(snapshot.header(), world, physics);
+        return std::holds_alternative<LatestWinsSnapshot>(restored) && std::get<LatestWinsSnapshot>(restored) == snapshot
+            && std::holds_alternative<ExchangeDecodeError>(decodeLatestWinsSnapshot(encodeLatestWinsSnapshot(invalid)))
+            && std::holds_alternative<ReliableOperation>(decoded)
+            && std::get<ReliableOperation>(decoded) == std::get<ReliableOperation>(original)
+            && std::holds_alternative<ExchangeDecodeError>(create({1025, 0, 0}))
+            && std::holds_alternative<ExchangeDecodeError>(create({0, -1025, 0}))
+              && std::holds_alternative<ExchangeDecodeError>(create({0, 0, 1025}))
+              && std::holds_alternative<ExchangeDecodeError>(create({}, {}, LocomotionMode::Jump))
+            && std::holds_alternative<ExchangeDecodeError>(create({}, Position3(1, 2, 3)));
+    }
+
     bool canonical_locomotion_round_trips_without_snapshot_one_shots()
     {
         const auto session = value<SessionId>(1);
@@ -792,6 +828,8 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "player-controls")
+        return player_controls_round_trip_and_reject_pose_or_unbounded_axes() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "player-respawn")
         return player_respawn_requests_are_bounded_and_round_trip() ? 0 : 1;
     if (argc == 2 && std::string_view(argv[1]) == "--print-golden")

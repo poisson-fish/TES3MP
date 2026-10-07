@@ -3660,4 +3660,13 @@ namespace MWWorld
         if (MWPhysics::Actor* const actor = mPhysics->getActor(ptr))
             actor->setActive(value);
     }
+    bool World::reconcilePlayerMovement(const MWPhysics::ActorReplayState& state,
+        std::span<const MWPhysics::ActorReplayInput> inputs)
+    {
+        const auto player = getPlayerPtr();
+        const auto position = mPhysics->reconcileActorMovement(player, state, inputs);
+        if (!position) return false;
+        moveObject(player, *position, false);
+        return true;
+    }
 }

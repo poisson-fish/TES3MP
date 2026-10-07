@@ -18,8 +18,10 @@
  */
 
 #include "character.hpp"
+#include "../mwclass/npcmovement.hpp"
 #include "jump.hpp"
 #include "deathanimation.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
 
 #include <array>
 #include <optional>
@@ -1976,6 +1978,8 @@ namespace MWMechanics
             updateAnimQueue();
         else if (!cls.getCreatureStats(mPtr).isDead())
         {
+            const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+            const bool authoritativeMovement = isPlayer && multiplayer && multiplayer->ownsPlayerMovement();
             bool onground = world->isOnGround(mPtr);
             bool inwater = world->isSwimming(mPtr);
             bool flying = world->isFlying(mPtr);
@@ -2002,7 +2006,7 @@ namespace MWMechanics
             movementSettings.mSpeedFactor = std::min(vec.length(), 1.f);
             vec.normalize();
 
-            const bool smoothMovement = Settings::game().mSmoothMovement;
+            const bool smoothMovement = Settings::game().mSmoothMovement && !authoritativeMovement;
             if (smoothMovement)
             {
                 float angle = mPtr.getRefData().getPosition().rot[2];
@@ -2069,7 +2073,7 @@ namespace MWMechanics
                 float delta = targetMovementAngle - stats.getSideMovementAngle();
                 float cosDelta = cosf(delta);
 
-                if ((vec.y() < 0) == mIsMovingBackward)
+                if (!authoritativeMovement && (vec.y() < 0) == mIsMovingBackward)
                     movementSettings.mSpeedFactor
                         *= std::min(std::max(cosDelta, 0.f) + 0.3f, 1.f); // slow down when turn
                 if (std::abs(delta) < osg::DegreesToRadians(20.0f))
@@ -2104,7 +2108,7 @@ namespace MWMechanics
             if (vec.x() != 0.f || vec.y() != 0.f)
             {
                 // advance athletics
-                if (isPlayer)
+                if (isPlayer && !authoritativeMovement)
                 {
                     if (inwater)
                     {
@@ -2126,39 +2130,12 @@ namespace MWMechanics
                     }
                 }
 
-                if (!godmode)
+                if (!godmode && !authoritativeMovement)
                 {
                     // reduce fatigue
-                    float fatigueLoss = 0.f;
-                    static const float fFatigueRunBase = gmst.find("fFatigueRunBase")->mValue.getFloat();
-                    static const float fFatigueRunMult = gmst.find("fFatigueRunMult")->mValue.getFloat();
-                    static const float fFatigueSwimWalkBase = gmst.find("fFatigueSwimWalkBase")->mValue.getFloat();
-                    static const float fFatigueSwimRunBase = gmst.find("fFatigueSwimRunBase")->mValue.getFloat();
-                    static const float fFatigueSwimWalkMult = gmst.find("fFatigueSwimWalkMult")->mValue.getFloat();
-                    static const float fFatigueSwimRunMult = gmst.find("fFatigueSwimRunMult")->mValue.getFloat();
-                    static const float fFatigueSneakBase = gmst.find("fFatigueSneakBase")->mValue.getFloat();
-                    static const float fFatigueSneakMult = gmst.find("fFatigueSneakMult")->mValue.getFloat();
-
-                    if (cls.getEncumbrance(mPtr) <= cls.getCapacity(mPtr))
-                    {
-                        const float encumbrance = cls.getNormalizedEncumbrance(mPtr);
-                        if (sneak)
-                            fatigueLoss = fFatigueSneakBase + encumbrance * fFatigueSneakMult;
-                        else
-                        {
-                            if (inwater)
-                            {
-                                if (!isrunning)
-                                    fatigueLoss = fFatigueSwimWalkBase + encumbrance * fFatigueSwimWalkMult;
-                                else
-                                    fatigueLoss = fFatigueSwimRunBase + encumbrance * fFatigueSwimRunMult;
-                            }
-                            else if (isrunning)
-                                fatigueLoss = fFatigueRunBase + encumbrance * fFatigueRunMult;
-                        }
-                    }
-                    fatigueLoss *= duration;
-                    fatigueLoss *= movementSettings.mSpeedFactor;
+                    const auto setting = [&](const char* id) { return gmst.find(id)->mValue.getFloat(); };
+                    const float fatigueLoss = MWClass::movementFatigueCost(cls.getNormalizedEncumbrance(mPtr),
+                        sneak, inwater, isrunning, movementSettings.mSpeedFactor, duration, setting);
                     DynamicStat<float> fatigue = cls.getCreatureStats(mPtr).getFatigue();
                     fatigue.setCurrent(fatigue.getCurrent() - fatigueLoss, fatigue.getCurrent() < 0);
                     cls.getCreatureStats(mPtr).setFatigue(fatigue);
@@ -2205,7 +2182,7 @@ namespace MWMechanics
                 {
                     float height = cls.getCreatureStats(mPtr).land(isPlayer);
                     float healthLost = 0.f;
-                    if (!inwater)
+                    if (!inwater && !authoritativeMovement)
                         healthLost = getFallDamage(mPtr, height);
 
                     if (healthLost > 0.0f)

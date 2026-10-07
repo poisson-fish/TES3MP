@@ -523,18 +523,26 @@ namespace
         std::array<std::byte, 2> image{std::byte{1}, std::byte{1}};
         mutable unsigned projected = 0;
         bool rejectProjection = false;
+        bool playerPhysics = false;
+        std::vector<uint64_t> appliedControls;
         struct Candidate final : PreparedNativeInventory
         {
             ChargenNativeFixture& service;
             std::array<std::byte, 2> before, after;
             bool consumed = false;
-            Candidate(ChargenNativeFixture& value, PlayerId player)
-                : service(value), before(value.image), after(value.image) { after.at(player.value() - 1) = std::byte{2}; }
+            std::vector<uint64_t> controls;
+            Candidate(ChargenNativeFixture& value, PlayerId player, bool completion = true)
+                : service(value), before(value.image), after(value.image)
+            { if (completion) after.at(player.value() - 1) = std::byte{2}; }
             CanonicalDurabilityResult commit(const NativeInventoryCommit& persist) noexcept override
             {
                 if (consumed || before != service.image) return CanonicalDurabilityResult::Rejected;
                 const auto result = persist(after);
-                if (result == CanonicalDurabilityResult::Committed) { service.image = after; consumed = true; }
+                if (result == CanonicalDurabilityResult::Committed)
+                {
+                    service.image = after; consumed = true;
+                    service.appliedControls.insert(service.appliedControls.end(), controls.begin(), controls.end());
+                }
                 return result;
             }
         };
@@ -545,6 +553,18 @@ namespace
         { return std::make_unique<Candidate>(*this, player); }
         std::span<const std::byte> inventoryImage() const noexcept override { return image; }
         bool hasNativeCombat() const noexcept override { return true; }
+        bool ownsPlayerPhysics() const noexcept override { return playerPhysics; }
+        bool allowsPlayerMovement(PlayerId) const override { return !playerPhysics; }
+        std::unique_ptr<PreparedNativeInventory> prepareNativePlayerTick(const CanonicalServerState&, ServerTick,
+            float, std::unique_ptr<PreparedNativeInventory> command, const CanonicalWorldState*,
+            std::optional<WaitRestRequest>, std::span<const ServerCommandProposal> controls) override
+        {
+            if (!playerPhysics) return command;
+            assert(!command && controls.size() <= 2);
+            auto candidate = std::make_unique<Candidate>(*this, id<PlayerId>(1), false);
+            for (const auto& control : controls) candidate->controls.push_back(control.commandSequence().value());
+            return candidate;
+        }
         const std::array<std::byte, 2>& values(const PreparedNativeInventory* candidate) const
         {
             const auto* staged = dynamic_cast<const Candidate*>(candidate);
@@ -579,7 +599,7 @@ namespace
             return std::get<LatestWinsCombatSnapshot>(std::move(result));
         }
     };
-    void chargenVisibilityBetweenTicks(bool native = false, bool reverse = false)
+    void chargenVisibilityBetweenTicks(bool native = false, bool reverse = false, bool controls = false)
     {
         using namespace TES3MP::ServerApp;
         const auto config = parsedConfig();
@@ -613,6 +633,7 @@ namespace
         CanonicalCommandReducer reducer(std::get<CanonicalServerState>(createCanonicalServerState({}, {})),
             observability, testContentManifest());
         ChargenNativeFixture engine;
+        engine.playerPhysics = controls;
         struct Durability final : CanonicalDurabilityPort
         {
             CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&,
@@ -630,6 +651,7 @@ namespace
         FakeAuthentication authentication;
         std::vector<CapabilityId> capabilities{ characterCreationCapability() };
         if (native) { capabilities.push_back(inventoryReplicationCapability()); capabilities.push_back(combatReplicationCapability()); }
+        if (controls) capabilities.push_back(playerPhysicsCapability());
         std::ranges::sort(capabilities);
         auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(
             std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10)), capabilities, {}));
@@ -760,6 +782,50 @@ namespace
             }
             assert(views[0] && views[1] && observations[0] && observations[1]);
         }
+        if (controls)
+        {
+            const auto sample = [&](uint64_t sequence, uint64_t player = 1, bool staleEpoch = false) {
+                const auto* entity = reducer.state().findPlayer(id<PlayerId>(player));
+                const auto operation = ReliableOperation::create(ReliableOperationHeader(
+                    ClientCommandHeader(id<SessionId>(player), SessionGeneration::initial(), id<CommandSequence>(sequence),
+                        id<CommandId>(sequence), reducer.canonicalRevision()),
+                    EntityPrecondition(entity->entityId(), entity->entityRevision(), staleEpoch
+                        ? entity->authorityEpoch().next().value() : entity->authorityEpoch())),
+                    PlayerLocomotionInput(id<LocomotionInputTick>(sequence), id<LocomotionInputSequence>(sequence),
+                        LocomotionIntent(LocomotionMode::Walk, zero, LinearVelocity3(0,0,0), {}, {}, PlayerMovementControls{})));
+                return std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::PlayerControlSample,
+                    MessageKind::ClientPlayerControls, encodeReliableOperation(std::get<ReliableOperation>(operation))));
+            };
+            const auto first = sample(9), last = sample(12);
+            auto& incoming = runtime.incomingByConnection[id<TransportConnectionId>(1)];
+            incoming.push_back({TransportChannel::PlayerControlLatest, first});
+            incoming.push_back({TransportChannel::PlayerControlLatest, last});
+            incoming.push_back({TransportChannel::PlayerControlLatest, first});
+            assert(application.pump(intake.nextTick()) && engine.appliedControls.empty());
+            clock.nanoseconds = 101'000'000;
+            assert(application.pump(intake.nextTick()) && engine.appliedControls == std::vector<uint64_t>{12});
+            incoming.push_back({TransportChannel::PlayerControlLatest, last});
+            incoming.push_back({TransportChannel::PlayerControlLatest, sample(13, 1, true)});
+            const auto* entity = reducer.state().findPlayer(id<PlayerId>(1));
+            const auto reliable = ReliableOperation::create(ReliableOperationHeader(
+                ClientCommandHeader(id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                    id<CommandId>(1), reducer.canonicalRevision()),
+                EntityPrecondition(entity->entityId(), entity->entityRevision(), entity->authorityEpoch())),
+                CellTransition(entity->transform().cell()));
+            send(1, MessageClass::ReliableOperation, MessageKind::ReliableOperation,
+                encodeReliableOperation(std::get<ReliableOperation>(reliable)));
+            clock.nanoseconds = 134'000'000;
+            assert(application.pump(intake.nextTick()) && engine.appliedControls == std::vector<uint64_t>{12});
+            assert(reducer.state().findActiveSession(id<SessionId>(1))->highestContiguousFinalizedCommand()
+                == CommandSequence::initial());
+            incoming.push_back({TransportChannel::PlayerControlLatest, sample(13, 2)});
+            assert(application.pump(intake.nextTick()) && !sessions.session(id<TransportConnectionId>(1))
+                && !reducer.state().findActiveSession(id<SessionId>(1)));
+            runtime.incomingByConnection[id<TransportConnectionId>(2)].push_back(
+                {TransportChannel::PresentationLatest, sample(14, 2)});
+            assert(application.pump(intake.nextTick()) && sessions.size() == 0 && reducer.state().activeSessions().empty());
+            std::cout << "PASS player-controls: latest sample, sequence gaps/stale/duplicate/epoch, reliable ordering and authentication\n";
+        }
         assert(application.stop());
         std::cout << (native ? "chargen-native-visibility" : "chargen-visibility")
             << (reverse ? " reverse" : "") << ": two staggered completions publish safe-point views and peer leave/enter\n";
@@ -846,7 +912,9 @@ namespace TES3MP::ServerApp::Testing
         ConnectionSessionCoordinator sessions(clock, observability,
             SessionTimeoutPolicy::create(30'000'000'000, 30'000'000'000, 30'000'000'000).value(),
             offer, authentication, queues, 2, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, world ? &*world : nullptr, &native);
-        ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), id<ServerTick>(baseTick.value() + 1),
+        const auto simulationTick = world ? world->time().lastAdvanceTick.next() : baseTick.next();
+        assert(simulationTick);
+        ServerCommandIntakeCoordinator intake(clock, observability, clock.now(), *simulationTick,
             IngressOrdinal::initial(), restored ? TickEpoch::NextTick : TickEpoch::Zero);
         FakeRuntime runtime;
         ServerApplicationWiring wiring{sessions, joins, crypto, queues, clock, intake, reducer, lifecycle};
@@ -1098,21 +1166,25 @@ namespace TES3MP::ServerApp::Testing
         }
         if (environment)
         {
-            // A send can fail after this pump catches up several native world
-            // ticks. Disconnect persistence must include that advanced world,
-            // even though the caller supplied the tick before catch-up.
+            // Catch up first, then fail the socket between scheduled steps.
+            // The lifecycle barrier is one tick ahead of the native clock.
             const auto entryTick = intake.nextTick();
+            clock.nanoseconds = 40 * 33'333'334ULL;
+            assert(application.pump(entryTick));
+            assert(reducer.checkpointTick() > entryTick);
+            const auto completedTick = world->time().lastAdvanceTick;
+            const auto futureTick = intake.nextTick();
+            assert(futureTick > completedTick);
             runtime.failedSends = {id<TransportConnectionId>(3)};
             assert(queues.enqueue(runtime.failedSends.front(), TransportChannel::ReliableOrdered, pending)
                 == TransportResult::Accepted);
-            clock.nanoseconds = 40 * 33'333'334ULL;
-            const bool disconnected = application.pump(entryTick);
-            if (!disconnected) std::cerr << "catch-up disconnect: " << application.failure() << '\n';
-            assert(disconnected);
-            assert(reducer.checkpointTick() > entryTick);
+            assert(application.pump(futureTick));
             assert(!reducer.state().findActiveSession(id<SessionId>(1)));
+            assert(world->time().lastAdvanceTick == completedTick);
             assert(persistence.restoredWorld() && *persistence.restoredWorld() == *world);
-            assert(persistence.restoredCheckpointTick() == reducer.checkpointTick());
+            assert(persistence.restoredCheckpointTick() == futureTick);
+            // The second invocation reopens this exact prefix and runs the
+            // omitted world step once, preserving RNG/time and inventories.
         }
         assert(application.stop());
         std::cout << "ServerApplication with synthetic transport: production authentication, put/take, late join, two owned deliveries, retry, resync, resume and journal compaction\n";
@@ -1125,10 +1197,11 @@ int main(int argc, char** argv)
     if (argc > 1)
     {
         assert(argc == 2 && (std::string_view(argv[1]) == "chargen-visibility"
+            || std::string_view(argv[1]) == "player-controls"
             || std::string_view(argv[1]) == "chargen-native-visibility"
             || std::string_view(argv[1]) == "chargen-native-visibility-reverse"));
         chargenVisibilityBetweenTicks(std::string_view(argv[1]) != "chargen-visibility",
-            std::string_view(argv[1]) == "chargen-native-visibility-reverse");
+            std::string_view(argv[1]) == "chargen-native-visibility-reverse", std::string_view(argv[1]) == "player-controls");
         return 0;
     }
     chargenVisibilityBetweenTicks();

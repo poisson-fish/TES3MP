@@ -424,6 +424,9 @@ namespace TES3MP::Native
         uint8_t worldCell(ESM::RefNum ref, const PreparedWorldTransfer* prepared = nullptr) const;
         PlainEquipmentValues preparedValues(const PreparedTransfer& prepared, size_t owner) const;
         PlainEquipmentValues preparedValues(const PreparedEquipment& prepared, size_t owner) const;
+        float preparedWeight(const PreparedTransfer&, size_t owner) const;
+        float preparedWeight(const PreparedEquipment&, size_t owner) const;
+        float preparedWeight(const PreparedWorldTransfer&, size_t owner) const;
     };
 }
 #endif

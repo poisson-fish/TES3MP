@@ -219,6 +219,9 @@ namespace TES3MP::OpenMWAdapter
         return {};
     }
 
+    std::optional<LocomotionIntent> DesktopAutomation::samplePlayerControls() noexcept
+    { return mDesktopInput ? mDesktopInput->samplePlayerControls() : std::nullopt; }
+
     std::optional<LocomotionIntent> DesktopAutomation::sampleCurrentIntent() noexcept
     {
         if (mRole == DesktopAutomationRole::NativeTraversal && mDesktopInput)
@@ -360,11 +363,17 @@ namespace TES3MP::OpenMWAdapter
             if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
             {
                 const auto& position = self->transform().position();
+                const auto* desktop = dynamic_cast<const DesktopPresentation*>(&mPresentation);
+                const auto correction = desktop ? desktop->playerPhysicsCorrection() : std::nullopt;
                 mOutput << "{\"event\":\"native_player_sample\",\"self\":" << self->playerId().value()
                     << ",\"revision\":" << snapshot.header().canonicalRevision().value()
                     << ",\"cell\":" << (self->transform().cell().asInterior()
                         ? self->transform().cell().asInterior()->cellSpace().value() : 0)
                     << ",\"epoch\":" << self->authorityEpoch().value()
+                    << ",\"physics\":" << (snapshot.playerPhysics() ? "true" : "false")
+                    << ",\"physics_consumed\":" << (snapshot.playerPhysics() ? snapshot.playerPhysics()->consumedCommand : 0)
+                    << ",\"physics_replayed\":" << (localReconciliation ? localReconciliation->physicsReplay.size() : 0)
+                    << ",\"physics_correction_quanta\":" << (correction ? std::to_string(*correction) : "null")
                     << ",\"position\":[" << position.x() << ',' << position.y() << ',' << position.z() << "]"
                     << ",\"players\":[";
                 bool comma = false;

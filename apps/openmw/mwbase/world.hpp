@@ -20,6 +20,7 @@
 #include "../mwworld/spellcaststate.hpp"
 
 #include "../mwrender/rendermode.hpp"
+namespace MWPhysics { struct ActorReplayState; struct ActorReplayInput; }
 
 namespace osg
 {
@@ -123,6 +124,8 @@ namespace MWBase
         World() {}
 
         virtual ~World() = default;
+        virtual bool reconcilePlayerMovement(const MWPhysics::ActorReplayState&,
+            std::span<const MWPhysics::ActorReplayInput>) { return false; }
 
         virtual void setRandomSeed(uint32_t seed) = 0;
         ///< \param seed The seed used when starting a new game.

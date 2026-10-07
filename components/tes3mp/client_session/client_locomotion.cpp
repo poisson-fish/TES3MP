@@ -36,7 +36,7 @@ namespace TES3MP
 
     LocalLocomotionReconciliation ClientLocomotionHistory::reconcile(
         const SpatialEntitySnapshot& authoritative, std::optional<CommandSequence> acknowledgedCommand,
-        bool hardDiscontinuity) noexcept
+        bool hardDiscontinuity, std::optional<PlayerPhysicsBaseline> physics) noexcept
     {
         if (mBaseline
             && (mBaseline->player != authoritative.playerId() || mBaseline->entity != authoritative.entityId()
@@ -56,10 +56,23 @@ namespace TES3MP
 
         Transform replayed = authoritative.transform();
         LinearVelocity3 velocity = authoritative.linearVelocity();
+        if (physics)
+        {
+            LocalLocomotionReconciliation result{replayed, velocity, 0, hardDiscontinuity, physics};
+            try
+            {
+                result.physicsReplay.reserve(mInputs.size());
+                for (const auto& retained : mInputs)
+                    if (retained.input.intent().controls()) result.physicsReplay.push_back(retained.input);
+            }
+            catch (...) { mInputs.clear(); return {replayed, velocity, 0, true, physics}; }
+            return result;
+        }
         std::size_t replayedCount = 0;
         for (const auto& retained : mInputs)
         {
             const auto& intent = retained.input.intent();
+            if (intent.controls()) continue; // Engine replay requires an acknowledged physics frame.
             if (intent.position() && intent.orientation())
             {
                 replayed = Transform(replayed.cell(), *intent.position(), *intent.orientation());

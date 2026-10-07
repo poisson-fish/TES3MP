@@ -107,6 +107,21 @@ namespace MWPhysics
         return collisionMask;
     }
 
+    void Actor::installPredictionFrame(const ActorFrameData& frame, bool discontinuity)
+    {
+        std::scoped_lock lock(mPositionMutex);
+        mPredictionOffset = mSimulationPosition - frame.mPosition;
+        if (discontinuity || mPredictionOffset.length2() > 256.f * 256.f) mPredictionOffset = {};
+        mPredictionCorrectionTime = std::chrono::steady_clock::now();
+        mPreviousPosition = mPosition = frame.mPosition;
+        mSimulationPosition = frame.mPosition + mPredictionOffset;
+        mPositionOffset = osg::Vec3f(); mVelocity = osg::Vec3f(); mSkipSimulation = false;
+        mForce = frame.mInertia; mOnGround = frame.mIsOnGround; mOnSlope = frame.mIsOnSlope;
+        mWalkingOnWater = frame.mWalkingOnWater; mStandingOnPtr = {};
+        mLastStuckPosition = frame.mLastStuckPosition; mStuckFrames = frame.mStuckFrames;
+        updateCollisionObjectPositionUnsafe();
+    }
+
     void Actor::updatePosition()
     {
         std::scoped_lock lock(mPositionMutex);
@@ -115,6 +130,7 @@ namespace MWPhysics
         mPosition = worldPosition;
         mSimulationPosition = worldPosition;
         mPositionOffset = osg::Vec3f();
+        mPredictionOffset = {};
         mStandingOnPtr = nullptr;
         mSkipSimulation = true;
     }
@@ -122,7 +138,14 @@ namespace MWPhysics
     void Actor::setSimulationPosition(const osg::Vec3f& position)
     {
         if (!std::exchange(mSkipSimulation, false))
-            mSimulationPosition = position;
+        {
+            // Collision state changes immediately. Only its displayed position
+            // carries the short correction offset; it never enters the solver.
+            const float age = std::chrono::duration<float>(std::chrono::steady_clock::now()
+                - mPredictionCorrectionTime).count();
+            const float weight = std::clamp(1.f - age / .067f, 0.f, 1.f);
+            mSimulationPosition = position + mPredictionOffset * weight;
+        }
     }
 
     osg::Vec3f Actor::getScaledMeshTranslation() const

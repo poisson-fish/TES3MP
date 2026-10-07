@@ -83,6 +83,14 @@ namespace TES3MP::Native
         (void)worldValues(&prepared);
         return owner == prepared.mState->mActor ? prepared.mState->mInventory->mSaved : installedValues(owner);
     }
+    float EquipmentRuntime::preparedWeight(const PreparedWorldTransfer& prepared, size_t owner) const
+    {
+        (void)worldValues(&prepared);
+        const auto& state = *prepared.mState;
+        return owner == state.mActor ? state.mInventory->mPrepared.installationCandidate(
+            preparationContext(owner), storage(owner)).getWeight() : storage(owner).getWeight();
+    }
+
     std::optional<EquipmentSessionValues::WorldCells> EquipmentRuntime::preparedWorldCells(const PreparedWorldTransfer& prepared) const
     {
         (void)worldValues(&prepared);

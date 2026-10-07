@@ -52,6 +52,9 @@ namespace MWPhysics
             unsigned int frameNumber, osg::Stats& stats);
 
         void resetSimulation(const ActorMap& actors);
+        void replacePredictionBodies(std::span<btCollisionObject* const> previous,
+            std::span<btCollisionObject* const> next);
+        void replayMovement(ActorFrameData&, std::span<const ActorReplayInput>, const osg::Vec3f& hullOffset);
 
         // Thread safe wrappers
         void rayTest(const btVector3& rayFromWorld, const btVector3& rayToWorld,

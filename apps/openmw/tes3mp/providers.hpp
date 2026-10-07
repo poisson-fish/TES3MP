@@ -132,6 +132,7 @@ namespace TES3MP::OpenMWAdapter
         virtual ~SemanticInputProvider() = default;
         virtual CellTransitionCapture captureCellTransition() noexcept = 0;
         virtual std::optional<LocomotionIntent> sampleCurrentIntent() noexcept = 0;
+        virtual std::optional<LocomotionIntent> samplePlayerControls() noexcept { return {}; }
         virtual std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept { return std::nullopt; }
         virtual std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept
         {

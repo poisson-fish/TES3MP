@@ -684,15 +684,27 @@ namespace TES3MP::OpenMWAdapter
         }
         else if (action == "autowalk")
         {
-            if (wm->isGuiMode()) throw std::runtime_error("Traversal movement requires game focus");
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal movement requires game focus: mode="
+                + std::to_string(int(wm->getMode())) + " console=" + std::to_string(wm->isConsoleMode()));
             MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_AutoMove);
+        }
+        else if (action == "jump")
+        {
+            if (wm->isGuiMode()) throw std::runtime_error("Traversal jump requires game focus");
+            MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_Jump);
+        }
+        else if (action == "turnright")
+        {
+            auto position = world->getPlayerPtr().getRefData().getPosition();
+            position.rot[2] += float(osg::PI_2);
+            world->rotateObject(world->getPlayerPtr(), position.asRotationVec3());
         }
         else if (action == "thirdperson")
         {
             world->toggleVanityMode(false);
             if (world->isFirstPerson()) world->togglePOV(true);
         }
-        else if (action == "facepeer")
+        else if (action == "facepeer" || action == "faceaway")
         {
             auto* desktop = dynamic_cast<DesktopPresentation*>(&mPresentation);
             const auto peer = desktop && mTraversalPeer
@@ -702,7 +714,8 @@ namespace TES3MP::OpenMWAdapter
             const auto dx = (*peer)[0] - position.pos[0];
             const auto dy = (*peer)[1] - position.pos[1];
             world->toggleVanityMode(false);
-            world->rotateObject(world->getPlayerPtr(), osg::Vec3f(.1f, 0, std::atan2(dx, dy)));
+            world->rotateObject(world->getPlayerPtr(), osg::Vec3f(.1f, 0,
+                std::atan2(dx, dy) + (action == "faceaway" ? float(osg::PI) : 0.f)));
         }
         else if (action == "probe")
         {
@@ -928,6 +941,7 @@ namespace TES3MP::OpenMWAdapter
         {
             if (wm->containsMode(MWGui::GM_Container)) wm->removeGuiMode(MWGui::GM_Container);
             if (wm->containsMode(MWGui::GM_Inventory)) wm->removeGuiMode(MWGui::GM_Inventory);
+            if (wm->isConsoleMode()) wm->toggleConsole();
         }
         else if (action == "reconnect" || action == "disconnect" || action == "disconnectbrief")
         {

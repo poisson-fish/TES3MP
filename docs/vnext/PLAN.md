@@ -111,8 +111,8 @@ Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
    reload/restart and smoothness under latency/jitter/loss. Before player cutover,
    accept V77 NPCs: door entry, two occupants, split interiors, combat,
    flight isolation and state after reentry/reconnect/restart. Switch player
-   movement last using shared physics, meeting DECISIONS.md's prediction/reconciliation
-   budgets. Retain inherited movement until cutover.
+   movement last using shared physics (V79), meeting DECISIONS.md's reconciliation
+   budgets. Retain inherited movement for older campaigns.
 
 **Exit:** bounded slices are insufficient. All OpenMW-supported combat paths in
 the gameplay loadout work generically across actors, players, records and targets:
@@ -131,8 +131,8 @@ duplicate settings and client gameplay writers; retain shared calculations/one c
 ## M5 - Complete scripted quests independently and together
 
 **Outcome:** unchanged engine scripts support a living shared world and independent
-progression. Start after accepted exploration; remaining M4 acceptance/movement
-cutover stay open. Follow [current direction](DECISIONS.md#scripted-quest-execution-contract):
+progression. Start after accepted exploration; remaining M4 exit criteria
+stay open. Follow [current direction](DECISIONS.md#scripted-quest-execution-contract):
 
 1. **Shared world first:** execute one context-free world script once for two
    desktops, preserving state through reentry/restart. Broaden ambient/object/door/NPC

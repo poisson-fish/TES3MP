@@ -4,6 +4,7 @@
 #include "tes3mp/canonical_state.hpp"
 #include "tes3mp/protocol_exchange.hpp"
 #include "tes3mp/transport.hpp"
+#include <tes3mp/native_inventory.hpp>
 
 #include <optional>
 #include <vector>
@@ -26,7 +27,8 @@ namespace TES3MP::ServerApp
 
     bool sharesInterest(const CanonicalServerState& state, SessionId target, SessionId source, bool neighborhoods = false) noexcept;
     std::optional<InterestBaselineDelivery> projectInterestBaseline(const CanonicalServerState& state,
-        SessionId target, ServerTick tick, CanonicalRevision revision, CanonicalStateVersion stateVersion, bool neighborhoods = false);
+        SessionId target, ServerTick tick, CanonicalRevision revision, CanonicalStateVersion stateVersion, bool neighborhoods = false,
+        const NativeInventoryAuthority* native = nullptr);
     bool admitInterestBaseline(OutboundQueueSet& queues, TransportConnectionId connection,
         const InterestBaselineDelivery& delivery);
 
@@ -40,7 +42,8 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, InterestDelivery>>& deliveries);
 
     std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectInterestViews(
-        const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision, bool neighborhoods = false);
+        const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision, bool neighborhoods = false,
+        const NativeInventoryAuthority* native = nullptr, const PreparedNativeInventory* candidate = nullptr);
     bool admitInterestViewsAtomically(OutboundQueueSet& queues,
         const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& deliveries);
     bool admitInterestTickAtomically(OutboundQueueSet& queues,

@@ -184,7 +184,7 @@ try
     }
     if (argc < 6 || argc > 10)
     {
-        std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z] [NAV_SETTINGS] [chargen]\n"
+        std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z] [NAV_SETTINGS] [player-physics|chargen]\n"
             "tes3mp_native_bootstrap --list-cells OPENMW_CONFIG_DIR NAME_FILTER (at most 64 results)\n"
             "tes3mp_native_bootstrap --inspect-area OPENMW_CONFIG_DIR START [RADIUS] (all connected areas)\n"
             "tes3mp_native_bootstrap --inspect-actors OPENMW_CONFIG_DIR CELL (placements and supported exits)\n"
@@ -196,7 +196,8 @@ try
             "Spawn uses a discovered incoming door destination, or explicit OpenMW coordinates.\n"
             "NAV_SETTINGS enables native-inventory-77 shared NPC simulation: at most 37 placed actors,\n"
             "up to 256 cells in bounded exterior areas/connected interiors; scripted/leveled actors require later services.\n"
-            "The final chargen option enables V78 discovered choices and empty fresh inventories.\n"
+            "The final player-physics option enables V79 authoritative player movement and character creation.\n"
+            "chargen retains V78 migration compatibility. Fresh inventories are empty unless starters are configured.\n"
             "Set the two registered player IDs in native.txt; their registrations must bind manifest.txt.\n"
             "Add connection/password/player_identity_file settings to server-content.cfg before launch.\n";
         return argc == 2 && std::string_view(argv[1]) == "--help" ? 0 : 2;
@@ -228,10 +229,12 @@ try
     }
     spawnPosition = loadout.playerSpawn(start, cells, spawnPosition);
     std::ostringstream material;
-    const bool characterCreation = argc == 10 && std::string_view(argv[9]) == "chargen";
-    if (argc == 10 && !characterCreation) throw std::invalid_argument("Expected chargen as final bootstrap option");
+    const bool playerPhysics = argc == 10 && std::string_view(argv[9]) == "player-physics";
+    const bool characterCreation = playerPhysics || (argc == 10 && std::string_view(argv[9]) == "chargen");
+    if (argc == 10 && !characterCreation) throw std::invalid_argument("Expected player-physics or chargen as final bootstrap option");
     const bool cellActors = argc >= 9;
-    const auto version = characterCreation ? "native-inventory-78" : cellActors ? "native-inventory-77" : "native-inventory-15";
+    const auto version = playerPhysics ? "native-inventory-79" : characterCreation ? "native-inventory-78"
+        : cellActors ? "native-inventory-77" : "native-inventory-15";
     const auto navigationSettings = cellActors ? std::filesystem::absolute(std::filesystem::u8path(argv[8]))
         : std::filesystem::path{};
     if (cellActors && !std::filesystem::is_regular_file(navigationSettings))

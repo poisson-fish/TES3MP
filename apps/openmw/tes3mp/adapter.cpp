@@ -40,7 +40,7 @@ namespace TES3MP::OpenMWAdapter
             nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(),
             nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
-            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability(), playerAppearanceCapability(), playerRespawnCapability() };
+            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability(), playerAppearanceCapability(), playerRespawnCapability(), playerPhysicsCapability() };
         std::ranges::sort(optional);
         optional.erase(std::unique(optional.begin(), optional.end()), optional.end());
         auto offer = std::get<CapabilityOffer>(
@@ -276,7 +276,7 @@ namespace TES3MP::OpenMWAdapter
                 CellTransitionCapture captured;
                 if (mGameRunning && hadSnapshot && !mResuming
                     && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
-                    && !mMinimumEstablishedSnapshotRevision)
+                    && !mMinimumEstablishedSnapshotRevision && !ownsPlayerMovement())
                 {
                     captured = mInput.captureCellTransition();
                     if (captured.result != ProviderResult::Accepted)
@@ -372,7 +372,10 @@ namespace TES3MP::OpenMWAdapter
                     mPendingCharacterCompletionRevision.reset();
                 }
                 if (snapshot)
-                    mMotion.observeAcknowledgement(snapshot->header().acknowledgedCommandSequence(), now);
+                    mMotion.observeAcknowledgement(ownsPlayerMovement()
+                        ? (snapshot->playerPhysics() ? CommandSequence::fromValue(snapshot->playerPhysics()->consumedCommand)
+                                                     : std::nullopt)
+                        : snapshot->header().acknowledgedCommandSequence(), now);
                 if (mPendingRespawn && snapshot && snapshot->header().acknowledgedCommandSequence()
                     && *snapshot->header().acknowledgedCommandSequence() >= *mPendingRespawn)
                     mPendingRespawn.reset();
@@ -577,7 +580,7 @@ namespace TES3MP::OpenMWAdapter
                 {
                     const auto applied
                         = mPresentation.applyAuthoritative(*snapshot, mRuntime->session().observedPlayers(),
-                            !mPendingCellTransition && !mDeferredCellTransition && !captured.transition, now,
+                            ownsPlayerMovement() || (!mPendingCellTransition && !mDeferredCellTransition && !captured.transition), now,
                             localReconciliation);
                     if (applied != ProviderResult::Accepted)
                     {
@@ -915,9 +918,9 @@ namespace TES3MP::OpenMWAdapter
                         }
                     }
                 }
-                if (snapshot)
+                if (snapshot && !mAwaitingResync && mRuntime->session().stateMachine().interestBaselineComplete())
                 {
-                    if (auto intent = mInput.sampleCurrentIntent())
+                    if (auto intent = ownsPlayerMovement() ? mInput.samplePlayerControls() : mInput.sampleCurrentIntent())
                         mMotion.sample(std::move(*intent), now);
                     const auto* self = selfEntry(*snapshot);
                     if (!self)
@@ -932,8 +935,13 @@ namespace TES3MP::OpenMWAdapter
                         const auto queued = hello && hello->selectedVersion().minor >= 3
                             ? mRuntime->queueLocomotionIntent(std::move(*intent))
                             : mRuntime->queueMotionIntent(PlayerMotionIntent(intent->desiredVelocity()));
-                        if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence
-                            || !mMotion.markQueued(*queued.sequence, queuedIntent, now))
+                        // Keep desired controls and a pending jump edge until
+                        // acknowledgement frees replay capacity. A rejected
+                        // sample consumes neither a sequence nor prediction time.
+                        const bool backpressured = queuedIntent.controls()
+                            && queued.result == ClientRuntimeResult::QueueRejected;
+                        if (!backpressured && (queued.result != ClientRuntimeResult::Accepted || !queued.sequence
+                            || !mMotion.markQueued(*queued.sequence, queuedIntent, now)))
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);
                             return;
@@ -1003,6 +1011,12 @@ namespace TES3MP::OpenMWAdapter
             }
 
             bool ownsPlayerLives() const noexcept override { return mOwnsPlayerLives && !mClosed; }
+            bool ownsPlayerMovement() const noexcept override
+            {
+                if (!mRuntime || mClosed) return false;
+                const auto& hello = mRuntime->session().stateMachine().negotiatedHello();
+                return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), playerPhysicsCapability());
+            }
             bool canRespawn() const noexcept override
             {
                 if (!mRuntime || !mReady || mClosed || mResuming || !mGameRunning || mPendingRespawn) return false;
@@ -1338,8 +1352,11 @@ namespace TES3MP::OpenMWAdapter
                                                                              : ConnectionStatus::PresentationFailed);
             }
 
-            void closeTerminal(ConnectionStatus status) noexcept
+            void closeTerminal(ConnectionStatus status,
+                std::source_location location = std::source_location::current()) noexcept
             {
+                std::fprintf(stderr, "TES3MP terminal connection: status=%u adapter_line=%u\n",
+                    unsigned(status), location.line());
                 mInput.clearSessionState();
                 mPresentation.clear();
                 if (mRuntime)

@@ -2,11 +2,13 @@
 #define OPENMW_MWPHYSICS_MOVEMENTDATA_H
 
 #include <limits>
+#include <span>
 
 #include <osg/Vec2f>
 #include <osg/Vec3f>
 
 class btCollisionObject;
+namespace MWWorld { class Ptr; }
 
 namespace MWPhysics
 {
@@ -57,6 +59,30 @@ namespace MWPhysics
         bool mIsInStorm = false;
         osg::Vec3f mStormDirection;
         float mStormWalkMultiplier = 0.f;
+    };
+
+    struct ActorReplayBody
+    {
+        const MWWorld::Ptr* actor = nullptr;
+        osg::Vec3f position;
+        float yaw = 0;
+    };
+    struct ActorReplayState
+    {
+        osg::Vec3f position, inertia, lastStuckPosition;
+        unsigned stuckFrames = 0;
+        bool grounded = false, slope = false, walkingOnWater = false;
+        bool discontinuity = false;
+        float* correctionDistance = nullptr; // Optional engine result, never persisted.
+        std::span<const ActorReplayBody> bodies;
+    };
+    struct ActorReplayInput
+    {
+        osg::Vec3f axes;
+        osg::Vec2f rotation;
+        float walkSpeed = 0, swimSpeed = 0, flySpeed = 0, jumpSpeed = 0, airControl = 1;
+        bool jump = false, sneak = false;
+        float xyScale = 1;
     };
 }
 

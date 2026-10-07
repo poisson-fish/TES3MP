@@ -56,6 +56,47 @@ namespace MWClass
         if (running) result *= runMultiplier;
         return (result * fatigueTerm + gravity) / 3.f;
     }
+
+    struct NpcMovementProfile
+    {
+        float walk, swim, fly, jump, airControl;
+    };
+    template<class Setting>
+    float movementFatigueCost(float encumbrance, bool sneaking, bool swimming, bool running,
+        float speedFactor, float seconds, const Setting& setting)
+    {
+        if (encumbrance > 1.f) return 0.f;
+        const char* base = sneaking ? "fFatigueSneakBase" : swimming
+            ? (running ? "fFatigueSwimRunBase" : "fFatigueSwimWalkBase") : "fFatigueRunBase";
+        const char* mult = sneaking ? "fFatigueSneakMult" : swimming
+            ? (running ? "fFatigueSwimRunMult" : "fFatigueSwimWalkMult") : "fFatigueRunMult";
+        if (!sneaking && !swimming && !running) return 0.f;
+        return (setting(base) + encumbrance * setting(mult)) * seconds * speedFactor;
+    }
+    template<class Setting>
+    float jumpFatigueCost(float encumbrance, const Setting& setting)
+    { return setting("fFatigueJumpBase") + std::min(1.f, encumbrance) * setting("fFatigueJumpMult"); }
+    // Explicit player context shared by authoritative stepping and prediction.
+    template<class Setting>
+    NpcMovementProfile npcMovementProfile(float speed, float athletics, float acrobatics,
+        float encumbrance, float fatigueTerm, float swiftSwim, float levitate, float jump,
+        bool running, bool sneaking, bool werewolfRunning, bool inert, const Setting& setting, float gravity)
+    {
+        const float walk = npcWalkSpeed(speed, encumbrance, setting("fMinWalkSpeed"),
+            setting("fMaxWalkSpeed"), setting("fEncumberedMoveEffect"));
+        const float run = npcRunSpeed(walk, athletics, setting("fAthleticsRunBonus"), setting("fBaseRunMultiplier"));
+        const float multiplier = werewolfRunning ? setting("fWereWolfRunMult") : 1.f;
+        return {
+            inert ? 0.f : (sneaking ? walk * setting("fSneakSpeedMultiplier") : running ? run : walk) * multiplier,
+            inert ? 0.f : npcSwimSpeed(running ? run : walk, swiftSwim, athletics,
+                setting("fSwimRunBase"), setting("fSwimRunAthleticsMult")) * multiplier,
+            inert ? 0.f : npcFlySpeed(speed, levitate, encumbrance, setting("fMinFlySpeed"),
+                setting("fMaxFlySpeed"), setting("fEncumberedMoveEffect")) * multiplier,
+            inert || sneaking ? 0.f : npcJumpSpeed(encumbrance, acrobatics, jump, fatigueTerm, running,
+                setting("fJumpEncumbranceBase"), setting("fJumpEncumbranceMultiplier"), setting("fJumpAcrobaticsBase"),
+                setting("fJumpAcroMultiplier"), setting("fJumpRunMultiplier"), gravity),
+            std::clamp(setting("fJumpMoveBase") + setting("fJumpMoveMult") * acrobatics / 100.f, 0.f, 1.f)};
+    }
 }
 
 #endif

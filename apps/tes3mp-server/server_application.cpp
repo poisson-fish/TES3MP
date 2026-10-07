@@ -191,7 +191,10 @@ namespace TES3MP::ServerApp
         if (mWiring)
         {
             if (auto* session = mWiring->sessions.session(connection); session && session->sessionId())
+            {
                 mLatestPoses.erase(*session->sessionId());
+                mLatestControls.erase(*session->sessionId());
+            }
             (void)mWiring->sessions.close(connection);
         }
         (void)mTransport.close(connection, TransportCloseMode::Abort);
@@ -282,9 +285,56 @@ namespace TES3MP::ServerApp
             if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted)
                 return false;
         for (const auto session : sessionIds)
+        {
             mLatestPoses.erase(session);
+            mLatestControls.erase(session);
+        }
         return true;
     }
+
+    bool ServerApplication::receivePlayerControls(TransportConnectionId connection, const TransportMessage& message) noexcept
+    try
+    {
+        if (!mWiring || !mWiring->nativeInventory || !mWiring->nativeInventory->ownsPlayerPhysics()
+            || message.channel != TransportChannel::PlayerControlLatest) return false;
+        const auto* session = mWiring->sessions.session(connection);
+        if (!session || session->state() != ServerSessionState::Established || !session->sessionId()
+            || !session->negotiatedHello() || !std::ranges::binary_search(
+                session->negotiatedHello()->negotiatedCapabilities(), playerPhysicsCapability())) return false;
+        const auto decoded = decodeProtocolFrame(message.bytes);
+        const auto* frame = std::get_if<DecodedFrame>(&decoded);
+        if (!frame || frame->messageKind() != MessageKind::ClientPlayerControls) return false;
+        auto payload = decodeReliableOperation(frame->payload());
+        auto* sample = std::get_if<ReliableOperation>(&payload);
+        if (!sample || !sample->header().entityPrecondition()) return false;
+        const auto& header = sample->header().commandHeader();
+        const auto* input = std::get_if<PlayerLocomotionInput>(&sample->body());
+        if (!input || !input->intent().controls() || header.sessionId() != *session->sessionId()
+            || header.sessionGeneration() != session->generation()
+            || header.commandSequence().value() != input->inputSequence().value()) return false;
+        const auto& canonical = mWiring->reducer.state();
+        const auto* progress = canonical.findActiveSession(header.sessionId());
+        const auto* player = progress ? canonical.findPlayer(progress->playerId()) : nullptr;
+        if (!player || progress->sessionGeneration() != header.sessionGeneration()
+            || player->entityId() != sample->header().entityPrecondition()->entityId()) return false;
+        // Controls already in flight across a teleport/respawn are harmless.
+        if (player->authorityEpoch() != sample->header().entityPrecondition()->expectedAuthorityEpoch()) return true;
+        const auto* profile = mWiring->joins.characterProfile(player->playerId());
+        if (!profile || profile->lifecycle() != CharacterLifecycle::EstablishedCharacter) return false;
+        const auto previous = mLatestControls.find(header.sessionId());
+        if (previous != mLatestControls.end())
+        {
+            const auto& prior = previous->second.sample;
+            if (header.commandSequence() < prior.header().commandHeader().commandSequence()) return true;
+            if (header.commandSequence() == prior.header().commandHeader().commandSequence()) return *sample == prior;
+            const auto& previousInput = std::get<PlayerLocomotionInput>(prior.body());
+            if (input->inputTick() <= previousInput.inputTick()) return false;
+        }
+        else if (mLatestControls.size() >= canonical.players().size()) return false;
+        mLatestControls.insert_or_assign(header.sessionId(), RetainedControls{std::move(*sample), true});
+        return true;
+    }
+    catch (...) { return false; }
 
     bool ServerApplication::relayPose(TransportConnectionId connection, const TransportMessage& message) noexcept
     try
@@ -386,7 +436,7 @@ namespace TES3MP::ServerApp
         const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
         const auto stateVersion = mWiring->lifecycle.candidateStateVersion(lifecycle->id);
         auto baseline = candidate && revision && stateVersion
-            ? projectInterestBaseline(*candidate, *session->sessionId(), tick, *revision, *stateVersion, mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas())
+            ? projectInterestBaseline(*candidate, *session->sessionId(), tick, *revision, *stateVersion, mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas(), mWiring->nativeInventory)
             : std::nullopt;
         auto observations
             = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision, mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas()) : std::nullopt;
@@ -586,7 +636,7 @@ namespace TES3MP::ServerApp
             return false;
         auto delivery = projectInterestBaseline(resolved.publication()->state(), request->sessionId(),
             resolved.publication()->checkpointTick(), mWiring->reducer.canonicalRevision(),
-            resolved.publication()->stateVersion(), mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas());
+            resolved.publication()->stateVersion(), mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas(), mWiring->nativeInventory);
         if (!delivery)
             return false;
         const bool wantActors = supportsActors(connection);
@@ -867,10 +917,30 @@ namespace TES3MP::ServerApp
             bool resyncRequested = false;
             for (std::size_t index = 0; index < received.messages; ++index)
             {
+                if (messages[index].channel == TransportChannel::PlayerControlLatest)
+                {
+                    if (!receivePlayerControls(connection, messages[index]))
+                    {
+                        if (!disconnectConnection(connection, tick))
+                        {
+                            mFailure = "rejected player controls disconnect failed";
+                            return false;
+                        }
+                        (void)failConnection(connection, "player controls rejected");
+                        closed = true;
+                        break;
+                    }
+                    continue;
+                }
                 if (messages[index].channel == TransportChannel::PresentationLatest)
                 {
                     if (!relayPose(connection, messages[index]))
                     {
+                        if (!disconnectConnection(connection, tick))
+                        {
+                            mFailure = "rejected pose disconnect failed";
+                            return false;
+                        }
                         (void)failConnection(connection, "pose relay rejected");
                         closed = true;
                         break;
@@ -1108,8 +1178,18 @@ namespace TES3MP::ServerApp
                 if (unanimous)
                     waitRestCommit = first;
             }
+            std::vector<ServerCommandProposal> playerControls;
+            for (const auto& [session, retained] : mLatestControls) if (retained.pending)
+            {
+                const auto& sample = retained.sample;
+                const auto& header = sample.header().commandHeader();
+                const auto& input = std::get<PlayerLocomotionInput>(sample.body());
+                playerControls.emplace_back(header.sessionId(), header.sessionGeneration(), header.commandSequence(),
+                    header.commandId(), header.observedCanonicalRevision(), *sample.header().entityPrecondition(),
+                    PlayerLocomotionCommandProposal(input.inputTick(), input.inputSequence(), input.intent()));
+            }
             if (!mWiring->reducer.stageNativeDoorStep(prepared, batch.scheduledTick().value(),
-                    1.f / ServerTicksPerSecond, waitRestCommit))
+                    1.f / ServerTicksPerSecond, waitRestCommit, playerControls))
             {
                 mFailure = "native tick scheduling failed";
                 return false;
@@ -1220,7 +1300,8 @@ namespace TES3MP::ServerApp
                 }
                 auto views = projectInterestViews(
                     prepared.candidateState(), batch.scheduledTick().value(), prepared.candidateRevision(),
-                    mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas());
+                    mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas(),
+                    mWiring->nativeInventory, prepared.candidateNativeInventory());
                 if (!views)
                 {
                     mFailure = "movement view projection failed";
@@ -1419,8 +1500,19 @@ namespace TES3MP::ServerApp
             {
                 const auto& baseWorld = prepared.candidateWorld() ? *prepared.candidateWorld() : *mWiring->world;
                 if (mWiring->nativeEnvironment)
-                    worldCandidate = mWiring->nativeEnvironment->advance(baseWorld,
-                        batch.scheduledTick().value(), waitRestApplied ? waitRestCommit->hours() : 0);
+                {
+                    try
+                    {
+                        worldCandidate = mWiring->nativeEnvironment->advance(baseWorld,
+                            batch.scheduledTick().value(), waitRestApplied ? waitRestCommit->hours() : 0);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        std::fprintf(stderr, "native environment advance failed: %.256s\n", error.what());
+                        mFailure = "native environment advance failed";
+                        return false;
+                    }
+                }
                 else
                 {
                     auto advancedWorld = advanceCanonicalWorldTime(
@@ -1600,6 +1692,7 @@ namespace TES3MP::ServerApp
                 return false;
             }
             mDialogueChoiceResults = std::move(dialogueChoiceResultsCandidate);
+            for (auto& [session, retained] : mLatestControls) retained.pending = false;
             if (mWiring->nativeInventory) mWiring->nativeInventory->synchronizeCells(mWiring->reducer.state());
             if (waitRestApplied)
                 waitRestConsentsCandidate.clear();
@@ -1624,6 +1717,8 @@ namespace TES3MP::ServerApp
             if (!pumped || *pumped == OutboundPumpResult::TransportFailed || *pumped == OutboundPumpResult::InvalidTime
                 || *pumped == OutboundPumpResult::SlowPeerEvicted)
             {
+                std::fprintf(stderr, "connection queue pump failed: result=%d tick=%llu\n",
+                    pumped ? static_cast<int>(*pumped) : -1, static_cast<unsigned long long>(tick.value()));
                 // A send may fail before the transport's closed event arrives.
                 // Keep session ownership until canonical disconnect is committed;
                 // erasing it here leaves a live lifecycle binding that cannot resume.
@@ -1699,6 +1794,7 @@ namespace TES3MP::ServerApp
         }
         const auto shutDown = mTransport.shutdown();
         mLatestPoses.clear();
+        mLatestControls.clear();
         mRejectedCloseDeadlines.clear();
         success = success && (shutDown == TransportResult::Accepted || shutDown == TransportResult::AlreadyFinalized);
         if (!success)

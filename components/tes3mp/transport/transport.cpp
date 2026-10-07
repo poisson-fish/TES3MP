@@ -202,6 +202,8 @@ namespace TES3MP
                     return 1;
                 case TransportChannel::PresentationLatest:
                     return 2;
+                case TransportChannel::PlayerControlLatest:
+                    return 3;
             }
             return 0;
         }
@@ -265,6 +267,8 @@ namespace TES3MP
                 return TransportChannel::LatestWins;
             case MessageClass::PresentationSample:
                 return TransportChannel::PresentationLatest;
+            case MessageClass::PlayerControlSample:
+                return TransportChannel::PlayerControlLatest;
         }
         return std::nullopt;
     }
@@ -278,6 +282,7 @@ namespace TES3MP
             case TransportChannel::LatestWins:
                 return LatestWinsMaximumMessageBytes;
             case TransportChannel::PresentationLatest:
+            case TransportChannel::PlayerControlLatest:
                 return PresentationLatestMaximumMessageBytes;
         }
         return std::nullopt;
@@ -348,6 +353,7 @@ namespace TES3MP
         mReliableRate.tokens = policy.reliableRateBurst;
         mLatestRate.tokens = policy.latestRateBurst;
         mPresentationRate.tokens = policy.latestRateBurst;
+        mPlayerControlRate.tokens = policy.latestRateBurst;
     }
 
     TransportResult OutboundTransportQueue::enqueue(TransportChannel channel, std::span<const std::byte> message)
@@ -366,9 +372,11 @@ namespace TES3MP
             count(TransportTelemetryKind::Rejected, channel, 1, StableNetworkReason::ProtocolViolation);
             return TransportResult::MessageTooLarge;
         }
-        if (channel == TransportChannel::LatestWins || channel == TransportChannel::PresentationLatest)
+        if (channel == TransportChannel::LatestWins || channel == TransportChannel::PresentationLatest
+            || channel == TransportChannel::PlayerControlLatest)
         {
-            auto& slot = channel == TransportChannel::PresentationLatest
+            auto& slot = channel == TransportChannel::PlayerControlLatest ? mPlayerControlLatest
+                : channel == TransportChannel::PresentationLatest
                 ? mPresentationLatest
                 : (isActorLatestFrame(message) ? mActorLatest
                                                : (isEquipmentLatestFrame(message) ? mEquipmentLatest
@@ -410,6 +418,7 @@ namespace TES3MP
         auto equipmentLatest = mEquipmentLatest;
         auto combatLatest = mCombatLatest;
         auto presentationLatest = mPresentationLatest;
+        auto playerControlLatest = mPlayerControlLatest;
         std::size_t reliableBytes = mReliableBytes;
         const auto stage = [&](TransportChannel channel, std::span<const std::byte> message) {
             if (channel == TransportChannel::LatestWins)
@@ -423,6 +432,11 @@ namespace TES3MP
             if (channel == TransportChannel::PresentationLatest)
             {
                 presentationLatest.emplace(message.begin(), message.end());
+                return TransportResult::Accepted;
+            }
+            if (channel == TransportChannel::PlayerControlLatest)
+            {
+                playerControlLatest.emplace(message.begin(), message.end());
                 return TransportResult::Accepted;
             }
             if (reliable.size() >= mPolicy.reliableMessages || message.size() > mPolicy.reliableBytes - reliableBytes)
@@ -461,12 +475,18 @@ namespace TES3MP
         if (secondChannel == TransportChannel::PresentationLatest
             && (mPresentationLatest || firstChannel == TransportChannel::PresentationLatest))
             count(TransportTelemetryKind::Coalesced, secondChannel);
+        if (firstChannel == TransportChannel::PlayerControlLatest && mPlayerControlLatest)
+            count(TransportTelemetryKind::Coalesced, firstChannel);
+        if (secondChannel == TransportChannel::PlayerControlLatest
+            && (mPlayerControlLatest || firstChannel == TransportChannel::PlayerControlLatest))
+            count(TransportTelemetryKind::Coalesced, secondChannel);
         mReliable.swap(reliable);
         mLatest.swap(latest);
         mActorLatest.swap(actorLatest);
         mEquipmentLatest.swap(equipmentLatest);
         mCombatLatest.swap(combatLatest);
         mPresentationLatest.swap(presentationLatest);
+        mPlayerControlLatest.swap(playerControlLatest);
         mReliableBytes = reliableBytes;
         count(TransportTelemetryKind::Admitted, firstChannel);
         count(TransportTelemetryKind::Admitted, secondChannel);
@@ -508,6 +528,7 @@ namespace TES3MP
         refill(mReliableRate, mPolicy.reliableRateBurst, mPolicy.reliableRefillMilliseconds, nowMilliseconds);
         refill(mLatestRate, mPolicy.latestRateBurst, mPolicy.latestRefillMilliseconds, nowMilliseconds);
         refill(mPresentationRate, mPolicy.latestRateBurst, mPolicy.latestRefillMilliseconds, nowMilliseconds);
+        refill(mPlayerControlRate, mPolicy.latestRateBurst, mPolicy.latestRefillMilliseconds, nowMilliseconds);
 
         std::size_t attempts = 0;
         bool progressed = false;
@@ -578,6 +599,19 @@ namespace TES3MP
                 break;
         }
 
+        if (mPlayerControlLatest && attempts < mPolicy.sendAttemptsPerPump && mPlayerControlRate.tokens != 0)
+        {
+            const auto result = runtime.send(connection, TransportChannel::PlayerControlLatest, *mPlayerControlLatest);
+            ++attempts;
+            --mPlayerControlRate.tokens;
+            if (result == TransportResult::Accepted)
+            {
+                mPlayerControlLatest.reset();
+                progressed = true;
+            }
+            else if (result != TransportResult::WouldBlock) return OutboundPumpResult::TransportFailed;
+            else count(TransportTelemetryKind::WouldBlock, TransportChannel::PlayerControlLatest);
+        }
         if (mPresentationLatest && attempts < mPolicy.sendAttemptsPerPump && mPresentationRate.tokens != 0)
         {
             const TransportResult result
@@ -626,7 +660,7 @@ namespace TES3MP
             return OutboundPumpResult::Progress;
         }
         return mReliable.empty() && !mLatest && !mActorLatest && !mEquipmentLatest && !mCombatLatest
-                && !mPresentationLatest
+                && !mPresentationLatest && !mPlayerControlLatest
             ? OutboundPumpResult::Idle
             : OutboundPumpResult::Blocked;
     }
@@ -639,6 +673,7 @@ namespace TES3MP
         mEquipmentLatest.reset();
         mCombatLatest.reset();
         mPresentationLatest.reset();
+        mPlayerControlLatest.reset();
         mReliableBytes = 0;
         mFirstReliableBlock.reset();
         mConsecutiveReliableBlocks = 0;
@@ -676,6 +711,9 @@ namespace TES3MP
             TransportTelemetryKind::QueuedMessages, TransportChannel::PresentationLatest, mPresentationLatest ? 1 : 0);
         gauge(TransportTelemetryKind::QueuedBytes, TransportChannel::PresentationLatest,
             mPresentationLatest ? mPresentationLatest->size() : 0);
+        gauge(TransportTelemetryKind::QueuedMessages, TransportChannel::PlayerControlLatest, mPlayerControlLatest ? 1 : 0);
+        gauge(TransportTelemetryKind::QueuedBytes, TransportChannel::PlayerControlLatest,
+            mPlayerControlLatest ? mPlayerControlLatest->size() : 0);
     }
 
     std::optional<OutboundQueueSet> OutboundQueueSet::create(OutboundQueuePolicy policy, std::size_t connections)

@@ -46,6 +46,7 @@ namespace TES3MP::OpenMWAdapter
 
         virtual MultiplayerState multiplayerState() const noexcept { return MultiplayerState::Ready; }
         virtual bool ownsPlayerLives() const noexcept { return false; }
+        virtual bool ownsPlayerMovement() const noexcept { return false; }
         virtual bool canRespawn() const noexcept { return false; }
         virtual bool submitRespawn() noexcept { return false; }
         virtual bool connect(std::string_view) noexcept { return false; }

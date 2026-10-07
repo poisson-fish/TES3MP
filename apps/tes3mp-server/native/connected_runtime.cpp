@@ -247,6 +247,16 @@ namespace TES3MP::Native
         return installedValues(owner);
     }
 
+    float EquipmentRuntime::preparedWeight(const PreparedTransfer& prepared, size_t owner) const
+    {
+        (void)preparedValues(prepared, owner); // Same lifetime/revision validation as projection.
+        const auto& state = *prepared.mState;
+        for (size_t i = 0; i < 2; ++i) if (state.mOwners[i] == owner)
+            return state.mStaged[i]->mPrepared.installationCandidate(
+                preparationContext(owner, state.mInitiator), storage(owner)).getWeight();
+        return storage(owner).getWeight();
+    }
+
     EquipmentRuntime::PreparedTransfer EquipmentRuntime::prepare(InventoryTransferCaller caller,
         InventoryTransferCommand command, std::optional<size_t> newlyDeadOwner)
     {
@@ -442,6 +452,14 @@ namespace TES3MP::Native
             throw std::invalid_argument("Native AI equipment slot invalid");
         return prepareEquipment(owner, {ownedId(ownerPtr(owner).getCellRef().getRefNum()), ownedId(item),
             mWorld.getPtrRegistryRevision(), EquipmentRequestedState::Equipped, slot});
+    }
+
+    float EquipmentRuntime::preparedWeight(const PreparedEquipment& prepared, size_t owner) const
+    {
+        (void)preparedValues(prepared, owner);
+        const auto& state = *prepared.mState;
+        return owner == state.mActor ? state.mStaged->mPrepared.installationCandidate(
+            preparationContext(owner), storage(owner)).getWeight() : storage(owner).getWeight();
     }
 
     EquipmentRuntime::PreparedEquipment EquipmentRuntime::prepareEquipment(size_t actor, EquipmentCommand command)

@@ -99,6 +99,8 @@ namespace TES3MP::ServerApp
         std::string_view mFailure;
         std::optional<ServerApplicationWiring> mWiring;
         std::map<SessionId, RetainedPose> mLatestPoses;
+        struct RetainedControls { ReliableOperation sample; bool pending; };
+        std::map<SessionId, RetainedControls> mLatestControls;
         std::map<std::pair<SessionId, CommandId>, RetainedDialogueChoiceResult> mDialogueChoiceResults;
         std::map<SessionId, RetainedWaitRestConsent> mWaitRestConsents;
         std::map<TransportConnectionId, MonotonicInstant> mRejectedCloseDeadlines;
@@ -114,6 +116,7 @@ namespace TES3MP::ServerApp
         bool resyncConnection(TransportConnectionId connection, ServerTick tick) noexcept;
         bool expireSessions(ServerTick tick) noexcept;
         bool relayPose(TransportConnectionId connection, const TransportMessage& message) noexcept;
+        bool receivePlayerControls(TransportConnectionId connection, const TransportMessage& message) noexcept;
         bool supportsActors(TransportConnectionId connection) const noexcept;
         bool supportsInteractiveObjects(TransportConnectionId connection) const noexcept;
         bool supportsInventory(TransportConnectionId connection) const noexcept;

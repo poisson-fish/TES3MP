@@ -273,7 +273,7 @@
       "id": "M4-003",
       "slice": "native interior navigation and durable actor motion",
       "owner": "OpenMW navigation, app-local native authority and desktop adapter",
-      "purpose": "Allow stock PathFinder updates to receive an explicit Navigator; stock callers still resolve the same World navigator. The detached native scene reuses DetourNavigator and shared settings conversion, stages two stock physics steps per tick, and installs its path/frame with the existing inventory owner only after durability. V16 binds one NPC and freezes background interaction; inherited player movement is unchanged. Shared NPC movement arithmetic, wait/rest recovery and breath timing serve the committed actor scene and stock callers. Shared stock summon lifecycle/placement callers are covered by M4-010; V71 enables bounded server dynamic membership.",
+      "purpose": "Allow stock PathFinder updates to receive an explicit Navigator; stock callers still resolve the same World navigator. The detached native scene reuses DetourNavigator and shared settings conversion, stages two stock physics steps per tick, and installs its path/frame with the existing inventory owner only after durability. V16 binds one NPC and freezes background interaction; inherited player movement is unchanged. Shared NPC movement arithmetic, wait/rest recovery and breath timing serve the committed actor scene and stock callers. Shared stock summon lifecycle/placement callers are covered by M4-010; V71 enables bounded server dynamic membership. V79 shares explicit player movement profiles and stock movement/jump fatigue formulas; connected players suppress local movement costs and restoration.",
       "paths": [
         "apps/openmw/mwclass/npcmovement.hpp",
         "apps/openmw/mwmechanics/actors.cpp",
@@ -286,7 +286,9 @@
         "tes3mp_headless_client_tests early-native-snapshot",
         "scripts/run_native_navigation_capture.py",
         "tes3mp_native_actor_tests movement-rules",
-        "tes3mp_native_dynamic_actor_tests stock-seams"
+        "tes3mp_native_dynamic_actor_tests stock-seams",
+        "tes3mp_native_loadout_tests player-physics",
+        "openmw_tes3mp_adapter_tests player-physics"
       ],
       "disposition": "shared engine navigation context; composed native tick and interpolated desktop presentation",
       "removal_condition": "OpenMW supplies an equivalent explicit navigation context for detached authoritative actor simulation"
@@ -295,7 +297,7 @@
       "id": "M4-002",
       "slice": "isolated collision effects and native interior NPC binding",
       "owner": "OpenMW physics and app-local actor runtime",
-      "purpose": "Route stock object flags and projectile effects through an explicit owner supplied to movement, sweeps and stair stepping. Stock callers retain immediate effects; the detached native scene journals bounded object contacts without interpreting engine user pointers. Extract stock actor hull selection and race-based NPC model selection for both callers. The native probe resolves one real interior NPC and frozen content collision resources; M4-003 adds navigation, live host transactions and replication; gameplay animation timing remains pending. Movement frame/solver paths are shared with M4-001; npc.cpp with M2-001; PhysicsSystem with NATIVE-DOOR-001.",
+      "purpose": "Route stock object flags and projectile effects through an explicit owner supplied to movement, sweeps and stair stepping. Stock callers retain immediate effects; the detached native scene journals bounded object contacts without interpreting engine user pointers. Extract stock actor hull selection and race-based NPC model selection for both callers. The native probe resolves one real interior NPC and frozen content collision resources; M4-003 adds navigation, live host transactions and replication; gameplay animation timing remains pending. Movement frame/solver paths are shared with M4-001; npc.cpp with M2-001; PhysicsSystem with NATIVE-DOOR-001. V79 installs acknowledged player inertia/ground/stuck state and a 67 ms presentation correction offset independently of immediate collision correction.",
       "paths": [
         "apps/openmw/mwphysics/collisioneffects.cpp",
         "apps/openmw/mwphysics/collisioneffects.hpp",
@@ -311,12 +313,15 @@
         "apps/openmw/mwphysics/stepper.cpp",
         "apps/openmw/mwphysics/stepper.hpp",
         "apps/openmw/mwphysics/movementsolver.hpp",
-        "apps/openmw/mwclass/npcmodel.hpp"
+        "apps/openmw/mwclass/npcmodel.hpp",
+        "apps/openmw/mwphysics/actor.hpp"
       ],
       "tests": [
         "tes3mp_native_actor_tests collision-effects",
         "tes3mp_native_actor_tests movement-collision",
-        "tes3mp_native_actor_probe native-interior-npc (Raflod, Arrille's Tradehouse; retained TR loadout)"
+        "tes3mp_native_actor_probe native-interior-npc (Raflod, Arrille's Tradehouse; retained TR loadout)",
+        "tes3mp_native_loadout_tests player-physics",
+        "openmw_tes3mp_adapter_tests player-physics"
       ],
       "disposition": "shared engine collision extraction; detached real-content NPC physics proof",
       "removal_condition": "OpenMW supplies equivalent explicit collision effects and actor hull/model construction for detached simulation"
@@ -325,15 +330,18 @@
       "id": "M4-001",
       "slice": "explicit stock actor movement frame inputs",
       "owner": "OpenMW physics and native server probe",
-      "purpose": "Expose actor movement frames without constructing World, a player or presentation services. Capture the winning storm movement setting with weather before scheduling stock physics; MovementSolver no longer reads Environment or ESMStore. Stock physics builds the same actor fields explicitly. Synthetic native tests exercise the existing solver, traces and stepper; this is not NPC navigation, transactional physics, a production headless dependency graph or multiplayer acceptance. PhysicsSystem changes share the paths registered under NATIVE-DOOR-001. M4-002 routes solver effects through an explicit owner and removes the obsolete live projectile pointer from frame data.",
+      "purpose": "Expose actor movement frames without constructing World, a player or presentation services. Capture the winning storm movement setting with weather before scheduling stock physics; MovementSolver no longer reads Environment or ESMStore. Stock physics builds the same actor fields explicitly. Synthetic native tests exercise the existing solver, traces and stepper; this is not NPC navigation, transactional physics, a production headless dependency graph or multiplayer acceptance. PhysicsSystem changes share the paths registered under NATIVE-DOOR-001. M4-002 routes solver effects through an explicit owner and removes the obsolete live projectile pointer from frame data. V79 provides bounded replay through MovementSolver with explicit player controls and no gameplay callbacks. V79 also preserves stock reference/race speed scaling during replay.",
       "paths": [
         "apps/openmw/mwphysics/movementdata.hpp",
         "apps/openmw/mwphysics/movementsolver.cpp",
-        "apps/openmw/mwphysics/mtphysics.cpp"
+        "apps/openmw/mwphysics/mtphysics.cpp",
+        "apps/openmw/mwphysics/mtphysics.hpp"
       ],
       "tests": [
         "tes3mp_native_actor_tests movement-collision",
-        "tes3mp_native_actor_tests movement-environment"
+        "tes3mp_native_actor_tests movement-environment",
+        "tes3mp_native_loadout_tests player-physics",
+        "openmw_tes3mp_adapter_tests player-physics"
       ],
       "disposition": "shared engine input extraction; synthetic headless collision proof",
       "removal_condition": "OpenMW supplies equivalent explicit actor and world movement inputs independent of singleton services"
@@ -711,7 +719,7 @@
       "id": "P8-001",
       "slice": "8.2",
       "owner": "OpenMW adapter",
-      "purpose": "Own one optional coordinator and invoke it on the main thread after input and before world mutation, with teardown before OpenMW dependencies. Test builds also drive an offline stock spell reference through this frame seam. Negotiated server-owned player lives bypass the stock single-player game-end transition across death and resume, allowing authoritative respawn to restore ordinary input.",
+      "purpose": "Own one optional coordinator and invoke it on the main thread after input and before world mutation, with teardown before OpenMW dependencies. Test builds also drive an offline stock spell reference through this frame seam. Negotiated server-owned player lives bypass the stock single-player game-end transition across death and resume, allowing authoritative respawn to restore ordinary input. V79 samples stock Lua player controls after synchronized input handlers and before mechanics consumes them.",
       "paths": [
         "apps/openmw/engine.cpp",
         "apps/openmw/engine.hpp"
@@ -877,7 +885,7 @@
       "id": "P16-001",
       "slice": "16.1",
       "owner": "OpenMW adapter",
-      "purpose": "Route player melee animation hit keys through the multiplayer semantic-command seam before stock single-player mutation, while allowing replicated content actors to participate in OpenMW's native melee contact search. M4-006 also shares explicit melee actor/content/clock primitives and gameplay text-key interpretation through these stock callers. V46 committed player poses suspend the local weapon action state machine until the authoritative swing ends. V52 keeps committed hit-reaction and fall/get-up clips under the actor presentation timeline instead of a second local recovery clock. Elemental shields share detached retaliation rolls with the stock melee caller; the native transaction owns damage, attribution and RNG durability. CharacterController shares stock forced-jump, launch, air-control and fall-damage arithmetic with native navigation/physics. Stock death selection shares group precedence with the native writer; committed death completion and living reaction clocks defer to the render timeline.",
+      "purpose": "Route player melee animation hit keys through the multiplayer semantic-command seam before stock single-player mutation, while allowing replicated content actors to participate in OpenMW's native melee contact search. M4-006 also shares explicit melee actor/content/clock primitives and gameplay text-key interpretation through these stock callers. V46 committed player poses suspend the local weapon action state machine until the authoritative swing ends. V52 keeps committed hit-reaction and fall/get-up clips under the actor presentation timeline instead of a second local recovery clock. Elemental shields share detached retaliation rolls with the stock melee caller; the native transaction owns damage, attribution and RNG durability. CharacterController shares stock forced-jump, launch, air-control and fall-damage arithmetic with native navigation/physics. Stock death selection shares group precedence with the native writer; committed death completion and living reaction clocks defer to the render timeline. V79 retains local movement presentation while the server owns movement fatigue and landing damage; local movement skill-use callbacks are suppressed pending M5 progression.",
       "paths": [
         "apps/openmw/mwmechanics/character.cpp",
         "apps/openmw/mwmechanics/combat.cpp",
@@ -896,7 +904,9 @@
         "tes3mp_native_actor_tests jump-fall",
         "tes3mp_native_loadout_tests movement-jumps",
         "tes3mp_native_loadout_tests actor-bodies",
-        "tes3mp_native_loadout_tests movement-fall"
+        "tes3mp_native_loadout_tests movement-fall",
+        "tes3mp_native_loadout_tests player-physics",
+        "openmw_tes3mp_adapter_tests player-physics"
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed pre-mutation melee hit hook and replicated-actor targeting role"
@@ -967,7 +977,7 @@
       "id": "P20-001",
       "slice": "desktop canonical weather and world time",
       "owner": "OpenMW adapter",
-      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the committed calendar/time-scale and optional engine elapsed days directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here. Native door presentation installs a committed angle without the stock Idle collision/avoidance path and exposes a read-only local-player contact probe. Native v12 derives regional/weather identities from loaded records and uses shared engine selection/transition helpers for stock single-player. M3 V15 also uses this boundary for server-selected leveled actor appearance or offline area discovery; see M3-008. Shared stock summon lifecycle/placement callers are covered by M4-010; V71 enables bounded server dynamic membership.",
+      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the committed calendar/time-scale and optional engine elapsed days directly to OpenMW globals. Stock placement callers use shared cursor/floor and bounds helpers without changing mutation order. Stock door activation and rotation use shared direction, step and contact-direction rules while retaining physics, rollback, AI and presentation here. Native door presentation installs a committed angle without the stock Idle collision/avoidance path and exposes a read-only local-player contact probe. Native v12 derives regional/weather identities from loaded records and uses shared engine selection/transition helpers for stock single-player. M3 V15 also uses this boundary for server-selected leveled actor appearance or offline area discovery; see M3-008. Shared stock summon lifecycle/placement callers are covered by M4-010; V71 enables bounded server dynamic membership. V79 exposes engine-owned player physics reconciliation and moves the displayed player without resetting its corrected collision frame.",
       "paths": [
         "apps/openmw/mwbase/world.hpp",
         "apps/openmw/mwworld/weather.cpp",
@@ -987,7 +997,9 @@
         "tes3mp_native_loadout_tests player-area-discovery",
         "tes3mp_inventory_replication_tests neighborhoods",
         "openmw-m3-v15.exe RelWithDebInfo link",
-        "tes3mp_native_dynamic_actor_tests stock-seams"
+        "tes3mp_native_dynamic_actor_tests stock-seams",
+        "tes3mp_native_loadout_tests player-physics",
+        "openmw_tes3mp_adapter_tests player-physics"
       ],
       "disposition": "local product adapter",
       "removal_condition": "OpenMW supplies equivalent supported external weather and world-time authority seams"
@@ -1030,7 +1042,7 @@
       "id": "NATIVE-DOOR-001",
       "slice": "M3 native door motion and delegated player contacts",
       "owner": "OpenMW native runtime",
-      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. M4-004 adds server NPC obstruction for V17 and corrects player query normal orientation; older domains retain player reports. M4-001 additionally moves actor/world frame definitions out of PhysicsSystem and supplies stock movement inputs explicitly before scheduling. M4-002 removes the obsolete live projectile pointer from frame construction.",
+      "purpose": "Share stock door direction, sound offsets, rotation and contact-direction rules. Commit native activation and steps with the coherent session image; aggregate sequenced, expiring reports tied to each authenticated player and current motion. Probe a detached client collision object against the local player only and install committed angles without local animation or actor avoidance. Collision is trusted client input; latency may clip before a report stalls progress. M4-004 adds server NPC obstruction for V17 and corrects player query normal orientation; older domains retain player reports. M4-001 additionally moves actor/world frame definitions out of PhysicsSystem and supplies stock movement inputs explicitly before scheduling. M4-002 removes the obsolete live projectile pointer from frame construction. V79 replays player controls through the stock physics world with worker-safe inert peer/NPC hulls retained for live prediction and cleared on context loss and shares collision-height swimming thresholds with the native player frame.",
       "paths": [
         "apps/openmw/mwclass/door.cpp",
         "apps/openmw/mwworld/doormotion.cpp",
@@ -1043,7 +1055,9 @@
         "tes3mp_native_loadout_tests door-session-host",
         "tes3mp_native_loadout_tests ordinary-door",
         "scripts/tests/test_openmw_patch_registry.py",
-        "openmw RelWithDebInfo link"
+        "openmw RelWithDebInfo link",
+        "tes3mp_native_loadout_tests player-physics",
+        "openmw_tes3mp_adapter_tests player-physics"
       ],
       "disposition": "shared engine gameplay extraction",
       "removal_condition": "OpenMW provides an equivalent service-independent ordinary-door activation and motion seam"

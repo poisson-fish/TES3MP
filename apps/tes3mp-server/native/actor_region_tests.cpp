@@ -27,7 +27,7 @@ namespace
     }
 
     void check(const std::filesystem::path& scratch, const std::filesystem::path& config,
-        const std::filesystem::path& settings)
+        const std::filesystem::path& settings, bool playersOnly = false)
     {
         using namespace TES3MP::Native;
         const auto cell = [](int x) { return ESM::RefId::esm3ExteriorCell(x, 100); };
@@ -128,6 +128,56 @@ namespace
         const auto initial = scene->image();
         const auto isolated = scene->neighborImage(1);
         const std::array movements{ActorMovement{.walkSpeed = 0}, ActorMovement{.walkSpeed = 0}};
+        if (playersOnly)
+        {
+            auto body = std::make_shared<ESM::NPC>(*loadout.store().get<ESM::NPC>().find(record));
+            constexpr uint64_t player = 0x4000000000000001ull, peer = player + 1;
+            const std::array bodies{
+                DynamicActorBody{player, record, {boundary - 200, y + 200, 257}, 0, cell(2), body},
+                DynamicActorBody{peer, record, {boundary - 200, y + 300, 257}, 0, cell(2), body}};
+            scene->bindPlayers(loadout, bodies);
+            auto& local = scene->forPlayer(player);
+            require(local.sharesCollisionWorld(scene->forPlayer(peer)) && local.sharesCollisionWorld(*scene),
+                "Player hulls do not share regional collision");
+            auto movement = ActorMovement{.enabled = true, .walkSpeed = 120, .swimSpeed = 120,
+                .flySpeed = 120, .jumpSpeed = 200};
+            const auto initialPlayer = local.image();
+            for (int tick = 0; tick < 40; ++tick)
+            {
+                auto approach = local.prepareControlled(movement, {0, 1, 0}, 0, 0);
+                local.install(*approach);
+            }
+            require(local.snapshot().mPosition[1] > bodies[0].position[1]
+                && local.snapshot().mPosition[1] < bodies[1].position[1] - 40,
+                "Controlled player passed through peer hull");
+            auto reset = local.prepareRestore(initialPlayer); local.install(*reset);
+            auto step = local.prepareControlled(movement, {1, 0, 0}, 0, 0);
+            auto retry = local.prepareControlled(movement, {1, 0, 0}, 0, 0);
+            require(local.image() == initialPlayer && std::ranges::equal(step->image(), retry->image()),
+                "Player physics preparation mutated state or changed retry");
+            require(local.canInstall(*step), "Player candidate cannot install");
+            local.install(*step);
+            require(local.snapshot().mPosition[0] > bodies[0].position[0], "Player controls did not move hull");
+            const auto walking = local.image();
+            for (int tick = 0; tick < 70; ++tick)
+            {
+                auto next = local.prepareControlled(movement, {1, 0, 0}, 0, 0);
+                local.install(*next);
+            }
+            require(local.snapshot().mPosition[0] >= boundary, "Controlled player did not cross exterior boundary");
+            auto restored = local.prepareRestore(walking); local.install(*restored);
+            require(local.image() == walking, "Player physics recovery changed frame");
+            auto stop = local.prepareControlled(movement, {0, 0, 0}, 0, 0); local.install(*stop);
+            const auto stopped = local.snapshot().mPosition;
+            auto stoppedAgain = local.prepareControlled(movement, {0, 0, 0}, 0, 0);
+            require(stoppedAgain->snapshot().mPosition == stopped, "Stopped player drifted");
+            rejects([&] { local.prepareControlled(movement, {1.01f, 0, 0}, 0, 0); });
+            require(local.snapshot().mPosition == stopped, "Rejected controls changed player");
+            movement.jumpRequested = true;
+            auto jump = local.prepareControlled(movement, {0, 0, 0}, 0, 0);
+            require(jump->snapshot().mPosition[2] > stopped[2], "Stock player jump did not launch");
+            return;
+        }
         const std::array<std::optional<std::array<float, 3>>, 2> destinations{};
         const std::array<uint8_t, 2> active{1, 0};
         bool crossed = false, blocked = false;
@@ -225,9 +275,10 @@ int main(int argc, char** argv)
 {
     try
     {
-        if (argc != 4) throw std::invalid_argument("Usage: actor_region_tests NEW_SCRATCH CONFIG SETTINGS");
-        check(std::filesystem::absolute(argv[1]), std::filesystem::absolute(argv[2]), std::filesystem::absolute(argv[3]));
-        std::cout << "PASS actor-regions (synthetic terrain, shared stock physics/navigation, crossing/rollback/restart/reentry)\n";
+        if (argc != 4 && argc != 5) throw std::invalid_argument("Usage: actor_region_tests NEW_SCRATCH CONFIG SETTINGS [players]");
+        check(std::filesystem::absolute(argv[1]), std::filesystem::absolute(argv[2]), std::filesystem::absolute(argv[3]),
+            argc == 5 && std::string_view(argv[4]) == "players");
+        std::cout << (argc == 5 ? "PASS player-physics-scene (shared stock hulls, crossing, jump, stop, rollback/restart)\n" : "PASS actor-regions (synthetic terrain, shared stock physics/navigation, crossing/rollback/restart/reentry)\n");
         return 0;
     }
     catch (const std::exception& error) { std::cerr << "FAIL actor-regions: " << error.what() << '\n'; return 1; }

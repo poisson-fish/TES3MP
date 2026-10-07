@@ -421,6 +421,27 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "player-controls")
+    {
+        using namespace TES3MP;
+        OutboundTransportQueue queue(OutboundQueuePolicy{});
+        const std::array<std::byte, 1> older{std::byte{1}}, newer{std::byte{2}}, reliable{std::byte{3}}, pose{std::byte{4}};
+        if (!check(queue.enqueue(TransportChannel::PlayerControlLatest, older) == TransportResult::Accepted
+                && queue.enqueue(TransportChannel::PlayerControlLatest, newer) == TransportResult::Accepted
+                && queue.enqueuePair(TransportChannel::ReliableOrdered, reliable, TransportChannel::PresentationLatest, pose)
+                    == TransportResult::Accepted, "player control admission failed")) return 1;
+        FakeRuntime runtime; runtime.blockReliable = true; runtime.blockPresentation = true;
+        queue.pump(runtime, TransportConnectionId::fromValue(1).value(), 0);
+        if (!check(runtime.sent.size() == 1 && runtime.sent[0].channel == TransportChannel::PlayerControlLatest
+                && runtime.sent[0].bytes == std::vector<std::byte>(newer.begin(), newer.end())
+                && queue.reliableMessages() == 1 && queue.hasPresentationLatest(), "reliable/pose stall blocked controls")) return 1;
+        if (!check(queue.enqueuePair(TransportChannel::PlayerControlLatest, older,
+                TransportChannel::PlayerControlLatest, newer) == TransportResult::Accepted, "control pair admission failed")) return 1;
+        queue.clear();
+        if (!check(!queue.hasLatest() && queue.reliableMessages() == 0, "control clear retained a sample")) return 1;
+        std::cout << "PASS player-controls: independent bounded slot, newest sample, atomic pair, reliable/pose stalls and cleanup\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "latest-families")
         return gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly()
             && gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly(true) ? 0 : 1;

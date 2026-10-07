@@ -29,6 +29,7 @@ namespace TES3MP
         ReliableOperation = 2,
         LatestWinsSnapshot = 3,
         PresentationSample = 4,
+        PlayerControlSample = 5,
     };
 
     enum class MessageKind : std::uint16_t
@@ -66,6 +67,7 @@ namespace TES3MP
         LatestWinsCombatSnapshot = 0x0203,
         ClientVrPoseSample = 0x0300,
         ServerVrPoseSnapshot = 0x0301,
+        ClientPlayerControls = 0x0302,
     };
 
     struct MessageDescriptor
@@ -121,6 +123,8 @@ namespace TES3MP
             case MessageKind::ServerVrPoseSnapshot:
                 return MessageDescriptor{ kind, MessageClass::PresentationSample,
                     PresentationSampleMaximumPayloadBytes };
+            case MessageKind::ClientPlayerControls:
+                return MessageDescriptor{ kind, MessageClass::PlayerControlSample, PresentationSampleMaximumPayloadBytes };
         }
         return std::nullopt;
     }
@@ -136,6 +140,7 @@ namespace TES3MP
             case MessageClass::LatestWinsSnapshot:
                 return LatestWinsSnapshotMaximumPayloadBytes;
             case MessageClass::PresentationSample:
+            case MessageClass::PlayerControlSample:
                 return PresentationSampleMaximumPayloadBytes;
         }
         return std::nullopt;

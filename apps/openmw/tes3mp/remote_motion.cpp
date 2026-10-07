@@ -61,7 +61,8 @@ namespace TES3MP::OpenMWAdapter
 
     double openMWRadiansFromNetwork(Turn32 turn) noexcept
     {
-        return -double(turn.value()) * (2.0 * std::numbers::pi / 4294967296.0);
+        // Signed angles preserve pitch around zero when the world clamps it.
+        return -double(std::bit_cast<int32_t>(turn.value())) * (2.0 * std::numbers::pi / 4294967296.0);
     }
 
     RemoteLocomotionAnimation remoteLocomotionAnimation(const RemoteMotionPose& pose) noexcept

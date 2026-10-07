@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <array>
+#include <cmath>
 
 namespace TES3MP
 {
@@ -26,6 +28,38 @@ namespace TES3MP
         Walk,
         Run,
         Jump,
+    };
+
+    // Dimensionless local controls. The engine owns speed, gravity and collision.
+    struct PlayerMovementControls
+    {
+        std::int16_t right = 0, forward = 0, vertical = 0;
+        Turn32 pitch = Turn32::fromValue(0);
+        bool jump = false;
+        constexpr bool valid() const noexcept
+        {
+            return right >= -1024 && right <= 1024 && forward >= -1024 && forward <= 1024
+                && vertical >= -1024 && vertical <= 1024;
+        }
+        friend constexpr bool operator==(PlayerMovementControls, PlayerMovementControls) noexcept = default;
+    };
+
+    struct PlayerPhysicsBaseline
+    {
+        std::array<float, 3> inertia{}, lastStuckPosition{};
+        float fallHeight = 0, breath = 0;
+        std::uint32_t stuckFrames = 0;
+        bool grounded = false, slope = false, walkingOnWater = false;
+        std::uint64_t consumedCommand = 0;
+        bool jumpHeld = false, blocked = false;
+        bool valid() const noexcept
+        {
+            const auto bounded = [](float value) { return std::isfinite(value) && std::abs(value) <= 1e7f; };
+            for (float value : inertia) if (!bounded(value)) return false;
+            for (float value : lastStuckPosition) if (!bounded(value)) return false;
+            return bounded(fallHeight) && fallHeight >= 0 && bounded(breath) && breath >= -1;
+        }
+        friend constexpr bool operator==(const PlayerPhysicsBaseline&, const PlayerPhysicsBaseline&) noexcept = default;
     };
 
     class LocomotionInputTick
@@ -74,12 +108,14 @@ namespace TES3MP
     public:
         constexpr LocomotionIntent(LocomotionMode mode, Turn32 rootFacing, LinearVelocity3 desiredVelocity,
             std::optional<Position3> position = std::nullopt,
-            std::optional<Orientation3> orientation = std::nullopt) noexcept
+            std::optional<Orientation3> orientation = std::nullopt,
+            std::optional<PlayerMovementControls> controls = std::nullopt) noexcept
             : mMode(mode)
             , mRootFacing(rootFacing)
             , mDesiredVelocity(desiredVelocity)
             , mPosition(position)
             , mOrientation(orientation)
+            , mControls(controls)
         {
         }
 
@@ -88,6 +124,7 @@ namespace TES3MP
         constexpr LinearVelocity3 desiredVelocity() const noexcept { return mDesiredVelocity; }
         constexpr const std::optional<Position3>& position() const noexcept { return mPosition; }
         constexpr const std::optional<Orientation3>& orientation() const noexcept { return mOrientation; }
+        constexpr const std::optional<PlayerMovementControls>& controls() const noexcept { return mControls; }
         friend constexpr bool operator==(const LocomotionIntent&, const LocomotionIntent&) noexcept = default;
 
     private:
@@ -96,6 +133,7 @@ namespace TES3MP
         LinearVelocity3 mDesiredVelocity;
         std::optional<Position3> mPosition;
         std::optional<Orientation3> mOrientation;
+        std::optional<PlayerMovementControls> mControls;
     };
 
     class MovementProfile

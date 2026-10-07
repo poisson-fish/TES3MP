@@ -694,6 +694,8 @@ namespace MWWorld
         DateTimeManager* getTimeManager() override { return mTimeManager.get(); }
 
         void setActorActive(const MWWorld::Ptr& ptr, bool value) override;
+        bool reconcilePlayerMovement(const MWPhysics::ActorReplayState&,
+            std::span<const MWPhysics::ActorReplayInput>) override;
     };
 }
 

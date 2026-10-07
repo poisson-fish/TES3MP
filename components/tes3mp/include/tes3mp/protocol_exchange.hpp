@@ -235,20 +235,24 @@ namespace TES3MP
     class LatestWinsSnapshot
     {
     public:
-        LatestWinsSnapshot(LatestWinsSnapshotHeader header, SpatialWorldView view)
+        LatestWinsSnapshot(LatestWinsSnapshotHeader header, SpatialWorldView view,
+            std::optional<PlayerPhysicsBaseline> physics = {})
             : mHeader(header)
             , mView(std::move(view))
+            , mPhysics(std::move(physics))
         {
         }
 
         constexpr const LatestWinsSnapshotHeader& header() const noexcept { return mHeader; }
         const SpatialWorldView& view() const noexcept { return mView; }
+        const std::optional<PlayerPhysicsBaseline>& playerPhysics() const noexcept { return mPhysics; }
 
         friend bool operator==(const LatestWinsSnapshot&, const LatestWinsSnapshot&) noexcept = default;
 
     private:
         LatestWinsSnapshotHeader mHeader;
         SpatialWorldView mView;
+        std::optional<PlayerPhysicsBaseline> mPhysics;
     };
 
     enum class ObservationChangeKind : std::uint8_t { Enter = 1, Leave = 2 };

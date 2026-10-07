@@ -594,9 +594,14 @@ namespace TES3MP
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto& negotiatedHello = mSession->stateMachine().negotiatedHello();
         if (!snapshot || !negotiatedHello || negotiatedHello->selectedVersion().major != 1
-            || negotiatedHello->selectedVersion().minor < 3
-            || mLocomotionHistory.size() == MaximumRetainedLocomotionInputs)
+            || negotiatedHello->selectedVersion().minor < 3)
             return { ClientRuntimeResult::NotConnected, std::nullopt };
+        // A delayed physics acknowledgement fills prediction history without
+        // losing the session. Leave the latest semantic controls with the caller
+        // and retry after reconciliation retires the bounded outstanding inputs.
+        if (mLocomotionHistory.size() == MaximumRetainedLocomotionInputs)
+            return { intent.controls() ? ClientRuntimeResult::QueueRejected : ClientRuntimeResult::NotConnected,
+                std::nullopt };
         const auto self = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
             return entry.playerId() == snapshot->header().targetPlayerId()
                 && entry.entityId() == snapshot->header().targetEntityId();
@@ -615,7 +620,27 @@ namespace TES3MP
             return { ClientRuntimeResult::EncodeRejected, std::nullopt };
 
         const PlayerLocomotionInput input(*inputTick, *inputSequence, intent);
-        auto queued = queueReliable(ReliableOperationBody(input));
+        ClientRuntimeQueueResult queued{ClientRuntimeResult::EncodeRejected, std::nullopt};
+        if (intent.controls())
+        {
+            if (!negotiated(mSession->stateMachine(), playerPhysicsCapability())
+                || !mSession->stateMachine().sessionId() || !mSession->stateMachine().interestBaselineComplete())
+                return {ClientRuntimeResult::NotConnected, std::nullopt};
+            const auto sequence = CommandSequence::fromValue(inputSequence->value());
+            const auto command = CommandId::fromValue(inputSequence->value());
+            if (!sequence || !command) return queued;
+            const auto header = ClientCommandHeader(*mSession->stateMachine().sessionId(),
+                snapshot->header().targetSessionGeneration(), *sequence, *command, snapshot->header().canonicalRevision());
+            auto operation = ReliableOperation::create(ReliableOperationHeader(header,
+                EntityPrecondition(self->entityId(), self->entityRevision(), self->authorityEpoch())), input);
+            const auto* value = std::get_if<ReliableOperation>(&operation);
+            if (!value) return queued;
+            // Reuse the bounded owned locomotion payload, on its own sample lane.
+            const auto result = queue(MessageClass::PlayerControlSample, MessageKind::ClientPlayerControls,
+                encodeReliableOperation(*value));
+            queued = {result, result == ClientRuntimeResult::Accepted ? sequence : std::nullopt};
+        }
+        else queued = queueReliable(ReliableOperationBody(input));
         if (queued.result == ClientRuntimeResult::Accepted
             && (!queued.sequence || !mLocomotionHistory.retain(*queued.sequence, input)))
             return { ClientRuntimeResult::QueueRejected, std::nullopt };
@@ -852,7 +877,12 @@ namespace TES3MP
         });
         if (self == snapshot->view().entries().end())
             return std::nullopt;
-        return mLocomotionHistory.reconcile(*self, snapshot->header().acknowledgedCommandSequence(), hardDiscontinuity);
+        const auto acknowledgement = negotiated(mSession->stateMachine(), playerPhysicsCapability())
+            ? (snapshot->playerPhysics() ? CommandSequence::fromValue(snapshot->playerPhysics()->consumedCommand)
+                                        : std::nullopt)
+            : snapshot->header().acknowledgedCommandSequence();
+        return mLocomotionHistory.reconcile(*self, acknowledgement, hardDiscontinuity,
+            snapshot->playerPhysics());
     }
 
     ClientRuntimeResult ClientSessionRuntime::queuePoseSample(const ClientVrPoseSample& sample)

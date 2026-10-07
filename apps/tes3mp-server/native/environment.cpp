@@ -345,8 +345,10 @@ namespace TES3MP::Native
     void Environment::validate(const CanonicalWorldState& world) const { (void)decode(world); }
     CanonicalWorldState Environment::advance(const CanonicalWorldState& world, ServerTick tick, unsigned int skippedHours) const
     {
-        require(tick > world.time().lastAdvanceTick && tick.value() - world.time().lastAdvanceTick.value() == 1
-            && skippedHours <= 24, "Invalid native environment step");
+        if (!(tick > world.time().lastAdvanceTick && tick.value() - world.time().lastAdvanceTick.value() == 1
+                && skippedHours <= 24))
+            throw std::invalid_argument("Invalid native environment step: tick=" + std::to_string(tick.value())
+                + " previous=" + std::to_string(world.time().lastAdvanceTick.value()));
         auto state = decode(world);
         const double hours = static_cast<double>(state.calendar.getGameTimeScale()) / (3600.0 * ServerTicksPerSecond) + skippedHours;
         state.calendar.advanceTime(hours, state.globals);

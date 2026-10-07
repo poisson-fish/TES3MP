@@ -94,6 +94,82 @@ namespace
         std::optional<TES3MP::TransportChannel> sentChannel;
     };
 
+    void playerControlsBackpressure()
+    {
+        using namespace TES3MP;
+        FakeRuntime transport;
+        TestSupport::ManualClock clock(MonotonicInstant::fromNanoseconds(0));
+        auto client = checked<std::unique_ptr<ClientSessionRuntime>>(ClientSessionRuntime::create(
+            transport, clock, *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000),
+            SessionGeneration::initial(), OutboundQueuePolicy{}));
+        const std::array capabilities{playerPhysicsCapability()};
+        const auto offer = checked<CapabilityOffer>(CapabilityOffer::create(
+            checked<ProtocolVersionRange>(ProtocolVersionRange::create(1, 3, 3)), capabilities, {}));
+        const auto hello = ClientHello::fromOffer(offer);
+        const auto server = checked<ServerHello>(negotiateClientHello(hello, offer));
+        require(client->start(*ConnectionEndpoint::create("127.0.0.1", 25565), hello,
+            AuthenticationRequest::join(*AuthenticationMaterial::create({}))) == HeadlessClientResult::Accepted);
+        require(client->advance().action == ClientSessionAction::SendClientHello);
+        const auto receive = [&](MessageClass cls, MessageKind kind, std::vector<std::byte> bytes, TransportChannel lane) {
+            transport.inbound.push_back({lane, checked<std::vector<std::byte>>(encodeProtocolFrame(cls, kind, bytes))});
+        };
+        receive(MessageClass::SessionControl, MessageKind::ServerHello, encodeServerHello(server), TransportChannel::ReliableOrdered);
+        require(client->advance().result == ClientRuntimeResult::Accepted);
+        receive(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+            encodeAuthenticationAccepted(AuthenticationAcceptedMessage::create(resumeToken(std::byte{8}), 5000).value()),
+            TransportChannel::ReliableOrdered);
+        require(client->advance().result == ClientRuntimeResult::Accepted);
+        const auto sid = value<SessionId>(1);
+        const auto generation = SessionGeneration::initial();
+        const auto player = value<PlayerId>(1);
+        const auto entity = value<EntityId>(1);
+        const auto baseline = checked<ReliableInterestBaseline>(ReliableInterestBaseline::create(
+            sid, generation, CanonicalRevision::initial(), CanonicalStateVersion::initial(), ServerTick::initial(), {}));
+        receive(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+            encodeReliableInterestBaseline(baseline), TransportChannel::ReliableOrdered);
+        const auto zero = Turn32::fromValue(0);
+        const auto snapshot = [&](uint64_t revision, uint64_t consumed) {
+            const std::array entries{SpatialEntitySnapshot(value<ServerTick>(revision), player, entity,
+                value<AppearanceId>(1), value<EntityRevision>(revision), value<AuthorityEpoch>(1),
+                Transform(CellId::interior(value<CellSpaceId>(1)), Position3(0,0,0), Orientation3(zero,zero,zero)),
+                LinearVelocity3(0,0,0))};
+            PlayerPhysicsBaseline physics; physics.consumedCommand = consumed; physics.grounded = true;
+            return LatestWinsSnapshot(LatestWinsSnapshotHeader(sid, generation, player, entity,
+                value<CanonicalRevision>(revision), {}), checked<SpatialWorldView>(SpatialWorldView::create(entries)), physics);
+        };
+        receive(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+            encodeLatestWinsSnapshot(snapshot(1,0)), TransportChannel::LatestWins);
+        require(client->advance().result == ClientRuntimeResult::Accepted);
+        const LocomotionIntent held(LocomotionMode::Run, zero, LinearVelocity3(0,0,0), {}, {},
+            PlayerMovementControls{0,1024,0,zero,false});
+        const LocomotionIntent jump(LocomotionMode::Walk, zero, LinearVelocity3(0,0,0), {}, {},
+            PlayerMovementControls{0,0,0,zero,true});
+        for (size_t i = 1; i <= MaximumRetainedLocomotionInputs; ++i)
+        {
+            const auto queued = client->queueLocomotionIntent(held);
+            require(queued.result == ClientRuntimeResult::Accepted && queued.sequence == value<CommandSequence>(i));
+        }
+        for (size_t i = 0; i < 8; ++i)
+        {
+            const auto blocked = client->queueLocomotionIntent(jump);
+            require(blocked.result == ClientRuntimeResult::QueueRejected && !blocked.sequence);
+        }
+        require(client->session().stateMachine().state() == ClientSessionState::Established);
+        const auto full = client->reconcileLocalPresentation();
+        require(full && full->physicsReplay.size() == MaximumRetainedLocomotionInputs);
+        receive(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+            encodeLatestWinsSnapshot(snapshot(2, MaximumRetainedLocomotionInputs)), TransportChannel::LatestWins);
+        require(client->advance().result == ClientRuntimeResult::Accepted);
+        const auto retired = client->reconcileLocalPresentation();
+        require(retired && retired->physicsReplay.empty());
+        const auto resumed = client->queueLocomotionIntent(jump);
+        require(resumed.result == ClientRuntimeResult::Accepted
+            && resumed.sequence == value<CommandSequence>(MaximumRetainedLocomotionInputs + 1));
+        const auto replay = client->reconcileLocalPresentation();
+        require(replay && replay->physicsReplay.size() == 1 && replay->physicsReplay[0].intent() == jump);
+        std::puts("PASS player-controls-backpressure: bounded stall, session retained, latest jump retried after acknowledgement");
+    }
+
     void earlyNativeSnapshot()
     {
         using namespace TES3MP;
@@ -141,6 +217,10 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "player-controls-backpressure")
+    {
+        playerControlsBackpressure(); return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "early-native-snapshot")
     {
         try { earlyNativeSnapshot(); return 0; }

@@ -6,6 +6,7 @@
 #include <apps/openmw/mwmechanics/powercooldown.hpp>
 #include "melee_animation.hpp"
 #include "cast_animation.hpp"
+#include "player_physics.hpp"
 #include <tes3mp/spatial_types.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <components/esm/attr.hpp>
@@ -66,27 +67,6 @@ namespace TES3MP::Native
     inline constexpr uint64_t TargetCampaignMagic = 0x6850434154335354;
     inline constexpr uint64_t CellActorsCampaignMagic = 0x6950434154335354;
     inline constexpr uint64_t CharacterCampaignMagic = 0x6a50434154335354;
-    inline void putActorProcessingCell(std::vector<char>& bytes, CellId cell)
-    {
-        putAreaWord(bytes, uint64_t(cell.kind()));
-        putAreaWord(bytes, cell.asInterior() ? cell.asInterior()->cellSpace().value() : cell.asExterior()->worldspace().value());
-        putAreaWord(bytes, cell.asExterior() ? uint32_t(cell.asExterior()->gridX()) : 0);
-        putAreaWord(bytes, cell.asExterior() ? uint32_t(cell.asExterior()->gridY()) : 0);
-    }
-    inline CellId getActorProcessingCell(std::span<const char> bytes, size_t& offset)
-    {
-        const auto kind = getAreaWord(bytes, offset), space = getAreaWord(bytes, offset);
-        const auto x = getAreaWord(bytes, offset), y = getAreaWord(bytes, offset);
-        const auto id = CellSpaceId::fromValue(space);
-        if (!id || x > UINT32_MAX || y > UINT32_MAX
-            || (kind == uint64_t(CellId::Kind::Interior) ? x || y : kind != uint64_t(CellId::Kind::Exterior)))
-            throw std::invalid_argument("Actor processing cell invalid");
-        if (kind == uint64_t(CellId::Kind::Interior)) return CellId::interior(*id);
-        const auto gx = std::bit_cast<int32_t>(uint32_t(x)), gy = std::bit_cast<int32_t>(uint32_t(y));
-        if (gx < -32768 || gx > 32767 || gy < -32768 || gy > 32767)
-            throw std::invalid_argument("Actor processing coordinates invalid");
-        return CellId::exterior(*id, gx, gy);
-    }
     inline constexpr uint64_t PassiveCampaignMagic = 0x6750434154335354;
     inline constexpr uint64_t PowerCampaignMagic = 0x6650434154335354;
     inline constexpr uint64_t EquipmentFamilyCampaignMagic = 0x6150434154335354;
@@ -403,12 +383,30 @@ namespace TES3MP::Native
         bool characters = false;
         std::array<uint64_t, 2> characterPlayers{};
         std::array<std::span<const char>, 2> characterProfiles, characterResources;
+        bool playerPhysics = false;
+        std::array<PlayerPhysicsState, 2> playerFrames;
     };
     inline ActorCampaign readActorCampaign(std::span<const char> bytes, bool dynamicDomain = false,
         const std::array<ActorCampaignCombat::PlayerLife, 2>* playerLives = nullptr, bool genericTargets = false)
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == PlayerPhysicsCampaignMagic)
+        {
+            if (genericTargets || dynamicDomain || playerLives)
+                throw std::invalid_argument("Nested player physics envelope");
+            auto [states, inner] = readPlayerPhysics(bytes);
+            size_t at = 0;
+            if (getAreaWord(inner, at) != CharacterCampaignMagic)
+                throw std::invalid_argument("Player physics requires character campaign");
+            auto result = readActorCampaign(inner);
+            result.playerPhysics = true;
+            result.playerFrames = std::move(states);
+            for (const auto& state : result.playerFrames)
+                if (state.root && state.inputTick > result.tick)
+                    throw std::invalid_argument("Player physics command clock invalid");
+            return result;
+        }
         if (magic == CharacterCampaignMagic)
         {
             if (genericTargets || dynamicDomain || playerLives) throw std::invalid_argument("Nested character envelope");

@@ -24,9 +24,8 @@ Coherent persistence and committed replication
 OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-Networking remains engine-independent. [CURRENT.md](CURRENT.md)
-distinguishes synthetic checks from live evidence and names the next action. Migrate in slices
-with one canonical writer.
+Networking remains engine-independent. [CURRENT.md](CURRENT.md) names the next
+action and separates synthetic/live evidence; migrate with one writer.
 
 ## Product boundaries
 

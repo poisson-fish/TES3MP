@@ -221,6 +221,7 @@ namespace TES3MP::Native
         std::vector<ActorSceneDoor> mDoors;
         bool mAvoidanceEnabled = false;
         bool mSmoothMovement = false;
+        bool mNormaliseRaceSpeed = false;
         bool mWaterNavigation = false;
         bool mIntrinsicFlying = false;
         bool mDynamicDestination = false;
@@ -278,7 +279,7 @@ namespace TES3MP::Native
                 .mWaterlevel = water, .mHalfExtentsZ = frame.mHalfExtentsZ,
                 .mOldHeight = frame.mOldHeight, .mStuckFrames = frame.mStuckFrames,
                 .mFlying = movement.levitating || mIntrinsicFlying, .mWasOnGround = frame.mIsOnGround,
-                .mWaterCollision = movement.waterWalking && water > -1e30f};
+                .mWaterCollision = movement.waterWalking && water > -1e30f, .mIsPlayer = frame.mIsPlayer};
         }
 
         float movementSpeed(const MWPhysics::ActorFrameData& frame, const ActorMovement& movement) const
@@ -295,7 +296,8 @@ namespace TES3MP::Native
             const auto fraction = [](float value) { return std::isfinite(value) && value >= 0.f && value <= 1.f; };
             if (!speed(movement.walkSpeed) || (movement.enabled && (!speed(movement.swimSpeed)
                     || !speed(movement.flySpeed) || !speed(movement.jumpSpeed)
-                    || !fraction(movement.slowFall) || !fraction(movement.airControl))))
+                    || !fraction(movement.slowFall) || !fraction(movement.airControl)))
+                || !std::isfinite(movement.xyScale) || movement.xyScale <= 0.f || movement.xyScale > 100.f)
                 throw std::invalid_argument("Actor movement outside bounds");
         }
 
@@ -310,7 +312,7 @@ namespace TES3MP::Native
                 wasGrounded, swimming, frame.mFlying);
             const auto input = movement.enabled ? MWMechanics::jumpMovement(velocity, movement.jumpSpeed,
                 requested, wasGrounded, swimming, frame.mFlying, false, movement.airControl) : velocity;
-            simulate(frame, contacts, {input.x(), input.y(), input.z()});
+            simulate(frame, contacts, {input.x() * movement.xyScale, input.y() * movement.xyScale, input.z()});
             if (!movement.enabled) return;
             // Stock MTPhysics resets fall height in water/flight/SlowFall; otherwise
             // descending physics contributes until CharacterController lands.
@@ -545,7 +547,10 @@ namespace TES3MP::Native
                             .mPosition = position.asVec3(),
                             .mCollisionObject = body->mObject.get(),
                             .mRotation = { position.rot[0], position.rot[2] },
-                            .mHalfExtentsZ = extents.z() * scale });
+                            .mHalfExtentsZ = extents.z() * scale,
+                            .mIsPlayer = std::ranges::any_of(dynamic, [id](const auto& body) {
+                                return body.actor == id && bool(body.playerBody);
+                            }) });
                     }
                 }
                 else
@@ -626,6 +631,12 @@ namespace TES3MP::Native
                 bodyCell = value.cell;
                 MWWorld::ManualRef reference(mStore, value.record);
                 auto ptr = reference.getPtr();
+                if (value.playerBody)
+                {
+                    if (ptr.getType() != ESM::NPC::sRecordId)
+                        throw std::invalid_argument("Player collision requires an NPC body");
+                    ptr.get<ESM::NPC>()->mBase = value.playerBody.get();
+                }
                 ESM::Position position{};
                 std::copy(value.position.begin(), value.position.end(), position.pos);
                 position.rot[2] = value.yaw;
@@ -635,7 +646,17 @@ namespace TES3MP::Native
             if (actor && !mActor) throw std::invalid_argument("Selected NPC absent from interior collision scene");
             if (mSharedParent)
             {
-                const auto shared = mSharedParent->mActorObstacles.find(actor);
+                auto shared = mSharedParent->mActorObstacles.find(actor);
+                if (shared == mSharedParent->mActorObstacles.end() && mActor->mIsPlayer)
+                {
+                    // The player child owns the hull; its lifetime is nested in
+                    // the regional owner and ends before that collision world.
+                    mWorld.addCollisionObject(mActor->mCollisionObject, MWPhysics::CollisionType_Actor,
+                        MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap
+                            | MWPhysics::CollisionType_Actor);
+                    mSharedParent->mIdentities.emplace(mActor->mCollisionObject, actor);
+                    shared = mSharedParent->mActorObstacles.emplace(actor, mActor->mCollisionObject).first;
+                }
                 if (shared == mSharedParent->mActorObstacles.end())
                     throw std::invalid_argument("Shared NPC collision body absent");
                 mActor->mCollisionObject = shared->second;
@@ -795,7 +816,10 @@ namespace TES3MP::Native
         ActorSceneSnapshot snapshot() const
         {
             return {mActorId, {mActor->mPosition.x(), mActor->mPosition.y(), mActor->mPosition.z()},
-                mActor->mIsOnGround, mContacts, mActor->mRotation.y(), mTravel.drowning, mTravel.jumpFlags, 0};
+                mActor->mIsOnGround, mContacts, mActor->mRotation.y(), mTravel.drowning, mTravel.jumpFlags, 0,
+                {mActor->mInertia.x(), mActor->mInertia.y(), mActor->mInertia.z()},
+                {mActor->mLastStuckPosition.x(), mActor->mLastStuckPosition.y(), mActor->mLastStuckPosition.z()},
+                mTravel.fallHeight, mTravel.breath, mActor->mStuckFrames, mActor->mIsOnSlope, mActor->mWalkingOnWater};
         }
     };
 
@@ -934,6 +958,82 @@ namespace TES3MP::Native
         mScenery.swap(candidate.mScenery);
         mGeometryDemand.swap(candidate.mGeometryDemand);
         mDormant.swap(candidate.mDormant);
+        mPlayers.swap(candidate.mPlayers);
+        mPlayerBindings.swap(candidate.mPlayerBindings);
+        mUnloadedPlayerImages.swap(candidate.mUnloadedPlayerImages);
+    }
+
+    void InteriorActorScene::bindPlayers(Loadout& loadout, std::span<const DynamicActorBody> players)
+    {
+        if (!mImpl || !mPlayers.empty() || players.size() > 2)
+            throw std::invalid_argument("Player collision domain invalid");
+        std::set<uint64_t> unique;
+        for (const auto& player : players)
+            if (!player.actor || !player.playerBody || !unique.insert(player.actor).second)
+                throw std::invalid_argument("Player collision identity invalid");
+        for (const auto& player : players)
+        {
+            auto& parent = *const_cast<InteriorActorScene&>(forCell(player.cell)).mImpl;
+            auto* regional = &parent;
+            while (regional->mSharedParent) regional = regional->mSharedParent;
+            auto child = std::unique_ptr<InteriorActorScene>(new InteriorActorScene(loadout, regional->mCells,
+                player.actor, "meshes/base_anim.nif", "meshes/base_animkna.nif", {}, regional,
+                std::span(&player, 1), false, true));
+            child->mImpl->mMultipleDomains = true;
+            std::vector<uint64_t> doors;
+            for (const auto& door : regional->mDoors) doors.push_back(door.mId);
+            if (!doors.empty()) child->bindDoors(doors, false);
+            child->enableMovementEffects();
+            mPlayers.push_back(std::move(child));
+        }
+        // Shared actor readers must see the same identities as the owner.
+        for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+            if (scene->mImpl->mSharedParent) scene->mImpl->mIdentities = scene->mImpl->mSharedParent->mIdentities;
+        for (auto& scene : mPlayers) scene->mImpl->mIdentities = scene->mImpl->mSharedParent->mIdentities;
+        mPlayerBindings.assign(players.begin(), players.end());
+    }
+
+    const InteriorActorScene& InteriorActorScene::forPlayer(uint64_t actor) const
+    {
+        for (const auto& scene : mPlayers) if (scene->actorId() == actor) return *scene;
+        throw std::invalid_argument("Player outside collision domain");
+    }
+    InteriorActorScene& InteriorActorScene::forPlayer(uint64_t actor)
+    { return const_cast<InteriorActorScene&>(std::as_const(*this).forPlayer(actor)); }
+    bool InteriorActorScene::hasPlayer(uint64_t actor) const noexcept
+    { return std::ranges::any_of(mPlayers, [actor](const auto& scene) { return scene->actorId() == actor; }); }
+    float InteriorActorScene::playerMovementScale(uint64_t actor) const
+    {
+        const auto found = std::ranges::find(mPlayerBindings, actor, &DynamicActorBody::actor);
+        if (!mImpl || found == mPlayerBindings.end()) throw std::invalid_argument("Player speed body unavailable");
+        if (mImpl->mNormaliseRaceSpeed) return 1.f;
+        const auto& npc = *found->playerBody;
+        const auto& race = *mImpl->mStore.get<ESM::Race>().find(npc.mRace);
+        const float scale = npc.isMale() ? race.mData.mMaleWeight : race.mData.mFemaleWeight;
+        if (!std::isfinite(scale) || scale <= 0.f || scale > 100.f)
+            throw std::invalid_argument("Player movement scale invalid");
+        return scale;
+    }
+    void InteriorActorScene::copyPlayersTo(Loadout& loadout, InteriorActorScene& fresh) const
+    {
+        if (mPlayerBindings.empty()) return;
+        auto bindings = mPlayerBindings;
+        if (mImpl) for (size_t i = 0; i < bindings.size(); ++i)
+        {
+            const auto frame = mPlayers[i]->snapshot();
+            bindings[i].position = frame.mPosition; bindings[i].yaw = frame.mYaw;
+            if (bindings[i].cell.is<ESM::ESM3ExteriorCellRefId>())
+                bindings[i].cell = ESM::RefId::esm3ExteriorCell(int(std::floor(frame.mPosition[0] / ESM::Land::REAL_SIZE)),
+                    int(std::floor(frame.mPosition[1] / ESM::Land::REAL_SIZE)));
+        }
+        fresh.bindPlayers(loadout, bindings);
+        for (size_t i = 0; i < mPlayerBindings.size(); ++i)
+        {
+            auto& player = fresh.forPlayer(mPlayerBindings[i].actor);
+            const auto bytes = mImpl ? mPlayers[i]->image() : mUnloadedPlayerImages.at(i);
+            auto restored = player.prepareRestore(bytes, player.mImpl->mDoors);
+            player.install(*restored);
+        }
     }
     void InteriorActorScene::replaceWorld(const ActorSceneWorld& world)
     {
@@ -1016,6 +1116,7 @@ namespace TES3MP::Native
         std::vector<Impl*> scenes;
         for (auto* scene = this; scene; scene = scene->mNeighbor.get()) scenes.push_back(scene->mImpl.get());
         for (const auto& scene : mScenery) scenes.push_back(scene->mImpl.get());
+        for (const auto& scene : mPlayers) scenes.push_back(scene->mImpl.get());
         std::set<ESM::RefId> unique;
         for (auto cell : demanded)
             if (!unique.insert(cell).second || !std::ranges::any_of(scenes, [&](const auto* scene) {
@@ -1473,6 +1574,18 @@ namespace TES3MP::Native
             mImpl->encode(*mImpl->mActor, mImpl->mPath, mImpl->mContacts, mImpl->mTravel),
             std::move(doors), arrived()});
         mDormant.swap(dormant);
+        mUnloadedPlayerImages.clear();
+        for (size_t i = 0; i < mPlayers.size(); ++i)
+        {
+            const auto& player = mPlayers[i];
+            mUnloadedPlayerImages.push_back(player->image());
+            const auto frame = player->snapshot();
+            mPlayerBindings[i].position = frame.mPosition; mPlayerBindings[i].yaw = frame.mYaw;
+            if (mPlayerBindings[i].cell.is<ESM::ESM3ExteriorCellRefId>())
+                mPlayerBindings[i].cell = ESM::RefId::esm3ExteriorCell(int(std::floor(frame.mPosition[0] / ESM::Land::REAL_SIZE)),
+                    int(std::floor(frame.mPosition[1] / ESM::Land::REAL_SIZE)));
+        }
+        mPlayers.clear();
         mImpl.reset();
         mScenery.clear();
     }
@@ -1491,6 +1604,9 @@ namespace TES3MP::Native
         mDormant.swap(fresh.mDormant);
         mNeighbor.swap(fresh.mNeighbor);
         mScenery.swap(fresh.mScenery);
+        mPlayers.swap(fresh.mPlayers);
+        mPlayerBindings.swap(fresh.mPlayerBindings);
+        mUnloadedPlayerImages.swap(fresh.mUnloadedPlayerImages);
     }
 
     void InteriorActorScene::enableMovementEffects()
@@ -1624,6 +1740,7 @@ namespace TES3MP::Native
             mImpl->mHitModels[i] = VFS::Path::Normalized(Settings::Manager::getString(modelNames[i], "Models"));
         mImpl->mAdditionalHitSources = Settings::Manager::getBool("use additional anim sources", "Game");
         mImpl->mSmoothMovement = Settings::Manager::getBool("smooth movement", "Game");
+        mImpl->mNormaliseRaceSpeed = Settings::Manager::getBool("normalise race speed", "Game");
         mImpl->mEnchantedWeaponsAreMagical = Settings::Manager::getBool("enchanted weapons are magical", "Game");
         mImpl->mOnlyAppropriateAmmunitionBypassesResistance
             = Settings::Manager::getBool("only appropriate ammunition bypasses resistance", "Game");
@@ -1896,6 +2013,30 @@ namespace TES3MP::Native
     };
     InteriorActorScene::Prepared::Prepared(std::unique_ptr<State> state) : mState(std::move(state)) {}
     InteriorActorScene::Prepared::~Prepared() = default;
+    void InteriorActorScene::withPlayerHulls(
+        std::span<const std::pair<uint64_t, const Prepared*>> frames, const std::function<void()>& operation)
+    {
+        struct Restore
+        {
+            struct Body { btCollisionWorld* world; btCollisionObject* body; btTransform transform; };
+            std::vector<Body> bodies;
+            ~Restore() { for (auto& value : bodies) {
+                value.body->setWorldTransform(value.transform); value.world->updateSingleAabb(value.body);
+            } }
+        } restore;
+        restore.bodies.reserve(frames.size());
+        for (const auto& [id, frame] : frames)
+        {
+            auto& scene = *forPlayer(id).mImpl;
+            if (!frame || frame->mState->lifetime != scene.mLifetime)
+                throw std::invalid_argument("Player hull candidate differs from scene");
+            auto* body = scene.mActor->mCollisionObject;
+            restore.bodies.push_back({&scene.mWorld, body, body->getWorldTransform()});
+            body->setWorldTransform(scene.actorTransform(*frame->mState->frame));
+            scene.mWorld.updateSingleAabb(body);
+        }
+        operation();
+    }
     void InteriorActorScene::prepareSceneryDoors(Prepared& prepared, std::span<const ActorSceneDoor> doors) const
     {
         auto& frames = prepared.mState->sceneryDoors;
@@ -1912,7 +2053,10 @@ namespace TES3MP::Native
         const auto& frame = *mState->frame;
         return {mState->actor, {frame.mPosition.x(), frame.mPosition.y(), frame.mPosition.z()},
             frame.mIsOnGround, mState->contacts, frame.mRotation.y(), mState->travel.drowning,
-            mState->travel.jumpFlags, mState->travel.landingFall};
+            mState->travel.jumpFlags, mState->travel.landingFall,
+            {frame.mInertia.x(), frame.mInertia.y(), frame.mInertia.z()},
+            {frame.mLastStuckPosition.x(), frame.mLastStuckPosition.y(), frame.mLastStuckPosition.z()},
+            mState->travel.fallHeight, mState->travel.breath, frame.mStuckFrames, frame.mIsOnSlope, frame.mWalkingOnWater};
     }
     std::optional<ActorSceneSnapshot> InteriorActorScene::Prepared::neighborSnapshot() const
     { return mNeighbor ? std::optional(mNeighbor->snapshot()) : std::nullopt; }
@@ -2003,7 +2147,7 @@ namespace TES3MP::Native
         const auto word = [&](uint64_t value) { putAreaWord(bytes, value); };
         const auto real = [&](float value) { word(std::bit_cast<uint32_t>(value)); };
         const auto vector = [&](const osg::Vec3f& value) { for (int i=0; i<3; ++i) real(value[i]); };
-        word(mWaterNavigation ? 3 : mAvoidanceEnabled ? 2 : 1); word(mActorId);
+        word(frame.mIsPlayer ? 4 : mWaterNavigation ? 3 : mAvoidanceEnabled ? 2 : 1); word(mActorId);
         vector(frame.mPosition); vector(frame.mInertia); vector(frame.mLastStuckPosition);
         real(frame.mRotation.x()); real(frame.mRotation.y()); real(frame.mOldHeight);
         word(frame.mStuckFrames); word(frame.mIsOnGround); word(frame.mIsOnSlope);
@@ -2024,6 +2168,7 @@ namespace TES3MP::Native
         {
             real(travel.breath); word(travel.jumpFlags); real(travel.fallHeight);
         }
+        if (frame.mIsPlayer) word(frame.mWalkingOnWater);
         return bytes;
     }
 
@@ -2070,7 +2215,7 @@ namespace TES3MP::Native
         const auto vector = [&]() { const auto x=real(), y=real(), z=real(); return osg::Vec3f(x,y,z); };
         const auto boolean = [&]() { const auto value=word(); if (value>1) throw std::invalid_argument("Invalid actor image boolean"); return bool(value); };
         const auto version = word(), actor = word();
-        if (version != (mImpl->mWaterNavigation ? 3 : mImpl->mAvoidanceEnabled ? 2 : 1) || actor != mImpl->mActorId)
+        if (version != (mImpl->mActor->mIsPlayer ? 4 : mImpl->mWaterNavigation ? 3 : mImpl->mAvoidanceEnabled ? 2 : 1) || actor != mImpl->mActorId)
             throw std::invalid_argument("Actor image identity mismatch: version=" + std::to_string(version)
                 + " actor=" + std::to_string(actor) + " expected=" + std::to_string(mImpl->mActorId));
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(*mImpl->mActor);
@@ -2150,6 +2295,7 @@ namespace TES3MP::Native
             travel.fallHeight = real();
             if (travel.fallHeight < 0.f) throw std::invalid_argument("Actor fall height outside bounds");
         }
+        if (frame->mIsPlayer) frame->mWalkingOnWater = boolean();
         if (offset != bytes.size()) throw std::invalid_argument("Trailing actor image data");
         auto retained = removed.empty() ? std::vector<char>(bytes.begin(), bytes.end())
             : mImpl->encode(*frame, path, ids, travel);
@@ -2234,6 +2380,43 @@ namespace TES3MP::Native
         return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
             mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(contacts), std::move(bytes),
             {doors.begin(), doors.end()}, std::move(travel)})));
+    }
+
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareControlled(
+        const ActorMovement& movement, const std::array<float, 3>& axes, float pitch, float yaw,
+        std::span<const ActorSceneDoor> doors)
+    {
+        if (!mImpl || !movement.enabled) throw std::invalid_argument("Controlled movement unavailable");
+        mImpl->validateMovement(movement);
+        for (float axis : axes)
+            if (!std::isfinite(axis) || std::abs(axis) > 1.f)
+                throw std::invalid_argument("Movement controls outside bounds");
+        if (!std::isfinite(pitch) || !std::isfinite(yaw) || std::abs(pitch) > 3.141593f
+            || std::abs(yaw) > 6.283186f) throw std::invalid_argument("Movement facing outside bounds");
+        const auto localDoors = mImpl->localDoors(doors);
+        mImpl->validateDoors(localDoors);
+        auto frame = std::make_unique<MWPhysics::ActorFrameData>(mImpl->movementFrame(*mImpl->mActor, movement));
+        frame->mRotation = {pitch, yaw};
+        auto travel = mImpl->mTravel;
+        travel.landingFall = 0.f;
+        auto path = mImpl->mPath;
+        std::vector<uint64_t> contacts;
+        struct RestoreDoors { Impl& scene; ~RestoreDoors() { scene.applyDoors(scene.mDoors); } } restore{*mImpl};
+        mImpl->applyDoors(localDoors);
+        osg::Vec3f direction(axes[0], axes[1], axes[2]);
+        if (direction.length2() > 1.f) direction.normalize();
+        for (int substep = 0; substep < 2; ++substep)
+        {
+            auto controls = movement;
+            // A release edge launches at most once in this durable tick.
+            if (substep) controls.jumpRequested = false;
+            mImpl->move(*frame, contacts, direction * mImpl->movementSpeed(*frame, movement), controls, travel);
+            mImpl->updateBreath(*frame, travel, movement);
+        }
+        auto bytes = mImpl->encode(*frame, path, contacts, travel);
+        return std::unique_ptr<Prepared>(new Prepared(std::make_unique<Prepared::State>(Prepared::State{
+            mImpl->mLifetime, mImpl->mActorId, std::move(frame), std::move(path), std::move(contacts),
+            std::move(bytes), {localDoors.begin(), localDoors.end()}, std::move(travel)})));
     }
 
     void InteriorActorScene::prepareNeighborNavigation(Prepared& prepared, float speed,

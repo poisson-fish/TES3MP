@@ -207,26 +207,6 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
             mInputManager->update(frametime, false);
         }
 
-        if (mMultiplayerCoordinator)
-        {
-            const bool gameRunning = mStateManager->getState() != MWBase::StateManager::State_NoGame;
-            mMultiplayerCoordinator->setGameRunning(gameRunning);
-            mMultiplayerCoordinator->frame(frametime);
-            if (!gameRunning && mMultiplayerCoordinator->gameStartRequested())
-            {
-                mWindowManager->removeGuiMode(MWGui::GM_MainMenu);
-                mStateManager->newGame(mMultiplayerCoordinator->characterLifecycle()
-                    == TES3MP::CharacterLifecycle::EstablishedCharacter);
-                mMultiplayerCoordinator->confirmGameStart(
-                    mStateManager->getState() == MWBase::StateManager::State_Running);
-            }
-        }
-
-#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
-        if (!mMultiplayerCoordinator && mStateManager->getState() == MWBase::StateManager::State_Running)
-            TES3MP::OpenMWAdapter::requestStockSpellPresentationCast(frametime);
-#endif
-
         // When the window is minimized, pause the game. Currently this *has* to be here to work around a MyGUI bug.
         // If we are not currently rendering, then RenderItems will not be reused resulting in a memory leak upon
         // changing widget textures (fixed in MyGUI 3.3.2), and destroyed widgets will not be deleted (not fixed yet,
@@ -253,6 +233,26 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
             // It applies to the game world queued changes from the previous frame.
             mLuaManager->synchronizedUpdate();
         }
+
+        if (mMultiplayerCoordinator)
+        {
+            const bool gameRunning = mStateManager->getState() != MWBase::StateManager::State_NoGame;
+            mMultiplayerCoordinator->setGameRunning(gameRunning);
+            mMultiplayerCoordinator->frame(frametime);
+            if (!gameRunning && mMultiplayerCoordinator->gameStartRequested())
+            {
+                mWindowManager->removeGuiMode(MWGui::GM_MainMenu);
+                mStateManager->newGame(mMultiplayerCoordinator->characterLifecycle()
+                    == TES3MP::CharacterLifecycle::EstablishedCharacter);
+                mMultiplayerCoordinator->confirmGameStart(
+                    mStateManager->getState() == MWBase::StateManager::State_Running);
+            }
+        }
+
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+        if (!mMultiplayerCoordinator && mStateManager->getState() == MWBase::StateManager::State_Running)
+            TES3MP::OpenMWAdapter::requestStockSpellPresentationCast(frametime);
+#endif
 
         // update game state
         {

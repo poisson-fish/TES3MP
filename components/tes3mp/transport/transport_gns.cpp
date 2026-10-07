@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <limits>
@@ -45,7 +46,8 @@ namespace
     constexpr std::uint16_t ReliableOrderedLane = 0;
     constexpr std::uint16_t LatestWinsLane = 1;
     constexpr std::uint16_t PresentationLatestLane = 2;
-    constexpr int TransportLaneCount = 3;
+    constexpr std::uint16_t PlayerControlLatestLane = 3;
+    constexpr int TransportLaneCount = 4;
     TES3MP::NullTransportTelemetrySink sNullTransportTelemetry;
 
     std::optional<std::uint16_t> laneFor(TES3MP::TransportChannel channel)
@@ -58,6 +60,8 @@ namespace
                 return LatestWinsLane;
             case TES3MP::TransportChannel::PresentationLatest:
                 return PresentationLatestLane;
+            case TES3MP::TransportChannel::PlayerControlLatest:
+                return PlayerControlLatestLane;
         }
         return std::nullopt;
     }
@@ -70,6 +74,8 @@ namespace
             return TES3MP::TransportChannel::LatestWins;
         if (lane == PresentationLatestLane)
             return TES3MP::TransportChannel::PresentationLatest;
+        if (lane == PlayerControlLatestLane)
+            return TES3MP::TransportChannel::PlayerControlLatest;
         return std::nullopt;
     }
 
@@ -565,6 +571,12 @@ namespace
             const auto failure = static_cast<EResult>(-result);
             if (failure == k_EResultLimitExceeded || failure == k_EResultIgnored)
                 return TES3MP::TransportResult::WouldBlock;
+            std::fprintf(stderr, "transport send failed: channel=%u bytes=%zu dependency_result=%d\n",
+                static_cast<unsigned>(channel), message.size(), static_cast<int>(failure));
+            SteamNetConnectionInfo_t info{};
+            if (SteamAPI_ISteamNetworkingSockets_GetConnectionInfo(sockets(), found->second.handle, &info))
+                std::fprintf(stderr, "transport failed-send connection: state=%d reason=%d detail=%.160s\n",
+                    static_cast<int>(info.m_eState), info.m_eEndReason, info.m_szEndDebug);
             if (failure == k_EResultInvalidParam)
                 return TES3MP::TransportResult::InvalidInput;
             if (failure == k_EResultInvalidState || failure == k_EResultNoConnection)
@@ -1098,8 +1110,8 @@ namespace
 
         bool configureChannels(HSteamNetConnection handle)
         {
-            const std::array<int, TransportLaneCount> priorities{ 0, 0, 0 };
-            const std::array<std::uint16_t, TransportLaneCount> weights{ 1, 1, 1 };
+            const std::array<int, TransportLaneCount> priorities{ 0, 0, 0, 0 };
+            const std::array<std::uint16_t, TransportLaneCount> weights{ 1, 1, 1, 1 };
             return SteamAPI_ISteamNetworkingSockets_ConfigureConnectionLanes(
                        sockets(), handle, TransportLaneCount, priorities.data(), weights.data())
                 == k_EResultOK;
@@ -1178,6 +1190,8 @@ namespace
             if (info.m_info.m_eState == k_ESteamNetworkingConnectionState_ClosedByPeer
                 || info.m_info.m_eState == k_ESteamNetworkingConnectionState_ProblemDetectedLocally)
             {
+                std::fprintf(stderr, "transport connection closed: state=%d reason=%d detail=%.160s\n",
+                    static_cast<int>(info.m_info.m_eState), info.m_info.m_eEndReason, info.m_info.m_szEndDebug);
                 mCandidateHandles.erase(info.m_hConn);
                 const auto failedCandidate = std::ranges::find_if(
                     attempt.candidates, [&](const Attempt::Candidate& value) { return value.handle == info.m_hConn; });
@@ -1321,12 +1335,16 @@ namespace
                     lanes[PresentationLatestLane].m_cbPendingUnreliable);
                 gauge(TES3MP::TransportTelemetryKind::UnacknowledgedBytes,
                     TES3MP::TransportChannel::PresentationLatest, 0);
+                gauge(TES3MP::TransportTelemetryKind::PendingBytes, TES3MP::TransportChannel::PlayerControlLatest,
+                    lanes[PlayerControlLatestLane].m_cbPendingUnreliable);
+                gauge(TES3MP::TransportTelemetryKind::UnacknowledgedBytes,
+                    TES3MP::TransportChannel::PlayerControlLatest, 0);
             }
         }
 
         TES3MP::TransportLimits mLimits;
         TES3MP::TransportTelemetrySink* mTelemetry = nullptr;
-        std::array<std::array<std::array<std::uint64_t, 3>, 2>, 7> mCounters{};
+        std::array<std::array<std::array<std::uint64_t, 4>, 2>, 7> mCounters{};
         std::optional<TES3MP::ListenerId> mNextListener = TES3MP::ListenerId::initial();
         std::optional<TES3MP::ConnectAttemptId> mNextAttempt = TES3MP::ConnectAttemptId::initial();
         std::optional<TES3MP::TransportConnectionId> mNextConnection = TES3MP::TransportConnectionId::initial();

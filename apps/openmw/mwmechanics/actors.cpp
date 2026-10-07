@@ -1,4 +1,5 @@
 #include "actors.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
 #include "objectmagic.hpp"
 #include "breathing.hpp"
 
@@ -394,7 +395,9 @@ namespace MWMechanics
         adjustMagicEffects(ptr, duration);
 
         // fatigue restoration
-        calculateRestoration(ptr, duration);
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (ptr != getPlayer() || !multiplayer || !multiplayer->ownsPlayerMovement())
+            calculateRestoration(ptr, duration);
     }
 
     void Actors::playIdleDialogue(const MWWorld::Ptr& actor) const
@@ -936,7 +939,8 @@ namespace MWMechanics
         {
             const bool godmode = isPlayer && world->getGodModeState();
 
-            if (!godmode)
+            const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+            if (!godmode && !(isPlayer && multiplayer && multiplayer->ownsPlayerMovement()))
             {
                 // If drowning, apply 3 points of damage per second
                 static const float fSuffocationDamage

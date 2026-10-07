@@ -127,6 +127,7 @@ namespace TES3MP::OpenMWAdapter
         void configure(DesktopContentMapping mapping, const PresentationProvider* presentation = nullptr);
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
+        std::optional<LocomotionIntent> samplePlayerControls() noexcept override;
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
         std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept override;
         std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept override;
@@ -219,6 +220,7 @@ namespace TES3MP::OpenMWAdapter
         std::vector<MagicProjectilePoseEvidence> magicProjectilePoseEvidence() const;
         std::vector<NativeActorMotion> nativeActorPresentation() const;
         std::optional<std::array<float, 3>> renderedPlayerPosition(PlayerId player) const;
+        std::optional<uint64_t> playerPhysicsCorrection() const;
         std::vector<PublicPlayerAppearance> renderedPlayerAppearances() const;
         std::vector<std::pair<PlayerId, std::vector<std::uint64_t>>> renderedPlayerEquipment() const;
         struct LocomotionEvidence { std::uint8_t kind; std::uint64_t id; std::string group; float clipTime; };

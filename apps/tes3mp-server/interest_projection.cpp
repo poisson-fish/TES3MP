@@ -39,7 +39,8 @@ namespace TES3MP::ServerApp
     }
 
     std::optional<InterestBaselineDelivery> projectInterestBaseline(const CanonicalServerState& state,
-        SessionId targetId, ServerTick tick, CanonicalRevision revision, CanonicalStateVersion stateVersion, bool neighborhoods)
+        SessionId targetId, ServerTick tick, CanonicalRevision revision, CanonicalStateVersion stateVersion, bool neighborhoods,
+        const NativeInventoryAuthority* native)
     {
         try
         {
@@ -68,7 +69,8 @@ namespace TES3MP::ServerApp
                 LatestWinsSnapshot(LatestWinsSnapshotHeader(target->sessionId(), target->sessionGeneration(),
                     target->playerId(), target->entityId(), revision,
                     target->highestContiguousFinalizedCommand()),
-                    std::get<SpatialWorldView>(std::move(view))) };
+                    std::get<SpatialWorldView>(std::move(view)),
+                    native ? native->projectPlayerPhysics(state, target->playerId(), nullptr) : std::nullopt) };
         }
         catch (...) { return std::nullopt; }
     }
@@ -176,7 +178,8 @@ namespace TES3MP::ServerApp
     }
 
     std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectInterestViews(
-        const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision, bool neighborhoods)
+        const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision, bool neighborhoods,
+        const NativeInventoryAuthority* native, const PreparedNativeInventory* candidate)
     {
         try
         {
@@ -196,7 +199,8 @@ namespace TES3MP::ServerApp
                 result.emplace_back(target.sessionId(), LatestWinsSnapshot(
                     LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), target.playerId(),
                         target.entityId(), revision, target.highestContiguousFinalizedCommand()),
-                    std::get<SpatialWorldView>(std::move(view))));
+                    std::get<SpatialWorldView>(std::move(view)),
+                    native ? native->projectPlayerPhysics(state, target.playerId(), candidate) : std::nullopt));
             }
             return result;
         }

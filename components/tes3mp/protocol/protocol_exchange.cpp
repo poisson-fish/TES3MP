@@ -316,6 +316,11 @@ namespace TES3MP
     {
         if (!header.entityPrecondition())
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingEntityPrecondition);
+        if (input.intent().controls() && (!input.intent().controls()->valid()
+                || input.intent().mode() == LocomotionMode::Jump
+                || input.intent().position() || input.intent().orientation()
+                || input.intent().desiredVelocity() != LinearVelocity3(0, 0, 0)))
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::InvalidLocomotionMode);
         return ReliableOperation(header, input);
     }
 
@@ -418,10 +423,15 @@ namespace TES3MP
                 const auto& ori = *input->intent().orientation();
                 encodedOrientation.emplace(ori.x().value(), ori.y().value(), ori.z().value());
             }
+            std::optional<ReliableSchema::PlayerMovementControls> encodedControls;
+            if (const auto& controls = input->intent().controls())
+                encodedControls.emplace(controls->right, controls->forward, controls->vertical,
+                    controls->pitch.value(), controls->jump);
             body = ReliableSchema::CreatePlayerLocomotionInput(builder, input->inputTick().value(),
                 input->inputSequence().value(), mode, input->intent().rootFacing().value(), &encodedVelocity,
                 encodedPosition ? &*encodedPosition : nullptr,
-                encodedOrientation ? &*encodedOrientation : nullptr).Union();
+                encodedOrientation ? &*encodedOrientation : nullptr,
+                encodedControls ? &*encodedControls : nullptr).Union();
             bodyType = ReliableSchema::ReliableOperationBody::PlayerLocomotionInput;
         }
         else if (const auto* respawn = std::get_if<PlayerRespawnRequest>(&value.body()))
@@ -472,8 +482,15 @@ namespace TES3MP
             encodedModes = builder.CreateVector(modes);
         }
         const auto view = SnapshotSchema::CreateSpatialWorldView(builder, encodedEntries, encodedModes);
+        std::optional<SnapshotSchema::PlayerPhysicsBaseline> physics;
+        if (const auto& state = value.playerPhysics())
+            physics.emplace(state->inertia[0], state->inertia[1], state->inertia[2],
+                state->lastStuckPosition[0], state->lastStuckPosition[1], state->lastStuckPosition[2],
+                state->fallHeight, state->breath, state->stuckFrames, state->grounded,
+                state->slope, state->walkingOnWater, state->consumedCommand, state->jumpHeld, state->blocked);
         const auto root = SnapshotSchema::CreateLatestWinsSnapshot(
-            builder, encodedHeader, SnapshotSchema::LatestWinsSnapshotBody::SpatialWorldView, view.Union());
+            builder, encodedHeader, SnapshotSchema::LatestWinsSnapshotBody::SpatialWorldView, view.Union(),
+            physics ? &*physics : nullptr);
         SnapshotSchema::FinishSizePrefixedLatestWinsSnapshotBuffer(builder, root);
         return takeBuffer(builder);
     }
@@ -616,10 +633,14 @@ namespace TES3MP
                 orientation.emplace(Turn32::fromValue(input->orientation()->x()),
                     Turn32::fromValue(input->orientation()->y()), Turn32::fromValue(input->orientation()->z()));
 
+            std::optional<PlayerMovementControls> controls;
+            if (const auto* value = input->controls())
+                controls = PlayerMovementControls{value->right(), value->forward(), value->vertical(),
+                    Turn32::fromValue(value->pitch()), value->jump()};
             return ReliableOperation::create(header, PlayerLocomotionInput(*inputTick, *inputSequence,
                 LocomotionIntent(mode, Turn32::fromValue(input->root_facing()),
                     LinearVelocity3(velocity->x(), velocity->y(), velocity->z()),
-                    position, orientation)));
+                    position, orientation, controls)));
         }
         if (root->body_type() == ReliableSchema::ReliableOperationBody::PlayerRespawnRequest)
         {
@@ -749,9 +770,20 @@ namespace TES3MP
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&worldView))
             return *failure;
 
+        std::optional<PlayerPhysicsBaseline> physics;
+        if (const auto* value = root->player_physics())
+        {
+            physics = PlayerPhysicsBaseline{{value->inertia_x(), value->inertia_y(), value->inertia_z()},
+                {value->stuck_x(), value->stuck_y(), value->stuck_z()}, value->fall_height(), value->breath(),
+                value->stuck_frames(), value->grounded(), value->slope(), value->walking_on_water(), value->consumed_command(),
+                value->jump_held(), value->blocked()};
+            // Player controls have an independent latest-wins acknowledgement.
+            if (!physics->valid() || physics->consumedCommand > MaximumLocomotionInputOrdinal)
+                return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::InvalidAcknowledgementPresence);
+        }
         return LatestWinsSnapshot(LatestWinsSnapshotHeader(*decodedValue(session), *decodedValue(generation),
                                       *decodedValue(player), *decodedValue(entity), *decodedValue(revision), acknowledgement),
-            std::get<SpatialWorldView>(std::move(worldView)));
+            std::get<SpatialWorldView>(std::move(worldView)), physics);
     }
 
     ReliableObservationBatchDecodeResult decodeReliableObservationBatch(std::span<const std::byte> payload)

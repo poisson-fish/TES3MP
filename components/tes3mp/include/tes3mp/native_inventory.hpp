@@ -15,6 +15,15 @@ namespace TES3MP
     // authorizes nonthrowing engine installation before canonical publication.
     using NativeInventoryCommit = std::function<CanonicalDurabilityResult(std::span<const std::byte>)>;
 
+    struct NativePlayerMotion
+    {
+        PlayerId player;
+        Transform root;
+        LinearVelocity3 velocity;
+        LocomotionMode mode;
+        PlayerPhysicsBaseline physics;
+    };
+
     class PreparedNativeInventory
     {
     public:
@@ -23,6 +32,7 @@ namespace TES3MP
         // reducer persists it with the unchanged native image before publication.
         virtual std::optional<Transform> playerDestination() const { return {}; }
         virtual std::span<const std::pair<PlayerId, Transform>> playerRelocations() const { return {}; }
+        virtual std::span<const NativePlayerMotion> playerMotions() const { return {}; }
         virtual bool changesInventory() const noexcept { return true; }
         virtual bool waitRestApplied() const noexcept { return false; }
         virtual std::optional<std::pair<PlayerId, std::uint64_t>> requestedPlayerRespawn() const { return {}; }
@@ -59,6 +69,9 @@ namespace TES3MP
         virtual bool streamsPlayerAreas() const noexcept { return false; }
         virtual bool hasLeveledActors() const noexcept { return false; }
         virtual bool hasActorMotion() const noexcept { return false; }
+        virtual bool ownsPlayerPhysics() const noexcept { return false; }
+        virtual std::optional<PlayerPhysicsBaseline> projectPlayerPhysics(
+            const CanonicalServerState&, PlayerId, const PreparedNativeInventory* = nullptr) const { return {}; }
         virtual bool hasNativeCombat() const noexcept { return false; }
         virtual bool hasNativeMagicUse() const noexcept { return false; }
         // Resolve inherited player motion against the native area domain. This
@@ -82,6 +95,11 @@ namespace TES3MP
             std::unique_ptr<PreparedNativeInventory> command, const CanonicalWorldState* world,
             std::optional<WaitRestRequest> waitRest)
         { return prepareNativeTick(players, tick, seconds, std::move(command), world); }
+        virtual std::unique_ptr<PreparedNativeInventory> prepareNativePlayerTick(
+            const CanonicalServerState& players, ServerTick tick, float seconds,
+            std::unique_ptr<PreparedNativeInventory> command, const CanonicalWorldState* world,
+            std::optional<WaitRestRequest> waitRest, std::span<const ServerCommandProposal>)
+        { return prepareNativeScheduledTick(players, tick, seconds, std::move(command), world, waitRest); }
         virtual void reportDoorObstruction(const CanonicalServerState&, const ClientDoorObstruction&, ServerTick) {}
     };
 }

@@ -14,6 +14,8 @@ namespace TES3MP
         LinearVelocity3 velocity;
         std::size_t replayedInputCount = 0;
         bool hardDiscontinuity = false;
+        std::optional<PlayerPhysicsBaseline> physics;
+        std::vector<PlayerLocomotionInput> physicsReplay;
 
         friend constexpr bool operator==(const LocalLocomotionReconciliation&,
             const LocalLocomotionReconciliation&) noexcept = default;
@@ -26,7 +28,8 @@ namespace TES3MP
 
         bool retain(CommandSequence commandSequence, PlayerLocomotionInput input) noexcept;
         LocalLocomotionReconciliation reconcile(const SpatialEntitySnapshot& authoritative,
-            std::optional<CommandSequence> acknowledgedCommand, bool hardDiscontinuity = false) noexcept;
+            std::optional<CommandSequence> acknowledgedCommand, bool hardDiscontinuity = false,
+            std::optional<PlayerPhysicsBaseline> physics = {}) noexcept;
         void clear() noexcept;
         std::size_t size() const noexcept { return mInputs.size(); }
 

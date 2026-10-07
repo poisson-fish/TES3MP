@@ -849,7 +849,8 @@ namespace TES3MP
                                     if (const auto* motion
                                         = std::get_if<PlayerMotionCommandProposal>(&proposal.payload()))
                                     {
-                                        if (!isLegacyMotionVelocitySafe(motion->desiredVelocity())
+                                        if ((mNativeInventory && mNativeInventory->ownsPlayerPhysics())
+                                            || !isLegacyMotionVelocitySafe(motion->desiredVelocity())
                                             || !mContentManifest.movementProfile().allows(
                                                 LocomotionMode::Walk, motion->desiredVelocity()))
                                         {
@@ -866,7 +867,25 @@ namespace TES3MP
                                         = std::get_if<PlayerLocomotionCommandProposal>(&proposal.payload()))
                                     {
                                         const auto& intent = locomotion->intent();
-                                        if (intent.position().has_value())
+                                        if (mNativeInventory && mNativeInventory->ownsPlayerPhysics())
+                                        {
+                                            requiresSpatialAdvance = false;
+                                            if (!intent.controls() || !intent.controls()->valid() || intent.position()
+                                                || intent.orientation() || intent.desiredVelocity() != LinearVelocity3(0, 0, 0)
+                                                || !mNativeInventory->allowsPlayerMovement(player->playerId()))
+                                                disposition = CommandDisposition::MotionOutOfRange;
+                                            else
+                                            {
+                                                prepared.mPlayerMovementCommands.push_back(proposal);
+                                                disposition = CommandDisposition::Applied;
+                                            }
+                                        }
+                                        else if (intent.controls())
+                                        {
+                                            requiresSpatialAdvance = false;
+                                            disposition = CommandDisposition::MotionOutOfRange;
+                                        }
+                                        else if (intent.position().has_value())
                                         {
                                             const auto currentOrientation = player->transform().orientation();
                                             const auto orientation = intent.orientation().value_or(Orientation3(
@@ -906,7 +925,12 @@ namespace TES3MP
                                         = std::get_if<CellTransitionCommandProposal>(&proposal.payload()))
                                     {
                                         const auto& requested = transition->requestedCell();
-                                        if (!mContentManifest.contains(requested))
+                                        if (mNativeInventory && mNativeInventory->ownsPlayerPhysics())
+                                        {
+                                            disposition = CommandDisposition::ObjectInteractionRejected;
+                                            requiresSpatialAdvance = false;
+                                        }
+                                        else if (!mContentManifest.contains(requested))
                                         {
                                             disposition = CommandDisposition::UnknownCell;
                                             requiresSpatialAdvance = false;
@@ -1522,9 +1546,8 @@ namespace TES3MP
                 const auto velocity = current.linearVelocity();
                 if (velocity == LinearVelocity3(0, 0, 0))
                     continue;
-                // Native campaigns retain inherited desktop poses until the
-                // movement cutover. Their velocity describes the last pose;
-                // it is never an intent for this legacy integration kernel.
+                // Native simulation owns movement. Published velocity describes
+                // its last frame, never a legacy integration-kernel intent.
                 // Reconnect/restart can have an active session before its first
                 // new pose and without the transient client-authority marker.
                 if (mNativeInventory && mNativeInventory->hasActorMotion())
@@ -2126,7 +2149,7 @@ namespace TES3MP
     }
 
     bool CanonicalCommandReducer::stageNativeDoorStep(PreparedBatch& prepared, ServerTick tick, float seconds,
-        std::optional<WaitRestRequest> waitRest) noexcept
+        std::optional<WaitRestRequest> waitRest, std::span<const ServerCommandProposal> playerControls) noexcept
     try
     {
         if (!prepared.result() || prepared.mBaseVersion != mStateVersion) return false;
@@ -2134,9 +2157,38 @@ namespace TES3MP
         // command candidate before one durability callback and publication.
         if (!mNativeInventory) return true;
         const bool hadCommand = static_cast<bool>(prepared.mNativeInventory);
-        auto door = mNativeInventory->prepareNativeScheduledTick(*prepared.mState, tick, seconds,
-            std::move(prepared.mNativeInventory), prepared.mWorld ? &*prepared.mWorld : mDurableWorld, waitRest);
-        if (!door) return true;
+        if (playerControls.size() > 2 || (!playerControls.empty() && !prepared.mPlayerMovementCommands.empty())) return false;
+        auto door = mNativeInventory->prepareNativePlayerTick(*prepared.mState, tick, seconds,
+            std::move(prepared.mNativeInventory), prepared.mWorld ? &*prepared.mWorld : mDurableWorld, waitRest,
+            playerControls.empty() ? std::span<const ServerCommandProposal>(prepared.mPlayerMovementCommands) : playerControls);
+        if (!door) return !mNativeInventory->ownsPlayerPhysics();
+        const auto motions = door->playerMotions();
+        if (!motions.empty())
+        {
+            auto players = std::vector(prepared.mState->players().begin(), prepared.mState->players().end());
+            if (motions.size() > players.size()) return false;
+            std::vector<PlayerId> seen;
+            for (const auto& motion : motions)
+            {
+                if (std::ranges::find(seen, motion.player) != seen.end()) return false;
+                seen.push_back(motion.player);
+                auto found = std::ranges::find(players, motion.player, &CanonicalPlayerEntityState::playerId);
+                if (found == players.end() || !mContentManifest.contains(motion.root.cell())) return false;
+                const auto epoch = found->transform().cell() == motion.root.cell()
+                    ? std::optional(found->authorityEpoch()) : found->authorityEpoch().next();
+                const auto version = prepared.mStateVersion.next();
+                const auto advanced = advanceCanonicalSpatialState(*found, tick, motion.root, motion.velocity, motion.mode);
+                const auto* value = std::get_if<CanonicalPlayerEntityState>(&advanced);
+                if (!epoch || !version || !value) return false;
+                *found = CanonicalPlayerEntityState(value->playerId(), value->entityId(), value->appearanceId(),
+                    value->transform(), value->linearVelocity(), value->entityRevision(), *epoch, tick, value->locomotionMode());
+                prepared.mStateVersion = *version;
+                prepared.mPublication->mSpatialTicks.push_back({*version, tick, *found});
+            }
+            auto state = createCanonicalServerState(players, prepared.mState->activeSessions());
+            if (!std::holds_alternative<CanonicalServerState>(state)) return false;
+            prepared.mState = std::make_shared<CanonicalServerState>(std::get<CanonicalServerState>(std::move(state)));
+        }
         const auto destinations = door->playerRelocations();
         if (!destinations.empty())
         {

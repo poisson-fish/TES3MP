@@ -1,4 +1,5 @@
 #include "mtphysics.hpp"
+#include "collisiontype.hpp"
 
 #include <cassert>
 #include <functional>
@@ -30,6 +31,8 @@
 #include "../mwbase/world.hpp"
 
 #include "actor.hpp"
+#include "collisioneffects.hpp"
+#include "../mwmechanics/jump.hpp"
 #include "contacttestwrapper.h"
 #include "movementsolver.hpp"
 #include "object.hpp"
@@ -823,6 +826,61 @@ namespace MWPhysics
         if (it == mCollisionObjects.end())
             return nullptr;
         return (*it)->getUserPointer();
+    }
+
+    void PhysicsTaskScheduler::replacePredictionBodies(std::span<btCollisionObject* const> previous,
+        std::span<btCollisionObject* const> next)
+    {
+        if (previous.size() > 39 || next.size() > 39) throw std::invalid_argument("Prediction body capacity exceeded");
+        waitForWorkers();
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        for (auto* body : previous) mCollisionWorld->removeCollisionObject(body);
+        for (auto* body : next) mCollisionWorld->addCollisionObject(body, CollisionType_Actor, CollisionType_Actor);
+    }
+
+    void PhysicsTaskScheduler::replayMovement(ActorFrameData& frame, std::span<const ActorReplayInput> inputs,
+        const osg::Vec3f& hullOffset)
+    {
+        if (inputs.size() > 128) throw std::invalid_argument("Player replay capacity exceeded");
+        waitForWorkers();
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        class ReplayEffects final : public CollisionEffects
+        {
+        public:
+            void objectCollision(const btCollisionObject*, bool) override {}
+            bool projectileActive(const btCollisionObject*) const override { return false; }
+            bool validProjectileTarget(const btCollisionObject*, const btCollisionObject*) const override { return false; }
+            const btCollisionObject* projectileCaster(const btCollisionObject*) const override { return nullptr; }
+            void hit(const btCollisionObject*, const btCollisionObject*, const btVector3&, const btVector3&) override {}
+            void hitWater(const btCollisionObject*) override {}
+        } effects;
+        const auto transform = frame.mCollisionObject->getWorldTransform();
+        struct RestoreBody
+        {
+            btCollisionWorld& world; btCollisionObject& body; btTransform transform;
+            ~RestoreBody() { body.setWorldTransform(transform); world.updateSingleAabb(&body); }
+        } restore{*mCollisionWorld, *frame.mCollisionObject, transform};
+        for (const auto& input : inputs)
+        {
+            auto direction = input.axes;
+            if (direction.length2() > 1.f) direction.normalize();
+            frame.mRotation = input.rotation;
+            for (int substep = 0; substep < 2; ++substep)
+            {
+                const bool swimming = frame.mPosition.z() < frame.mSwimLevel;
+                const float speed = frame.mFlying ? input.flySpeed : swimming ? input.swimSpeed : input.walkSpeed;
+                frame.mMovement = MWMechanics::jumpMovement(direction * speed, input.jumpSpeed,
+                    input.jump && substep == 0, frame.mIsOnGround, swimming, frame.mFlying, input.sneak, input.airControl);
+                frame.mMovement.x() *= input.xyScale; frame.mMovement.y() *= input.xyScale;
+                auto bodyTransform = transform;
+                // Preserve the model's fixed hull offset from the actor root.
+                bodyTransform.setOrigin(Misc::Convert::toBullet(frame.mPosition + hullOffset));
+                frame.mCollisionObject->setWorldTransform(bodyTransform);
+                mCollisionWorld->updateSingleAabb(frame.mCollisionObject);
+                MovementSolver::unstuck(frame, mCollisionWorld);
+                MovementSolver::move(frame, 1.f / 60.f, mCollisionWorld, {}, effects);
+            }
+        }
     }
 
     void PhysicsTaskScheduler::releaseSharedStates()

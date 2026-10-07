@@ -85,7 +85,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 78; ++candidate)
+            for (unsigned candidate = 3; candidate <= 79; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -311,6 +311,7 @@ namespace TES3MP::Native
             binding.mRetainTraveler = traveler;
             binding.mTravelerNeighborhood = neighborhood && cells->front().asExterior() != nullptr;
             binding.mCharacterCreation = descriptorVersion >= 78;
+            binding.mPlayerPhysics = descriptorVersion >= 79;
             if (binding.mCharacterCreation)
                 for (auto& actor : binding.mActors) actor.mEmptyInventory = true;
             binding.mCellActors = descriptorVersion >= 77;
@@ -846,6 +847,8 @@ namespace TES3MP::Native
                 };
                 auto scene = createScene();
                 start.binding.mCreateActorSet = createScene;
+                start.binding.mBindPhysicsPlayers = [&loadout](InteriorActorScene& scene,
+                    std::span<const DynamicActorBody> bodies) { scene.bindPlayers(loadout, bodies); };
                 for (const auto* domain : start.binding.worldDomains())
                     if (start.binding.mCellActors || start.binding.mTravelerNeighborhood || domain->mCell == start.wireCell)
                         start.binding.mCollisionCells.push_back(domain->mCell);
@@ -1003,13 +1006,14 @@ namespace TES3MP::Native
                                 }
                             }
                             fresh->replaceWorld(world);
+                            scene->copyPlayersTo(loadout, *fresh);
                             scene->reload(*fresh);
                         }
                         else if (!active) scene->unload();
                     };
                 }
                 if (start.binding.mCellActors)
-                    start.binding.mGeometryActivity = [scene, createScene, names,
+                    start.binding.mGeometryActivity = [scene, createScene, names, &loadout,
                         retained = std::vector<bool>{}](const std::vector<bool>& active,
                         const DynamicActorSet& actors, const ActorSceneWorld& world,
                         std::span<const ActorSceneDoor> doors) mutable {
@@ -1027,6 +1031,7 @@ namespace TES3MP::Native
                                 || (!bodies.empty() && DynamicActorSet::resources(*fresh) != actors.collisionResources))
                                 throw std::invalid_argument("Streamed collision resources changed after binding");
                             fresh->replaceWorld(world);
+                            scene->copyPlayersTo(loadout, *fresh);
                             auto restored = fresh->prepareRestore(scene->image(), doors);
                             fresh->install(*restored);
                             fresh->retainGeometry(demanded);

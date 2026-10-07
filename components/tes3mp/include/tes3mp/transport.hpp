@@ -271,6 +271,7 @@ namespace TES3MP
         ReliableOrdered = 1,
         LatestWins = 2,
         PresentationLatest = 3,
+        PlayerControlLatest = 4,
     };
 
     inline constexpr std::size_t ReliableOrderedMaximumMessageBytes
@@ -388,7 +389,7 @@ namespace TES3MP
         {
             return mLatest.has_value() || mActorLatest.has_value() || mEquipmentLatest.has_value()
                 || mCombatLatest.has_value()
-                || mPresentationLatest.has_value();
+                || mPresentationLatest.has_value() || mPlayerControlLatest.has_value();
         }
         bool hasWorldLatest() const noexcept
         {
@@ -422,16 +423,18 @@ namespace TES3MP
         std::optional<std::vector<std::byte>> mEquipmentLatest;
         std::optional<std::vector<std::byte>> mCombatLatest;
         std::optional<std::vector<std::byte>> mPresentationLatest;
+        std::optional<std::vector<std::byte>> mPlayerControlLatest;
         std::size_t mReliableBytes = 0;
         RateBucket mReliableRate;
         RateBucket mLatestRate;
         RateBucket mPresentationRate;
+        RateBucket mPlayerControlRate;
         std::size_t mNextWorldLatest = 0;
         std::optional<std::uint64_t> mFirstReliableBlock;
         std::size_t mConsecutiveReliableBlocks = 0;
         std::optional<std::uint64_t> mLastPumpTime;
         TransportTelemetrySink* mTelemetry = nullptr;
-        std::array<std::array<std::uint64_t, 3>, 7> mCounters{};
+        std::array<std::array<std::uint64_t, 4>, 7> mCounters{};
     };
 
     class OutboundQueueSet

@@ -63,7 +63,8 @@ tes3mp_native_bootstrap CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B 1 X:Y:Z NAV_
 This emits V77 with `actors auto`; startup validates actor/cell/resource bounds.
 Registrations must bind the new manifest.
 
-Append `chargen` after `NAV_SETTINGS` for V78; register two fresh profiles.
+Append `player-physics` after `NAV_SETTINGS` for V79 (capabilities 6/36/38); register
+two fresh profiles. `chargen` retains V78 migration. Do not upgrade existing saves.
 Winning choices and creation/completion use the configured safe point.
 Optional trailing `starting_items COUNT`: quoted-record/quantity/slot triples
 (`-1` unequipped, at most 64). Grants commit once at completion; omission stays empty.

@@ -9,6 +9,7 @@
 #include <vector>
 #include <span>
 #include <map>
+#include <functional>
 #include <components/esm/refid.hpp>
 #include <components/esm3/objectstate.hpp>
 #include "melee_animation.hpp"
@@ -48,6 +49,11 @@ namespace TES3MP::Native
         bool mDrowning = false;
         uint8_t mJumpFlags = 0; // Stock ForceJump / ForceMoveJump.
         float mLandingFall = 0; // Candidate-only landing consequence, never replayed on restore.
+        std::array<float, 3> mInertia{}, mLastStuckPosition{};
+        float mFallHeight = 0, mBreath = 0;
+        uint32_t mStuckFrames = 0;
+        bool mSlope = false, mWalkingOnWater = false;
+        float mFatigueCost = 0; // Candidate-only consequence, owned by the gameplay transaction.
     };
     struct ActorMovement
     {
@@ -64,6 +70,7 @@ namespace TES3MP::Native
         bool jumpRequested = false;
         float airControl = 1;
         std::optional<uint8_t> jumpFlags; // Trusted script result; absence retains committed flags.
+        float xyScale = 1;
     };
     struct DynamicActorBody
     {
@@ -72,6 +79,7 @@ namespace TES3MP::Native
         std::array<float, 3> position{};
         float yaw = 0;
         ESM::RefId cell;
+        std::shared_ptr<const ESM::NPC> playerBody;
     };
     struct ActorSceneWorld
     {
@@ -100,6 +108,10 @@ namespace TES3MP::Native
         std::unique_ptr<InteriorActorScene> mNeighbor;
         std::vector<std::unique_ptr<InteriorActorScene>> mScenery;
         std::vector<ESM::RefId> mGeometryDemand;
+        // Player frames share regional collision without entering NPC AI indices.
+        std::vector<std::unique_ptr<InteriorActorScene>> mPlayers;
+        std::vector<DynamicActorBody> mPlayerBindings;
+        std::vector<std::vector<char>> mUnloadedPlayerImages;
         InteriorActorScene(Loadout& loadout, std::span<const ESM::RefId> cells, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation,
             std::span<const uint64_t> neighbors, Impl* sharedParent,
@@ -107,6 +119,7 @@ namespace TES3MP::Native
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
             bindAnimationSources(ESM::RefId actor, const ESM::NPC* playerBody = nullptr);
     public:
+        class Prepared;
         InteriorActorScene(Loadout& loadout, const std::string& cell, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation);
         // V20: one interior or a fixed, contiguous exterior processing neighborhood
@@ -130,6 +143,14 @@ namespace TES3MP::Native
         InteriorActorScene& forActor(uint64_t actor);
         const InteriorActorScene& forActor(uint64_t actor) const;
         const InteriorActorScene& forCell(ESM::RefId cell) const;
+        void bindPlayers(Loadout& loadout, std::span<const DynamicActorBody> players);
+        InteriorActorScene& forPlayer(uint64_t actor);
+        float playerMovementScale(uint64_t actor) const;
+        const InteriorActorScene& forPlayer(uint64_t actor) const;
+        bool hasPlayer(uint64_t actor) const noexcept;
+        void copyPlayersTo(Loadout&, InteriorActorScene&) const;
+        void withPlayerHulls(std::span<const std::pair<uint64_t, const Prepared*>> frames,
+            const std::function<void()>& operation);
         // Both scenes are detached from the host during preparation. Commit can
         // install the complete collision membership without allocating.
         void installActorSet(InteriorActorScene& candidate) noexcept;
@@ -239,6 +260,9 @@ namespace TES3MP::Native
         std::unique_ptr<Prepared> prepareNavigation(const ActorMovement& movement,
             std::span<const ActorSceneDoor> doors = {},
             std::optional<std::array<float, 3>> destination = {});
+        std::unique_ptr<Prepared> prepareControlled(const ActorMovement& movement,
+            const std::array<float, 3>& axes, float pitch, float yaw,
+            std::span<const ActorSceneDoor> doors = {});
         void prepareNeighborNavigation(Prepared& prepared, float speed,
             std::span<const ActorSceneDoor> doors,
             std::optional<std::array<float, 3>> destination);

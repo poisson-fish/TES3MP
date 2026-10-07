@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <mutex>
+#include <chrono>
 
 #include "ptrholder.hpp"
 
@@ -22,6 +23,7 @@ namespace Resource
 
 namespace MWPhysics
 {
+    struct ActorFrameData;
     class PhysicsTaskScheduler;
 
     class Actor final : public PtrHolder
@@ -63,6 +65,8 @@ namespace MWPhysics
          * to account for e.g. scripted movements
          */
         void setSimulationPosition(const osg::Vec3f& position);
+        void installPredictionFrame(const ActorFrameData&, bool discontinuity);
+        osg::Vec3f getCollisionOffset() const { return getScaledMeshTranslation(); }
 
         void updateCollisionObjectPosition();
 
@@ -176,6 +180,8 @@ namespace MWPhysics
 
         osg::Vec3f mScale;
         osg::Vec3f mPositionOffset;
+        osg::Vec3f mPredictionOffset;
+        std::chrono::steady_clock::time_point mPredictionCorrectionTime;
         bool mSkipSimulation = true;
         mutable std::mutex mPositionMutex;
 

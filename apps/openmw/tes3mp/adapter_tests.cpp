@@ -5,6 +5,7 @@
 #include "player_profile_manager.hpp"
 #include "providers.hpp"
 #include "remote_motion.hpp"
+#include <tes3mp/client_locomotion.hpp>
 
 #include <array>
 #include <cmath>
@@ -1093,6 +1094,7 @@ void chargenInstallation()
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+
     // Each player's completion can commit before or after its peer's. All
     // retained images must install even when movement has advanced far ahead.
     for (const uint64_t completion : {2u, 3u}) for (const unsigned order : {0u, 1u, 2u})
@@ -1218,6 +1220,8 @@ void remoteLocomotionCoordinates()
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    for (double pitch : {-.5, -.1, .1, .5})
+        require(std::abs(openMWRadiansFromNetwork(networkTurnFromOpenMW(pitch)) - pitch) < 1e-8);
     const auto cell = CellId::interior(value<CellSpaceId>(7));
     const auto zero = Turn32::fromValue(0);
     constexpr std::array walk{RemoteLocomotionAnimation::WalkForward, RemoteLocomotionAnimation::WalkBack,
@@ -1288,6 +1292,54 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "player-physics")
+    {
+        const auto now = [](uint64_t ns) { return MonotonicInstant::fromNanoseconds(ns); };
+        const auto zero = Turn32::fromValue(0);
+        const LocomotionIntent held(LocomotionMode::Run, zero, LinearVelocity3(0, 0, 0), {}, {},
+            PlayerMovementControls{1024, 0, 0, zero, false});
+        const LocomotionIntent stopped(LocomotionMode::Walk, zero, LinearVelocity3(0, 0, 0), {}, {}, PlayerMovementControls{});
+        MotionIntentTracker tracker;
+        tracker.sample(held, now(0));
+        require(tracker.next({0, 0, 0}) == held);
+        require(tracker.markQueued(value<CommandSequence>(1), held, now(0)));
+        tracker.sample(stopped, now(10'000'000));
+        require(!tracker.next({0, 0, 0})); // Multiple render samples cannot buy replay time.
+        tracker.sample(held, now(33'333'334));
+        require(tracker.next({0, 0, 0}) == held); // Heartbeat proceeds while acknowledgements are delayed.
+        require(tracker.markQueued(value<CommandSequence>(2), held, now(33'333'334)));
+        tracker.sample(stopped, now(66'666'668));
+        require(tracker.next({0, 0, 0}) == stopped);
+        ClientLocomotionHistory history;
+        require(history.retain(value<CommandSequence>(1), PlayerLocomotionInput(
+            value<LocomotionInputTick>(1), value<LocomotionInputSequence>(1), held)));
+        require(history.retain(value<CommandSequence>(2), PlayerLocomotionInput(
+            value<LocomotionInputTick>(2), value<LocomotionInputSequence>(2), stopped)));
+        PlayerPhysicsBaseline physics;
+        physics.inertia = {1, 2, 3}; physics.grounded = true; physics.consumedCommand = 1;
+        const auto baseline = remoteSample(4, 4, 1024);
+        const auto replay = history.reconcile(baseline, value<CommandSequence>(1), false, physics);
+        require(replay.root == baseline.transform() && replay.physics == physics
+            && replay.physicsReplay.size() == 1 && replay.physicsReplay.front().intent() == stopped);
+        const auto reset = history.reconcile(remoteSample(5, 5, 4096, 0, 2), std::nullopt, false, physics);
+        require(reset.hardDiscontinuity && reset.physicsReplay.empty() && history.size() == 0);
+        tracker.clear(); tracker.sample(stopped, now(66'666'668));
+        require(tracker.next({0, 0, 0}) == stopped);
+        require(tracker.markQueued(value<CommandSequence>(3), stopped, now(66'666'668)));
+        const LocomotionIntent jump(LocomotionMode::Walk, zero, LinearVelocity3(0,0,0), {}, {},
+            PlayerMovementControls{0, 0, 0, zero, true});
+        tracker.sample(jump, now(70'000'000));
+        tracker.sample(stopped, now(100'000'002));
+        const auto pulse = tracker.next({0,0,0});
+        require(pulse && pulse->controls()->jump); // A short press survives the send cadence.
+        require(tracker.markQueued(value<CommandSequence>(4), *pulse, now(100'000'002)));
+        tracker.sample(stopped, now(133'333'336));
+        require(tracker.next({0,0,0})->controls()->jump); // Loss repeats the edge until the solver acknowledges it.
+        tracker.observeAcknowledgement(value<CommandSequence>(4), now(140'000'000));
+        require(tracker.next({0,0,0}) == stopped);
+        std::cout << "PASS player-physics controls and replay history\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "remote-locomotion-coordinates")
     {
         remoteLocomotionCoordinates(); return 0;
