@@ -5,6 +5,7 @@
 #include <components/esm3/globalscript.hpp>
 #include <components/esm3/loadglob.hpp>
 #include <components/interpreter/program.hpp>
+#include <span>
 
 namespace ESM { class Script; }
 namespace Interpreter { struct ExecutionTrace; }
@@ -14,8 +15,10 @@ namespace MWScript
 {
     struct ExecutionContext;
     class ReferenceResolver;
-    // Context-free subset of the stock compiler/interpreter. Callers supply
-    // explicitly owned globals and stage the returned state in their transaction.
+    class ScriptState;
+    struct GlobalScriptDesc;
+    // Bounded subset of the stock compiler/interpreter. Callers supply
+    // explicitly owned globals/banks and stage the returned state in their transaction.
     // No player, reference lookup, Environment, UI or script-manager fallback.
     class WorldScript
     {
@@ -40,22 +43,27 @@ namespace MWScript
             std::vector<std::string> presentation;
         };
 
-        WorldScript(const ESM::Script& script, std::vector<ESM::Global> ownedGlobals);
+        WorldScript(const ESM::Script& script, std::vector<ESM::Global> ownedGlobals,
+            std::span<const ESM::Script> bank = {});
         const ESM::RefId& id() const { return mId; }
+        const Compiler::Locals& declarations() const { return mDeclarations; }
+        bool bankCapable() const { return mBank; }
         State initial() const;
         void validate(const State& state) const;
         Invocation execute(const State& before, Interpreter::ExecutionTrace* trace = nullptr) const;
         Invocation execute(const State& before, const ExecutionContext& execution,
             const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-            Interpreter::ExecutionTrace* trace = nullptr) const;
+            Interpreter::ExecutionTrace* trace = nullptr, ScriptState* bank = nullptr,
+            GlobalScriptDesc* caller = nullptr) const;
 
     private:
         Invocation executeImpl(const State&, Interpreter::ExecutionTrace*, const ExecutionContext*,
-            const MWWorld::ESMStore*, const ReferenceResolver*) const;
+            const MWWorld::ESMStore*, const ReferenceResolver*, ScriptState*, GlobalScriptDesc*) const;
         ESM::RefId mId;
         Compiler::Locals mDeclarations;
         Interpreter::Program mProgram;
         std::vector<ESM::Global> mGlobals;
+        bool mBank = false;
     };
 }
 

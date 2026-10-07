@@ -2,16 +2,14 @@
 
 ## Working loop
 
-1. Read [CURRENT](CURRENT.md), this file, [README](README.md), active [PLAN](PLAN.md);
-   consult [DECISIONS](DECISIONS.md) for boundary/persistence changes.
-2. Code/tests/`git status` establish behavior; consult history/retired documents only for gaps.
-3. Bounded slices: one writer, preserved migration, shared handlers/checks/dependencies. No additional plan.
+1. Read [CURRENT](CURRENT.md), [DEVELOPMENT](DEVELOPMENT.md), [README](README.md) and active [PLAN](PLAN.md); consult [DECISIONS](DECISIONS.md) for boundaries/persistence.
+2. Use code/tests/`git status`; inspect history only for unanswered questions.
+3. Preserve one writer/migration; share handlers/checks/dependencies.
 4. Run the smallest affected check; fix/rerun failures.
-5. Review diffs; update CURRENT's behavior/limitations/evidence and consequential decisions.
-   Commit when authorized; report executed checks only.
+5. Review diffs; update CURRENT evidence/limitations and consequential DECISIONS.
+6. Commit when authorized; report executed checks only.
 
-Measurements/logs belong in ignored `build/`. Never track assets, credentials/tokens,
-saves or machine-local content paths. Git archives development.
+Use ignored `build/` for evidence. Never track assets, credentials, saves or local content paths.
 
 ## Dependency and migration rules
 
@@ -31,8 +29,8 @@ Update touched proof/JSON inputs. Repair whole-baseline provenance/compare patch
 
 ## Narrow verification
 
-Broad suites/gates/baselines require requested scope. Log to `build/logs`; inspect
-exit codes/short tails. Source-contract failures report compact mismatches, never source files.
+Broad gates require requested scope. Log to `build/logs`; inspect exits/short tails.
+Source-contract failures report mismatches, never source files.
 
 Documentation checks, separately; stop on failure:
 
@@ -43,7 +41,7 @@ python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTest
 python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTests.test_active_local_links_resolve *> build/logs/docs-links.log
 ```
 
-Build the owning C++ target/dependencies in an existing tree; run one executable/filter,
+Build owning C++ targets/dependencies in an existing tree. Run one filter;
 never aggregate `_tests_run`. Update CURRENT evidence.
 
 NPC playtests, optional stock navigation:
@@ -63,11 +61,14 @@ Optional trailing `starting_items COUNT`: quoted-record/quantity/slot triples
 Policy changes require fresh campaigns; scripted rewards await M5.
 Fresh V80 bootstrap: append `shared_script RECORD globals COUNT GLOBAL...` after `player-physics`
 (0–16 globals); validate winning content/ownership before publication. Omission retains V79.
-V81/V82 descriptors also require `personal_scripts COUNT story ID script "RECORD" globals COUNT GLOBAL...`
-(1–8 stories, mirrored per character). Native trusted calls stage source-free core
-invocations in prepared host ticks. Fresh V82 schedules each established online character/story
-once per host tick; offline/skipped ticks never catch up. Markers recover with gameplay;
-V81 remains trusted-call-only. Personal output delivery stays closed. Bootstrap still emits V80.
+V81/V82 require `personal_scripts COUNT story ID script "RECORD" globals COUNT GLOBAL...`
+(1–8 stories mirrored/character). Trusted source-free calls stage in host ticks.
+V82 schedules online established characters/stories once/tick, without catch-up;
+markers recover with gameplay. V81 stays trusted-only. V83 uses `story ID scripts COUNT script "RECORD" running 0|1 ... globals COUNT GLOBAL...`:
+1–4 members/story, ≤16 mirrored instances total. Admission order governs one visit/member/tick;
+StartScript enables later members, StopScript retains locals. One global writer/story;
+bank locals/flags/ordinals/markers join gameplay recovery. Fresh campaigns only.
+Personal output stays closed; bootstrap emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.
@@ -79,12 +80,8 @@ Wrappers `protocol`, `server-logic`, `adapter-tests`, `contracts`, `standalone` 
 groups; `baseline`, `checks`, `full`, unfiltered unittest discovery and default
 standalone presets are not narrow defaults. Linux/macOS presets: root CMakePresets.json.
 
-Record bounded synthetic/loadout/live evidence. Captures prove exercised paths; mod data is external.
-
 ## Documentation contract
 
-Keep exactly five active Markdown files under `docs/vnext`:
-README (vision), CURRENT (state/evidence/next action, ≤850 words), PLAN (sole roadmap,
-≤1,500), DEVELOPMENT (workflow), DECISIONS (constraints/proposals).
-Combined ceiling: 5,000 words; dependency proofs exempt. Replace stale handoffs,
-preserving links/evidence. No duplicate trackers/plans/diaries/reports.
+Five active files: README, CURRENT (≤850 words), PLAN (sole roadmap, ≤1,500),
+DEVELOPMENT, DECISIONS; combined ≤5,000. Dependency proofs are exempt.
+Replace handoffs; keep links/evidence. No duplicate trackers/plans/diaries/reports.

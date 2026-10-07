@@ -5591,7 +5591,8 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool personalScheduling = effectFamily == "personal-scheduling";
+        const bool personalBanks = effectFamily == "script-banks";
+        const bool personalScheduling = personalBanks || effectFamily == "personal-scheduling";
         const bool personalScript = personalScheduling || effectFamily == "personal-state";
         const bool sharedScript = personalScript || effectFamily == "shared-script";
         const bool playerPhysics = sharedScript || effectFamily == "player-physics";
@@ -6275,6 +6276,19 @@ namespace TES3MP::Native::Testing
                         + std::string(stall ? "while ( 1 )\nendwhile\n" : "") + "end " + name + "\n";
                     out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
                 }
+                if (personalBanks)
+                    for (const auto& [name, body] : std::vector<std::pair<std::string, std::string>>{
+                        {"ledger_x73", "set calls to calls + 1\nset ledger_x73.token to token + 1\n"
+                            "set relay_q19.calls to relay_q19.calls + 5\nset relay_q19.phase to relay_q19.phase + 0.25\n"
+                            "if ( calls != 2 )\nStartScript relay_q19\nendif\n"
+                            "set ambient_counter_83 to ambient_counter_83 + 1\nMessageBox \"Private ledger.\""},
+                        {"relay_q19", "set calls to calls + 1\nset ledger_x73.token to ledger_x73.token + 2\n"
+                            "set ambient_counter_83 to ambient_counter_83 + 10\nStopScript relay_q19\nMessageBox \"Private relay.\""}})
+                    {
+                        ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId(name);
+                        script.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n" + body + "\nend " + name;
+                        out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
+                    }
             }
             if (encounterProfile == "vanilla-multi-loop")
             {
@@ -9174,7 +9188,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (personalScheduling ? "native-inventory-82\nmanifest " : personalScript ? "native-inventory-81\nmanifest " : sharedScript ? "native-inventory-80\nmanifest " : playerPhysics ? "native-inventory-79\nmanifest " : characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (personalBanks ? "native-inventory-83\nmanifest " : personalScheduling ? "native-inventory-82\nmanifest " : personalScript ? "native-inventory-81\nmanifest " : sharedScript ? "native-inventory-80\nmanifest " : playerPhysics ? "native-inventory-79\nmanifest " : characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -9208,7 +9222,9 @@ namespace TES3MP::Native::Testing
             if (lifecycle) out << "respawn " << std::dec << (playerLives ? 20 : boundEquipment ? 90 : 3) << "\n";
             if (characterCreation) out << "starting_items 1\n\"common_shirt_01\" 1 8\n";
             if (sharedScript) out << "shared_script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\"\n";
-            if (personalScript) out << "personal_scripts 2 story 91 script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\" "
+            if (personalBanks) out << "personal_scripts 2 story 91 scripts 2 script \"ledger_x73\" running 1 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\" "
+                "story 92 scripts 2 script \"ledger_x73\" running 1 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\"\n";
+            else if (personalScript) out << "personal_scripts 2 story 91 script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\" "
                 "story 92 script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\"\n";
         }
         if (playerCastLifecycle)
@@ -9391,7 +9407,24 @@ namespace TES3MP::Native::Testing
                     std::vector<uint64_t> result;
                     for (const auto& entry : values)
                     {
-                        require(entry.runtime.runtime.script.mLocals.mVariables.front().second.getInteger() == entry.runtime.tick
+                        if (personalBanks)
+                        {
+                            const auto local = [](const auto& value, std::string_view name) {
+                                for (const auto& [key, number] : value.runtime.script.mLocals.mVariables)
+                                    if (key == name) return number.getFloat();
+                                throw std::runtime_error("Missing bank local");
+                            };
+                            const auto n = entry.runtime.tick;
+                            const auto relay = n - (n >= 2 ? 1 : 0);
+                            require(entry.members.size() == 1 && entry.members[0].tick == relay
+                                && local(entry.runtime, "calls") == n && local(entry.runtime, "token") == n + 2 * relay
+                                && local(entry.members[0], "calls") == 5 * n + relay
+                                && local(entry.members[0], "phase") == .25f * n
+                                && entry.runtime.runtime.globals.front().mValue.getInteger() == n + 10 * relay
+                                && entry.runtime.runtime.script.mRunning && !entry.members[0].runtime.script.mRunning,
+                                "Host bank lost typed/self locals, running flags or canonical globals");
+                        }
+                        else require(entry.runtime.runtime.script.mLocals.mVariables.front().second.getInteger() == entry.runtime.tick
                             && entry.runtime.runtime.globals.front().mValue.getInteger() == entry.runtime.tick,
                             "Personal host cursors/globals/locals diverged");
                         result.push_back(entry.runtime.tick);
@@ -9476,7 +9509,13 @@ namespace TES3MP::Native::Testing
                     std::ifstream input(descriptor);
                     const std::string text((std::istreambuf_iterator<char>(input)), {});
                     auto trustedText = text;
-                    trustedText.replace(0, std::string("native-inventory-82").size(), "native-inventory-81");
+                    trustedText.replace(0, std::string("native-inventory-82").size(), personalBanks ? "native-inventory-82" : "native-inventory-81");
+                    if (personalBanks)
+                    {
+                        trustedText.erase(trustedText.find("personal_scripts"));
+                        trustedText += "personal_scripts 2 story 91 script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\" "
+                            "story 92 script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\"\n";
+                    }
                     const auto trustedDescriptor = scratch / "v81-trusted.txt";
                     { std::ofstream out(trustedDescriptor); out << trustedText; }
                     InventoryHost trusted(trustedDescriptor, manifest, *registry, *crypto, {});
@@ -9488,8 +9527,17 @@ namespace TES3MP::Native::Testing
                         require(rejected, "Personal scheduling silently upgraded or downgraded");
                     }
                     auto stalledText = text;
-                    const auto lastScript = stalledText.rfind("ambient_pulse_83");
-                    stalledText.replace(lastScript, std::string("ambient_pulse_83").size(), "ambient_stall_83");
+                    if (personalBanks)
+                    {
+                        const auto lastStory = stalledText.find("story 92 scripts 2");
+                        stalledText.replace(lastStory, std::string("story 92 scripts 2").size(), "story 92 scripts 3");
+                        stalledText.insert(stalledText.find("globals", lastStory), "script \"ambient_stall_83\" running 1 ");
+                    }
+                    else
+                    {
+                        const auto lastScript = stalledText.rfind("ambient_pulse_83");
+                        stalledText.replace(lastScript, std::string("ambient_pulse_83").size(), "ambient_stall_83");
+                    }
                     const auto stalledDescriptor = scratch / "scheduled-stalled.txt";
                     { std::ofstream out(stalledDescriptor); out << stalledText; }
                     InventoryHost stalled(stalledDescriptor, manifest, *registry, *crypto, {});
@@ -9507,7 +9555,26 @@ namespace TES3MP::Native::Testing
                     catch (const std::exception&) { failed = true; }
                     require(failed && image(stalledNative) == stalledBefore,
                         "Late personal scheduler failure leaked earlier scripts/gameplay");
-                    std::cout << "personal scheduling host: eligible characters/stories, atomic retry/stale/late failure, "
+                    if (personalBanks)
+                    {
+                        const auto prefix = text.substr(0, text.find("personal_scripts"));
+                        for (const std::string option : {"personal_scripts 1 story 91 scripts 0\n",
+                            "personal_scripts 1 story 91 scripts 5\n",
+                            "personal_scripts 1 story 91 scripts 2 script \"ledger_x73\" running 1 script \"ledger_x73\" running 0 globals 0\n",
+                            "personal_scripts 1 story 91 scripts 1 script \"ledger_x73\" running 2 globals 0\n",
+                            "personal_scripts 1 story 91 scripts 1 script \"missing\" running 1 globals 0\n",
+                            "personal_scripts 1 story 91 scripts 1 script \"ambient_pulse_83\" running 1 globals 1 \"gamehour\"\n"})
+                        {
+                            const auto invalidDescriptor = scratch / "invalid-bank.txt";
+                            { std::ofstream out(invalidDescriptor); out << prefix << option; }
+                            bool invalid = false;
+                            try { InventoryHost rejected(invalidDescriptor, manifest, *registry, *crypto, {}); }
+                            catch (const std::exception&) { invalid = true; }
+                            require(invalid && image(repaired.service()) == durable, "Malformed bank admission changed gameplay");
+                        }
+                    }
+                    std::cout << (personalBanks ? "script banks host: typed/self locals, running flags, canonical globals, admission bounds, "
+                        : "personal scheduling host: ") << "eligible characters/stories, atomic retry/stale/late failure, "
                         "offline/skipped ticks, silent installation/output, exact/uncertain physics recovery, V81 preserved\n";
                     return;
                 }

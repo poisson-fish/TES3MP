@@ -16,6 +16,8 @@ namespace MWScript
     namespace Misc
     {
         void installOpcodes(Interpreter::Interpreter& interpreter);
+        void registerScriptOpcodes(Compiler::Extensions& extensions);
+        void installScriptOpcodes(Interpreter::Interpreter& interpreter);
     }
 }
 

@@ -3,6 +3,7 @@
 #include "loadout.hpp"
 #include "world_script.hpp"
 #include <apps/openmw/mwworld/globals.hpp>
+#include <components/esm3/loadscpt.hpp>
 #include <algorithm>
 #include <array>
 #include <memory>
@@ -10,7 +11,8 @@
 namespace TES3MP::Native
 {
     inline std::shared_ptr<const SharedWorldScript> admitSharedWorldScript(const Loadout& loadout,
-        ESM::RefId id, std::span<const ESM::RefId> owned, CredentialCrypto& crypto)
+        ESM::RefId id, std::span<const ESM::RefId> owned, CredentialCrypto& crypto,
+        std::span<const ESM::Script> bank = {})
     {
         if (owned.size() > MWScript::WorldScript::MaximumGlobals)
             throw std::invalid_argument("Shared global ownership budget exceeded");
@@ -28,7 +30,7 @@ namespace TES3MP::Native
             if (!global) throw std::invalid_argument("Shared global absent from winning content");
             globals.push_back(*global);
         }
-        return std::make_shared<const SharedWorldScript>(*script, std::move(globals), loadout.contentFingerprint(), crypto);
+        return std::make_shared<const SharedWorldScript>(*script, std::move(globals), loadout.contentFingerprint(), crypto, bank);
     }
 }
 #endif

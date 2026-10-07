@@ -42,18 +42,23 @@ namespace TES3MP::Native
         };
 
         SharedWorldScript(const ESM::Script& script, std::vector<ESM::Global> globals,
-            std::string_view campaignContent, CredentialCrypto& crypto);
+            std::string_view campaignContent, CredentialCrypto& crypto, std::span<const ESM::Script> bank = {});
+        const Compiler::Locals& declarations() const { return mRuntime.declarations(); }
+        bool bankCapable() const { return mRuntime.bankCapable(); }
         State initial() const;
         std::vector<char> encode(const State& state) const;
         State restore(std::span<const char> image) const;
         Prepared prepare(const State& committed, uint64_t tick) const;
         Prepared prepare(const State& committed, const MWScript::ExecutionContext& execution,
             const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver) const;
+        Prepared prepareBank(const State&, const MWScript::ExecutionContext&, const MWWorld::ESMStore&,
+            const MWScript::ReferenceResolver&, MWScript::ScriptState&, MWScript::GlobalScriptDesc&) const;
         Result transact(State& committed, uint64_t tick, const DurableSink& persist) const;
 
     private:
         Prepared prepareImpl(const State&, uint64_t, const MWScript::ExecutionContext*,
-            const MWWorld::ESMStore*, const MWScript::ReferenceResolver*) const;
+            const MWWorld::ESMStore*, const MWScript::ReferenceResolver*, MWScript::ScriptState* = nullptr,
+            MWScript::GlobalScriptDesc* = nullptr) const;
         MWScript::WorldScript mRuntime;
         CredentialDigest mIdentity;
     };

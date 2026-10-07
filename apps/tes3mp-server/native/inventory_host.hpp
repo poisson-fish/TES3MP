@@ -25,8 +25,13 @@ namespace TES3MP::Native
     // V80 opts a fresh V79 campaign into one context-free shared script:
     // `shared_script "record" globals COUNT "global"...` (0..16 owned globals).
     // Winning content and policy bind admission; one invocation per world tick
-    // joins actor/inventory durability. Presentation delivery remains pending.
+    // joins actor/inventory durability and committed ambient presentation.
     // Fresh campaign; desktop acceptance remains separate from headless checks.
+    // V81 admits trusted personal calls; V82 schedules online characters/stories.
+    // V83: personal_scripts COUNT story ID scripts COUNT script "record" running 0|1 ...
+    // globals COUNT "global"...; 1..4 members/story, 16 mirrored instances total.
+    // Ordered bank locals/running flags/ordinals and one global writer/story
+    // join gameplay durability. Prior versions retain their single-script layouts.
     // V69 uses stock intervention selection with explicit player context and bound
     // destinations, stock object reach, Target/mixed Lock/Open and death-owned
     // soul capture. It retains V68 fields with a new discriminator; fresh campaign.

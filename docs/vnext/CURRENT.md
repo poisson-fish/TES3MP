@@ -1,6 +1,6 @@
 # Current state and next action
 
-**Active: M5 [PLAN.md](PLAN.md), cross-script context. M4 closed, 2026-10-06.**
+**Active: M5 [PLAN.md](PLAN.md), native script banks. M4 closed, 2026-10-06.**
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
@@ -56,11 +56,6 @@ Resume bounds inactivity, retaining expiry/generation/replay rejection
 (`build/logs/respawn-same-cell-{client-build,locomotion}.log`). Operator accepted
 revival/Seyda Neen safe-point respawn, 2026-10-04; unarmed confirmed.
 
-**Inherited desktops:** `build/v76-collision-acceptance-10/result.json` (100ms delay,
-±25ms jitter, 10% loss), `build/spell-v74-acceptance-23/result.json`,
-`build/combat-acceptance-16/result.json`.
-[Stock comparisons](../../scripts/native_spell_presentation_capture.py) prove dispatch only.
-
 **Exterior trace:** `build/logs/seyda-six-actors.log`: six actors/nine interiors.
 Single-cell preview disables travel. Excluded scripts/scripted inventory require M5;
 restore only proven content.
@@ -105,9 +100,6 @@ Fresh campaigns require `player-physics`; V78 retains migration; movement skills
 128-input saturation waits/retries; backpressure/adapter passed.
 Clients quit (0); combat/death/loot/respawn retained. Abort resolved; reopen on recurrence.
 
-**M4 closed, 2026-10-06:** accepted two-client/NPC melee/ranged/magic, vanilla/TR gear,
-impairment, interruption/death/loot/respawn and recovery/convergence.
-
 **M5 shared execution:** [runtime](../../apps/tes3mp-server/native/world_script.hpp)
 stock compiler/core opcodes, owned globals, staged locals/messages,
 committed/deferred/rejected outcomes, bound GSCR/GLOB recovery.
@@ -151,8 +143,15 @@ future-marker and V81 upgrade/downgrade rejection.
 StartScript/StopScript/ScriptRunning; ≤64 locals/128-byte names. Targets reject.
 Synthetic `build/logs/m5-cross-script-{context,rollback,stock,lookup-regression}.log`:
 character/story isolation, identity/bounds/waits, late-failure/durability rollback/retry,
-stock GSCR locals/running recovery and stock callers. V82 single-script admission remains.
+stock GSCR locals/running recovery and stock callers. V81/V82 retain single-script admission.
 
-**Next:** wire native multi-script admission/state/scheduling/durability, then dialogue
+**V83 native banks:** 1–4 scripts/story, ≤16 mirrored instances. Admission order;
+StartScript enables later members, StopScript retains locals. Character/story globals,
+typed/self locals, running flags and member ordinals commit with gameplay/markers.
+Synthetic `build/logs/m5-script-banks-{state,host-05,legacy-state,legacy-host,trusted-host,shared}.log`:
+late rejection/defer/rollback/retry/stale, offline/skipped ticks, stopped-state and
+exact/uncertain recovery; V81/V82 preserved; incompatible policies reject.
+
+**Next:** dialogue
 ([M5 contract](DECISIONS.md#m5-implementation-contract)). Personal output delivery,
 physical-reference operations and NPC restoration remain closed.

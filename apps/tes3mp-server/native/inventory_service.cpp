@@ -5520,13 +5520,16 @@ namespace TES3MP::Native
         const auto& before = transaction->personalScripts ? transaction->personalScripts->state : *mPersonalScriptState;
         if (transaction->personalInvocations >= PersonalScripts::MaximumInvocationsPerTransaction
             && std::ranges::none_of(before, [&](const auto& entry) { return entry.last == execution; })) return rejected;
-        auto prepared = mBinding.mPersonalScripts->prepare(before, execution, mRuntime.mStore, resolver);
+        auto prepared = mBinding.mPersonalScripts->prepare(before, execution, mRuntime.mStore, resolver,
+            PersonalScripts::MaximumInvocationsPerTransaction - transaction->personalInvocations);
         auto result = prepared.result;
         if (result.outcome != SharedWorldScript::Outcome::Committed)
             transaction->personalInvalid = true;
         else if (result.executed)
         {
-            ++transaction->personalInvocations;
+            transaction->personalInvocations += prepared.invocations;
+            if (transaction->personalInvocations > PersonalScripts::MaximumInvocationsPerTransaction)
+            { transaction->personalInvalid = true; return rejected; }
             transaction->personalScripts = std::move(prepared);
         }
         guard.finished = true;

@@ -1795,14 +1795,27 @@ namespace MWScript
             }
         };
 
-        void installOpcodes(Interpreter::Interpreter& interpreter)
+        void registerScriptOpcodes(Compiler::Extensions& extensions)
         {
-            interpreter.installSegment5<OpMenuMode>(Compiler::Misc::opcodeMenuMode);
-            interpreter.installSegment5<OpRandom>(Compiler::Misc::opcodeRandom);
+            extensions.registerFunction("scriptrunning", 'l', "c", Compiler::Misc::opcodeScriptRunning);
+            extensions.registerInstruction("startscript", "c", Compiler::Misc::opcodeStartScript,
+                Compiler::Misc::opcodeStartScriptExplicit);
+            extensions.registerInstruction("stopscript", "c", Compiler::Misc::opcodeStopScript);
+        }
+
+        void installScriptOpcodes(Interpreter::Interpreter& interpreter)
+        {
             interpreter.installSegment5<OpScriptRunning>(Compiler::Misc::opcodeScriptRunning);
             interpreter.installSegment5<OpStartScript<ImplicitRef>>(Compiler::Misc::opcodeStartScript);
             interpreter.installSegment5<OpStartScript<ExplicitRef>>(Compiler::Misc::opcodeStartScriptExplicit);
             interpreter.installSegment5<OpStopScript>(Compiler::Misc::opcodeStopScript);
+        }
+
+        void installOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpMenuMode>(Compiler::Misc::opcodeMenuMode);
+            interpreter.installSegment5<OpRandom>(Compiler::Misc::opcodeRandom);
+            installScriptOpcodes(interpreter);
             interpreter.installSegment5<OpGetSecondsPassed>(Compiler::Misc::opcodeGetSecondsPassed);
             interpreter.installSegment5<OpEnable<ImplicitRef>>(Compiler::Misc::opcodeEnable);
             interpreter.installSegment5<OpEnable<ExplicitRef>>(Compiler::Misc::opcodeEnableExplicit);

@@ -2,10 +2,14 @@
 
 #include "interpretercontext.hpp"
 #include "locals.hpp"
+#include "miscextensions.hpp"
+#include "scriptstate.hpp"
 
 #include <components/compiler/context.hpp>
 #include <components/compiler/errorhandler.hpp>
 #include <components/compiler/fileparser.hpp>
+#include <components/compiler/extensions.hpp>
+#include <components/compiler/quickfileparser.hpp>
 #include <components/compiler/exception.hpp>
 #include <components/compiler/scanner.hpp>
 #include <components/compiler/tokenloc.hpp>
@@ -47,7 +51,7 @@ namespace MWScript
         const ESM::Global* find(const std::vector<ESM::Global>& globals, std::string_view id)
         {
             const auto found = std::ranges::find_if(globals,
-                [&](const auto& global) { return Misc::StringUtils::ciEqual(global.mId.getRefIdString(), id); });
+                [&](const auto& global) { return ::Misc::StringUtils::ciEqual(global.mId.getRefIdString(), id); });
             return found == globals.end() ? nullptr : &*found;
         }
         class Context final : public InterpreterContext
@@ -74,8 +78,9 @@ namespace MWScript
             Context(Locals& locals, std::vector<ESM::Global>& globals, std::vector<std::string>& presentation)
                 : InterpreterContext(&locals, {}), mGlobals(globals), mPresentation(presentation) {}
             Context(Locals& locals, std::vector<ESM::Global>& globals, std::vector<std::string>& presentation,
-                const ExecutionContext& execution, const MWWorld::ESMStore& content, const ReferenceResolver& resolver)
-                : InterpreterContext(&locals, execution, content, resolver), mGlobals(globals), mPresentation(presentation) {}
+                const ExecutionContext& execution, const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
+                ScriptState* bank)
+                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank), mGlobals(globals), mPresentation(presentation) {}
 
             int getGlobalShort(std::string_view id) const override { return global(id).getInteger(); }
             int getGlobalLong(std::string_view id) const override { return global(id).getInteger(); }
@@ -108,24 +113,25 @@ namespace MWScript
             std::string_view getPCNextRank() const override { unavailable(); }
             int getPCBounty() const override { unavailable(); }
             std::string_view getCurrentCellName() const override { unavailable(); }
-            int getMemberShort(ESM::RefId, std::string_view, bool) const override { unavailable(); }
-            int getMemberLong(ESM::RefId, std::string_view, bool) const override { unavailable(); }
-            float getMemberFloat(ESM::RefId, std::string_view, bool) const override { unavailable(); }
-            void setMemberShort(ESM::RefId, std::string_view, int, bool) override { unavailable(); }
-            void setMemberLong(ESM::RefId, std::string_view, int, bool) override { unavailable(); }
-            void setMemberFloat(ESM::RefId, std::string_view, float, bool) override { unavailable(); }
         };
         class CompilerContext final : public Compiler::Context
         {
             const std::vector<ESM::Global>& mGlobals;
+            const std::vector<std::pair<ESM::RefId, Compiler::Locals>>& mMembers;
         public:
-            explicit CompilerContext(const std::vector<ESM::Global>& globals) : mGlobals(globals) {}
+            CompilerContext(const std::vector<ESM::Global>& globals,
+                const std::vector<std::pair<ESM::RefId, Compiler::Locals>>& members) : mGlobals(globals), mMembers(members) {}
             bool canDeclareLocals() const override { return true; }
             char getGlobalType(const std::string& id) const override
             { const auto* found = find(mGlobals, id); return found ? type(found->mValue) : ' '; }
-            std::pair<char, bool> getMemberType(const std::string&, const ESM::RefId&) const override
-            { return {' ', false}; }
-            bool isId(const ESM::RefId&) const override { return false; }
+            std::pair<char, bool> getMemberType(const std::string& name, const ESM::RefId& id) const override
+            {
+                for (const auto& [script, locals] : mMembers)
+                    if (script == id) return {locals.getType(name), false};
+                return {' ', false};
+            }
+            bool isId(const ESM::RefId& id) const override
+            { return std::ranges::any_of(mMembers, [&](const auto& entry) { return entry.first == id; }); }
         };
         class Errors final : public Compiler::ErrorHandler
         {
@@ -159,8 +165,9 @@ namespace MWScript
         }
     }
 
-    WorldScript::WorldScript(const ESM::Script& script, std::vector<ESM::Global> ownedGlobals)
-        : mId(script.mId), mGlobals(std::move(ownedGlobals))
+    WorldScript::WorldScript(const ESM::Script& script, std::vector<ESM::Global> ownedGlobals,
+        std::span<const ESM::Script> bank)
+        : mId(script.mId), mGlobals(std::move(ownedGlobals)), mBank(!bank.empty())
     {
         require(mId.is<ESM::StringRefId>(), "World script ID must be a content string");
         name(mId.getRefIdString());
@@ -176,14 +183,45 @@ namespace MWScript
             for (std::size_t j = 0; j < i; ++j)
                 require(global.mId != mGlobals[j].mId, "Duplicate world global ownership");
         }
-        CompilerContext context(mGlobals);
+        require(bank.size() <= 4, "Script bank exceeds bounds");
+        std::vector<std::pair<ESM::RefId, Compiler::Locals>> members;
+        CompilerContext context(mGlobals, members);
+        for (const auto& member : bank)
+        {
+            require(member.mId.is<ESM::StringRefId>(), "Invalid bank script identity");
+            name(member.mId.getRefIdString());
+            require(!member.mScriptText.empty() && member.mScriptText.size() <= MaximumSourceBytes
+                && member.mScriptText.find('\0') == std::string::npos, "Bank script source exceeds bounds");
+            require(std::ranges::none_of(members, [&](const auto& entry) { return entry.first == member.mId; }),
+                "Repeated bank script");
+            Compiler::Locals locals;
+            Errors declarations;
+            Compiler::QuickFileParser parser(declarations, context, locals);
+            std::istringstream source(member.mScriptText);
+            Compiler::Scanner scanner(declarations, source, nullptr);
+            scanner.scan(parser);
+            require(declarations.isGood(), "Invalid bank declarations");
+            size_t count = 0;
+            for (const char kind : {'s', 'l', 'f'})
+                for (const auto& local : std::as_const(locals).get(kind)) { name(local); ++count; }
+            require(count <= MaximumLocals, "Bank locals exceed bounds");
+            members.emplace_back(member.mId, std::move(locals));
+        }
+        require(!mBank || std::ranges::any_of(members, [&](const auto& entry) { return entry.first == mId; }),
+            "Caller lacks bank ownership");
+        Compiler::Extensions extensions;
+        if (mBank)
+        {
+            Misc::registerScriptOpcodes(extensions);
+            context.setExtensions(&extensions);
+        }
         Errors errors;
         // Stock compilation can warn and skip unknown instructions. Admission
         // must not turn an unsupported script into a successful no-op.
         errors.setWarningsMode(2);
         Compiler::FileParser parser(errors, context);
         std::istringstream source(script.mScriptText);
-        Compiler::Scanner scanner(errors, source, nullptr);
+        Compiler::Scanner scanner(errors, source, context.getExtensions());
         bool compiled = true;
         try { scanner.scan(parser); }
         catch (const Compiler::SourceException&) { compiled = false; }
@@ -220,7 +258,7 @@ namespace MWScript
 
     void WorldScript::validate(const State& state) const
     {
-        require(state.script.mId == mId && state.script.mRunning && state.script.mTargetId.empty()
+        require(state.script.mId == mId && (mBank || state.script.mRunning) && state.script.mTargetId.empty()
             && !state.script.mTargetRef.isSet(), "World script state/context mismatch");
         require(state.script.mLocals.mVariables.size() <= MaximumLocals, "World script locals exceed bounds");
         Locals::validateRestore(state.script.mLocals, mDeclarations);
@@ -234,28 +272,42 @@ namespace MWScript
     }
 
     WorldScript::Invocation WorldScript::execute(const State& before, Interpreter::ExecutionTrace* trace) const
-    { return executeImpl(before, trace, nullptr, nullptr, nullptr); }
+    { return executeImpl(before, trace, nullptr, nullptr, nullptr, nullptr, nullptr); }
 
     WorldScript::Invocation WorldScript::execute(const State& before, const ExecutionContext& execution,
-        const MWWorld::ESMStore& content, const ReferenceResolver& resolver, Interpreter::ExecutionTrace* trace) const
-    { return executeImpl(before, trace, &execution, &content, &resolver); }
+        const MWWorld::ESMStore& content, const ReferenceResolver& resolver, Interpreter::ExecutionTrace* trace,
+        ScriptState* bank, GlobalScriptDesc* caller) const
+    { return executeImpl(before, trace, &execution, &content, &resolver, bank, caller); }
 
     WorldScript::Invocation WorldScript::executeImpl(const State& before, Interpreter::ExecutionTrace* trace,
-        const ExecutionContext* execution, const MWWorld::ESMStore* content, const ReferenceResolver* resolver) const
+        const ExecutionContext* execution, const MWWorld::ESMStore* content, const ReferenceResolver* resolver,
+        ScriptState* bank, GlobalScriptDesc* caller) const
     {
         validate(before);
         Invocation result{before, {}};
-        auto locals = Locals::restore(before.script.mLocals, mId, mDeclarations);
+        require(mBank ? (execution && bank && caller) : (!bank && !caller), "Bank execution lacks staged ownership");
+        if (mBank)
+        {
+            const auto binding = bank->resolve(*execution, mId);
+            const auto* target = std::get_if<MWWorld::Ptr>(&caller->mTarget);
+            require(&binding.instance == caller && &binding.declarations == &mDeclarations
+                && caller->mLocals.getScriptId() == mId && caller->mRunning && before.script.mRunning
+                && target && target->isEmpty(), "Bank caller/target mismatch");
+        }
+        auto restored = Locals::restore(before.script.mLocals, mId, mDeclarations);
+        auto& locals = caller ? caller->mLocals : restored;
         auto context = execution
-            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver)
+            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank)
             : std::make_unique<Context>(locals, result.state.globals, result.presentation);
         Interpreter::Interpreter interpreter;
         Interpreter::installOpcodes(interpreter);
+        if (mBank) Misc::installScriptOpcodes(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
         interpreter.run(mProgram, *context, MaximumExecutedInstructions, trace);
         result.state.script.mLocals.mVariables.clear();
         require(locals.write(result.state.script.mLocals, mDeclarations), "World script locals unavailable");
+        if (caller) result.state.script.mRunning = caller->mRunning;
         validate(result.state);
         return result;
     }

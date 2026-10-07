@@ -101,8 +101,8 @@ namespace TES3MP::Native
     }
 
     SharedWorldScript::SharedWorldScript(const ESM::Script& script, std::vector<ESM::Global> globals,
-        std::string_view campaignContent, CredentialCrypto& crypto)
-        : mRuntime(script, std::move(globals))
+        std::string_view campaignContent, CredentialCrypto& crypto, std::span<const ESM::Script> bank)
+        : mRuntime(script, std::move(globals), bank)
     {
         require(!campaignContent.empty() && campaignContent.size() <= 256);
         // Bind source, ownership/defaults, limits and the content/campaign identity.
@@ -113,6 +113,11 @@ namespace TES3MP::Native
         };
         append("context-free-world-script-1;8192;2048;4096;64;16;128;8;256;32768");
         append(campaignContent); append(script.mScriptText);
+        if (!bank.empty())
+        {
+            append("owned-script-bank-1;4");
+            for (const auto& member : bank) { append(member.mId.getRefIdString()); append(member.mScriptText); }
+        }
         require(crypto.sha256(std::as_bytes(std::span(binding)), mIdentity));
     }
 
@@ -178,9 +183,18 @@ namespace TES3MP::Native
         const MWScript::ReferenceResolver& resolver) const
     { return prepareImpl(committed, execution.invocation, &execution, &content, &resolver); }
 
+    SharedWorldScript::Prepared SharedWorldScript::prepareBank(const State& committed,
+        const MWScript::ExecutionContext& execution, const MWWorld::ESMStore& content,
+        const MWScript::ReferenceResolver& resolver, MWScript::ScriptState& bank, MWScript::GlobalScriptDesc& caller) const
+    {
+        auto prepared = prepareImpl(committed, committed.tick + 1, &execution, &content, &resolver, &bank, &caller);
+        prepared.result.invocationTick = execution.invocation;
+        return prepared;
+    }
+
     SharedWorldScript::Prepared SharedWorldScript::prepareImpl(const State& committed, uint64_t tick,
         const MWScript::ExecutionContext* execution, const MWWorld::ESMStore* content,
-        const MWScript::ReferenceResolver* resolver) const
+        const MWScript::ReferenceResolver* resolver, MWScript::ScriptState* bank, MWScript::GlobalScriptDesc* caller) const
     {
         Prepared prepared;
         auto& result = prepared.result;
@@ -193,7 +207,7 @@ namespace TES3MP::Native
             if (tick && tick == committed.tick)
             { result.outcome = Outcome::Committed; return prepared; }
             require(tick && committed.tick != std::numeric_limits<uint64_t>::max() && tick == committed.tick + 1);
-            auto invocation = execution ? mRuntime.execute(committed.runtime, *execution, *content, *resolver, &result.trace)
+            auto invocation = execution ? mRuntime.execute(committed.runtime, *execution, *content, *resolver, &result.trace, bank, caller)
                 : mRuntime.execute(committed.runtime, &result.trace);
             prepared.state = {tick, std::move(invocation.state)};
             prepared.image = encode(prepared.state);

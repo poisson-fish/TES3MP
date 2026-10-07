@@ -198,6 +198,129 @@ namespace
         std::cout << "personal scheduling: active ownership, silent replay, offline/skipped ticks, event cursors, "
             "late failure rollback, bounded policy and exact/version-bound recovery\n";
     }
+    void scriptBanks(CredentialCrypto& crypto)
+    {
+        using Definition = PersonalScripts::Definition;
+        const auto id = [](std::string_view name) { return ESM::RefId::stringRefId(name); };
+        const auto records = [&](std::string suffix = "") {
+            std::vector<ESM::Script> scripts;
+            for (const auto& [name, body] : std::vector<std::pair<std::string, std::string>>{
+                {"ledger_x73", "set ledger_x73.calls to calls + 1\nset token to token + 1\n"
+                    "set relay_q19.calls to relay_q19.calls + 5\nset relay_q19.phase to relay_q19.phase + 0.25\n"
+                    "StartScript relay_q19\nStopScript ledger_x73\nset sharedpulse to sharedpulse + 1"},
+                {"relay_q19", "set calls to calls + 1\nset ledger_x73.token to ledger_x73.token + 2\n"
+                    "set sharedpulse to sharedpulse + 10\nStopScript relay_q19"},
+                {"clock_b41", "set calls to calls + 1\nif ( calls == 2 )\nStartScript ledger_x73\nendif\n" + suffix}})
+            {
+                ESM::Script record; record.blank(); record.mId = id(name);
+                record.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n" + body + "\nend " + name;
+                scripts.push_back(std::move(record));
+            }
+            return scripts;
+        };
+        const auto policy = [&](const std::vector<ESM::Script>& scripts) {
+            std::vector<std::shared_ptr<const SharedWorldScript>> programs;
+            for (const auto& record : scripts)
+                programs.push_back(std::make_shared<const SharedWorldScript>(record, globals(), "campaign-one", crypto, scripts));
+            Definition entry{11, 31, programs[0], {{programs[1], false}, {programs[2], true}}};
+            if (programs.size() == 4) entry.members.push_back({programs[3], true});
+            auto bob = entry; bob.character = 22;
+            auto other = entry; other.story = 32;
+            return std::vector{entry, bob, other};
+        };
+        const auto definitions = policy(records());
+        PersonalScripts runtime(7, definitions, crypto, true, true);
+        MWWorld::ESMStore content;
+        struct Resolver final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw MWScript::ScriptContextUnavailable(); }
+        } resolver;
+        auto state = runtime.initial(); const auto initial = runtime.encode(state);
+        const std::array<uint64_t, 1> alice{11}, bob{22};
+        auto first = runtime.prepareScheduled(state, 3, alice, content, resolver);
+        require(first.result.outcome == SharedWorldScript::Outcome::Committed && first.invocations == 6
+            && first.result.presentation.empty() && runtime.encode(state) == initial, "Bank preparation leaked state");
+        state.swap(first.state);
+        require(local(state[0].runtime, "calls") == 1 && local(state[0].runtime, "token") == 3
+            && local(state[0].members[0], "calls") == 6 && local(state[0].members[0], "phase") == .25
+            && !state[0].runtime.runtime.script.mRunning && !state[0].members[0].runtime.script.mRunning
+            && state[0].members[1].runtime.script.mRunning && state[0].runtime.runtime.globals[0].mValue.getInteger() == 11
+            && state[0].members[0].runtime.globals.empty() && state[1].last.invocation == 0
+            && local(state[2].runtime, "calls") == 1, "Bank locals/flags/globals crossed writers or lost self aliases");
+        const auto saved = runtime.encode(state);
+        require(!runtime.prepareScheduled(state, 3, alice, content, resolver).result.executed,
+            "Same-tick bank replayed");
+        PersonalScripts restarted(7, definitions, crypto, true, true);
+        state = restarted.restore(saved);
+        require(restarted.encode(state) == saved, "Bank recovery changed stock locals/running flags");
+        auto second = restarted.prepareScheduled(state, 20, alice, content, resolver);
+        require(second.invocations == 2 && second.state[0].runtime.tick == 1
+            && second.state[0].runtime.runtime.script.mRunning && second.state[0].scheduledTick == 20,
+            "Stopped bank member ran or restart caught up ticks");
+        auto third = restarted.prepareScheduled(second.state, 21, alice, content, resolver);
+        require(third.invocations == 6 && local(third.state[0].runtime, "calls") == 2
+            && local(third.state[0].members[0], "calls") == 12, "Restart reset locals or ran a member twice");
+        auto other = runtime.prepareScheduled(state, 4, bob, content, resolver);
+        require(other.invocations == 3 && other.state[0].last.invocation == 1
+            && other.state[1].last.invocation == 1, "Active bank ownership lost isolation");
+        require(!runtime.prepareScheduled(state, 10, {}, content, resolver).result.executed, "Offline banks ran");
+        auto stopped = definitions; stopped.resize(1); stopped[0].running = false; stopped[0].members.clear();
+        PersonalScripts dormant(7, stopped, crypto, true, true);
+        auto marker = dormant.prepareScheduled(dormant.initial(), 8, alice, content, resolver);
+        require(marker.result.executed && marker.invocations == 1 && marker.state[0].scheduledTick == 8
+            && !dormant.restore(marker.image)[0].runtime.runtime.script.mRunning
+            && marker.state[0].runtime.tick == 0, "Stopped bank failed to commit its bounded marker");
+        auto call = marker.state[0].last; ++call.invocation;
+        require(dormant.prepare(marker.state, call, content, resolver, 0).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Stopped bank bypassed the invocation budget");
+        auto receipt = dormant.prepare(marker.state, call, content, resolver, 1);
+        require(receipt.result.executed && receipt.invocations == 1 && receipt.state[0].runtime.tick == 0
+            && !dormant.prepare(receipt.state, call, content, resolver, 0).result.executed,
+            "Stopped receipt executed a script or charged an exact replay");
+        auto limited = runtime.initial()[0].last; limited.invocation = 1;
+        const auto saturated = runtime.prepare(runtime.initial(), limited, content, resolver, 2);
+        require(saturated.result.outcome == SharedWorldScript::Outcome::Rejected && saturated.state.empty()
+            && saturated.image.empty() && !saturated.result.executed, "Bank exceeded the remaining host budget");
+        for (const std::string suffix : {"StartScript foreign", "ledger_x73->StartScript relay_q19"})
+        {
+            PersonalScripts invalid(7, policy(records(suffix)), crypto, true, true);
+            const auto before = invalid.initial(); const auto bytes = invalid.encode(before);
+            auto failed = invalid.prepareScheduled(before, 1, alice, content, resolver);
+            require(failed.result.outcome == (suffix.starts_with("ledger") ? SharedWorldScript::Outcome::Deferred
+                    : SharedWorldScript::Outcome::Rejected)
+                && !failed.result.executed && failed.state.empty() && failed.image.empty() && failed.invocations == 0
+                && invalid.encode(before) == bytes, "Late bank rejection/wait retained locals/flags/globals");
+        }
+        auto malformed = state; malformed[0].members[0].tick = 99;
+        rejects([&] { runtime.encode(malformed); }, "Future member ordinal admitted");
+        for (size_t size : {size_t(0), saved.size() - 1, saved.size() + 1})
+        { auto bytes = saved; bytes.resize(size); rejects([&] { runtime.restore(bytes); }, "Malformed bank envelope admitted"); }
+        auto changed = definitions; changed[0].members[0].running = true;
+        PersonalScripts rebound(7, changed, crypto, true, true);
+        rejects([&] { rebound.restore(saved); }, "Bank running policy changed without a fresh campaign");
+        auto legacyProgram = std::make_shared<const SharedWorldScript>(pulse(), globals(), "campaign-one", crypto);
+        PersonalScripts legacy(7, {{11, 31, legacyProgram}}, crypto, true);
+        rejects([&] { legacy.restore(saved); }, "Bank state downgraded");
+        rejects([&] { runtime.restore(legacy.encode(legacy.initial())); }, "Single-script state upgraded");
+        auto duplicate = definitions; duplicate[0].members.push_back({duplicate[0].script, false});
+        rejects([&] { PersonalScripts invalid(7, duplicate, crypto, true, true); }, "Duplicate bank writer admitted");
+        auto maximumRecords = records();
+        ESM::Script meter; meter.blank(); meter.mId = id("meter_l93");
+        meter.mScriptText = "begin meter_l93\nlong calls\nset calls to calls + 1\nend meter_l93";
+        maximumRecords.push_back(std::move(meter));
+        auto full = policy(maximumRecords); full.push_back(full[0]); full.back().story = 33;
+        PersonalScripts bounded(7, full, crypto, true, true);
+        const auto maximum = bounded.prepareScheduled(bounded.initial(), 1, std::array<uint64_t, 2>{11, 22}, content, resolver);
+        require(maximum.invocations == PersonalScripts::MaximumInvocationsPerTransaction
+            && maximum.image.size() <= PersonalScripts::MaximumImageBytes,
+            "Maximum admitted bank exceeded transaction/image bounds");
+        full.push_back(full[0]); full.back().story = 35;
+        rejects([&] { PersonalScripts invalid(7, full, crypto, true, true); }, "Campaign bank budget exceeded");
+        std::cout << "script banks: typed/self locals, lifecycle/order, isolated globals, offline/skipped/replayed ticks, "
+            "late rejection/wait rollback, stopped markers, stock/version-bound recovery and budgets\n";
+    }
+
     void shared(CredentialCrypto& crypto)
     {
         SharedWorldScript runtime(pulse(), globals(), "campaign-one", crypto);
@@ -389,6 +512,7 @@ int main(int argc, char** argv)
         else if (filter == "admission") admission(*crypto);
         else if (filter == "personal") personal(*crypto);
         else if (filter == "personal-scheduling") personalScheduling(*crypto);
+        else if (filter == "script-banks") scriptBanks(*crypto);
         else throw std::invalid_argument("Unknown filter");
         std::cout << "PASS shared-world-script " << filter << '\n'; return 0;
     }

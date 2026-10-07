@@ -69,9 +69,16 @@ namespace TES3MP::Native
             std::vector<StartingRecord> startingItems;
             ESM::RefId sharedScript;
             std::vector<ESM::RefId> sharedGlobals;
-            struct PersonalRecord { uint64_t story; ESM::RefId script; std::vector<ESM::RefId> globals; };
+            struct PersonalRecord
+            {
+                uint64_t story;
+                ESM::RefId script;
+                std::vector<ESM::RefId> globals;
+                std::vector<std::pair<ESM::RefId, bool>> bank;
+            };
             std::vector<PersonalRecord> personalScripts;
             bool personalScheduling = false;
+            bool personalBanks = false;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -91,7 +98,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 82; ++candidate)
+            for (unsigned candidate = 3; candidate <= 83; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -326,15 +333,33 @@ namespace TES3MP::Native
                     if (!in || !count || count > PersonalScripts::MaximumInstances / 2)
                         throw std::invalid_argument("Personal story budget exceeded");
                     std::set<uint64_t> stories;
+                    size_t instances = 0;
                     for (size_t i = 0; i < count; ++i)
                     {
                         key("story"); uint64_t story = 0; in >> story;
                         if (!in || !story || !stories.insert(story).second)
                             throw std::invalid_argument("Personal story identity invalid or repeated");
-                        key("script"); auto script = record(); key("globals"); size_t globals = 0; in >> globals;
+                        Startup::PersonalRecord entry{story, {}, {}};
+                        if (descriptorVersion == 83)
+                        {
+                            key("scripts"); size_t scripts = 0; in >> scripts;
+                            if (!in || !scripts || scripts > PersonalScripts::MaximumScriptsPerBank
+                                || (instances += scripts * 2) > PersonalScripts::MaximumInstances)
+                                throw std::invalid_argument("Personal script bank budget exceeded");
+                            std::set<ESM::RefId> names;
+                            for (size_t j = 0; j < scripts; ++j)
+                            {
+                                key("script"); auto script = record(); key("running"); int running = -1; in >> running;
+                                if (!in || (running != 0 && running != 1) || !names.insert(script).second)
+                                    throw std::invalid_argument("Personal bank script or running flag invalid");
+                                entry.bank.emplace_back(script, running != 0);
+                            }
+                            entry.script = entry.bank.front().first;
+                        }
+                        else { key("script"); entry.script = record(); }
+                        key("globals"); size_t globals = 0; in >> globals;
                         if (!in || globals > MWScript::WorldScript::MaximumGlobals)
                             throw std::invalid_argument("Personal global budget exceeded");
-                        Startup::PersonalRecord entry{story, script, {}};
                         std::set<ESM::RefId> owned;
                         for (size_t j = 0; j < globals; ++j)
                         {
@@ -455,12 +480,14 @@ namespace TES3MP::Native
             for (const auto& entry : personalScripts)
             {
                 semantic << "personal-story:" << entry.story << ':' << entry.script << '\n';
+                for (const auto& [script, running] : entry.bank)
+                    semantic << "personal-member:" << script << ':' << running << '\n';
                 for (const auto& global : entry.globals) semantic << "personal-global:" << global << '\n';
             }
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,
-                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems), sharedScript, std::move(sharedGlobals), std::move(personalScripts), descriptorVersion == 82};
+                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems), sharedScript, std::move(sharedGlobals), std::move(personalScripts), descriptorVersion >= 82, descriptorVersion == 83};
         }
     }
     struct InventoryHost::Impl
@@ -1120,11 +1147,27 @@ namespace TES3MP::Native
                 std::vector<PersonalScripts::Definition> definitions;
                 for (const auto& entry : start.personalScripts)
                 {
-                    auto script = admitSharedWorldScript(loadout, entry.script, entry.globals, crypto);
-                    for (auto player : start.binding.mPlayers) definitions.push_back({player.value(), entry.story, script});
+                    std::vector<ESM::Script> records;
+                    for (const auto& [id, running] : entry.bank)
+                    {
+                        const auto* record = loadout.store().get<ESM::Script>().search(id);
+                        if (!record) throw std::invalid_argument("Personal bank script absent from winning content");
+                        records.push_back(*record);
+                    }
+                    auto script = admitSharedWorldScript(loadout, entry.script, entry.globals, crypto, records);
+                    PersonalScripts::Definition definition{0, entry.story, script};
+                    if (start.personalBanks)
+                    {
+                        definition.running = entry.bank.front().second;
+                        for (size_t i = 1; i < entry.bank.size(); ++i)
+                            definition.members.push_back({admitSharedWorldScript(loadout, entry.bank[i].first,
+                                entry.globals, crypto, records), entry.bank[i].second});
+                    }
+                    for (auto player : start.binding.mPlayers)
+                    { definition.character = player.value(); definitions.push_back(definition); }
                 }
                 start.binding.mPersonalScripts = std::make_shared<const PersonalScripts>(campaign,
-                    std::move(definitions), crypto, start.personalScheduling);
+                    std::move(definitions), crypto, start.personalScheduling, start.personalBanks);
             }
             if (start.binding.mSummons)
             {

@@ -6,14 +6,15 @@
       "id": "M5-002",
       "slice": "explicit script execution context and scoped reference/script-state lookup",
       "owner": "OpenMW MWScript InterpreterContext and stock reference callers",
-      "purpose": "Carry bounded stable campaign/story/physical-scope/character/source/life/invocation/causal-event identities through explicit and implicit reference lookup. Scoped callers supply an authoritative resolver and staged character stats; unavailable dependencies propagate separately from absence, stale references reject, and unprovided services reject instead of falling back to Environment. Bound external names before RefId allocation. Personal text uses explicit character/content/stats; stock and detached callers remain supported. An optional explicitly owned staged script bank routes stock typed cross-script members and StartScript/StopScript/ScriptRunning through the same complete context. Names, declarations, local shapes and values validate before writes. Lifecycle calls retain locals and change only staged source-free running flags; no inline execution, lazy admission or physical targets. Filtered engine-seam checks cover ownership, waits, late failure/durability rollback, retry and stock GSCR recovery. Live multi-script campaign admission/scheduling remains closed.",
+      "purpose": "Carry bounded stable campaign/story/physical-scope/character/source/life/invocation/causal-event identities through explicit and implicit reference lookup. Scoped callers supply an authoritative resolver and staged character stats; unavailable dependencies propagate separately from absence, stale references reject, and unprovided services reject instead of falling back to Environment. Bound external names before RefId allocation. Personal text uses explicit character/content/stats; stock and detached callers remain supported. An optional explicitly owned staged script bank routes stock typed cross-script members and StartScript/StopScript/ScriptRunning through the same complete context. Names, declarations, local shapes and values validate before writes. Lifecycle calls retain locals and change only staged source-free running flags; no inline execution, lazy admission or physical targets. Filtered engine-seam checks cover ownership, waits, late failure/durability rollback, retry and stock GSCR recovery. V83 native admission/scheduling now stages bounded character/story banks with gameplay; the lifecycle opcode installer is shared with stock callers.",
       "paths": [
         "apps/openmw/mwscript/executioncontext.hpp",
         "apps/openmw/mwscript/interpretercontext.cpp",
         "apps/openmw/mwscript/interpretercontext.hpp",
         "apps/openmw/mwscript/ref.cpp",
         "apps/openmw/mwscript/scriptstate.hpp",
-        "apps/openmw/mwscript/miscextensions.cpp"
+        "apps/openmw/mwscript/miscextensions.cpp",
+        "apps/openmw/mwscript/miscextensions.hpp"
       ],
       "tests": [
         "tes3mp_native_script_context_tests lookup",
@@ -21,16 +22,17 @@
         "tes3mp_native_script_context_tests stock",
         "tes3mp_native_script_context_tests cross-script",
         "tes3mp_native_script_context_tests cross-script-rollback",
-        "tes3mp_native_script_context_tests cross-script-stock"
+        "tes3mp_native_script_context_tests cross-script-stock",
+        "tes3mp_native_world_script_tests script-banks"
       ],
-      "disposition": "Scoped engine context and cross-script state/lifecycle seam; V82 personal scheduling retains its single-script admission. Multi-script campaign wiring, dialogue and NPC restoration remain closed.",
+      "disposition": "Scoped engine context and cross-script state/lifecycle seam, wired to V83 native character/story banks. Dialogue and NPC restoration remain closed.",
       "removal_condition": "OpenMW supplies equivalent explicit transactional script context and scoped reference resolution"
     },
     {
       "id": "M5-001",
       "slice": "context-free shared world script transaction seam",
       "owner": "OpenMW MWScript compiler/interpreter and app-local script transaction",
-      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. V80 explicitly opts fresh campaigns into one winning shared script and 0-16 globals. Preparation composes with actor/inventory/player physics durability; invocation ordinals survive skipped world ticks and observers never execute. Exact and uncertain recovery bind script state with gameplay; V79 images retain their layout. Calendar ownership rejects. Capability 39 carries bounded committed literal messages through atomic reliable admission and the stock client UI. Session/invocation checks suppress duplicate output; baselines and recovery never replay it. Bootstrap shares host admission, emits fresh V80 and retains V79 on omission. Synthetic impaired two-desktop reentry/restart and native-window message captures pass. V81 explicitly admits 1-8 source-free personal stories for each bound character. The same compiler/core opcodes execute through scoped InterpreterContext; stock GSCR/GLOB state, ordered causal-event cursors and complete ownership/content policy join existing actor/inventory/player-physics transactions. Trusted calls stage bounded invocations; any rejected call invalidates the containing candidate. Atomic rejection/retry, isolated characters/stories, exact and uncertain recovery and V80 upgrade/downgrade rejection are exercised. Fresh V82 schedules each established online character/story once per host tick in the same actor/inventory/player-physics transaction. Durable per-instance schedule markers suppress replay; offline and skipped ticks never catch up. Late script failure discards all staged instances/gameplay; exact and uncertain recovery preserve scheduling, and V81 upgrade/downgrade rejects. V81 remains trusted-call-only. Cross-script calls, dialogue, physical-reference operations and personal output delivery remain closed.",
+      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. V80 explicitly opts fresh campaigns into one winning shared script and 0-16 globals. Preparation composes with actor/inventory/player physics durability; invocation ordinals survive skipped world ticks and observers never execute. Exact and uncertain recovery bind script state with gameplay; V79 images retain their layout. Calendar ownership rejects. Capability 39 carries bounded committed literal messages through atomic reliable admission and the stock client UI. Session/invocation checks suppress duplicate output; baselines and recovery never replay it. Bootstrap shares host admission, emits fresh V80 and retains V79 on omission. Synthetic impaired two-desktop reentry/restart and native-window message captures pass. V81 explicitly admits 1-8 source-free personal stories for each bound character. The same compiler/core opcodes execute through scoped InterpreterContext; stock GSCR/GLOB state, ordered causal-event cursors and complete ownership/content policy join existing actor/inventory/player-physics transactions. Trusted calls stage bounded invocations; any rejected call invalidates the containing candidate. Atomic rejection/retry, isolated characters/stories, exact and uncertain recovery and V80 upgrade/downgrade rejection are exercised. Fresh V82 schedules each established online character/story once per host tick in the same actor/inventory/player-physics transaction. Durable per-instance schedule markers suppress replay; offline and skipped ticks never catch up. Late script failure discards all staged instances/gameplay; exact and uncertain recovery preserve scheduling, and V81 upgrade/downgrade rejects. V81 remains trusted-call-only. V83 admits 1-4 scripts per story and at most 16 mirrored script instances, with explicit initial running flags. Shared stock lifecycle/core opcodes and typed members mutate staged banks in admission order. Each character/story owns one global writer; stopped locals and member ordinals recover with gameplay. Dialogue, physical-reference operations and personal output delivery remain closed.",
       "paths": [
         "apps/openmw/mwscript/worldscript.cpp",
         "apps/openmw/mwscript/worldscript.hpp"
@@ -48,9 +50,11 @@
         "tes3mp_native_world_script_tests personal",
         "tes3mp_native_loadout_tests personal-state NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
         "tes3mp_native_world_script_tests personal-scheduling",
-        "tes3mp_native_loadout_tests personal-scheduling NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
+        "tes3mp_native_loadout_tests personal-scheduling NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
+        "tes3mp_native_world_script_tests script-banks",
+        "tes3mp_native_loadout_tests script-banks NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
       ],
-      "disposition": "Shared scheduling/delivery and synthetic desktop reentry/restart proven; V81 trusted personal calls and V82 source-free personal scheduling compose with host durability. Native multi-script admission, dialogue, physical effects and NPC restoration remain closed.",
+      "disposition": "Shared execution/delivery, V81 trusted calls, V82 personal scheduling and V83 bounded script banks compose with host durability. Dialogue, physical effects and NPC restoration remain closed.",
       "removal_condition": "OpenMW supplies equivalent transactional context-free script execution with explicit ownership and bounded presentation"
     },
     {
