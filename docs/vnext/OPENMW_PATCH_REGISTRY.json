@@ -3,6 +3,33 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M5-003",
+      "slice": "character/story stock dialogue filters and transactional journal/topic results",
+      "owner": "OpenMW dialogue Filter, Quest/Topic and MWScript stock compiler/opcodes",
+      "purpose": "Scoped stock INFO selection retains ordering and comparisons while sourcing Journal, owned globals/typed locals, Choice and TalkedToPC from one explicit invocation. Speaker scope/life and primary script identity revalidate. Unsupported services reject before singleton access. Stock result bytecode stages banks, journals and known topics together; Quest/Topic accept explicit content and suppress uncommitted Lua/UI callbacks. V84 admits bounded winning DIAL/INFO policy and persists progression and contextual replay receipts with the existing gameplay transaction. Trusted native calls, late rejection/defer, durability rollback/retry, two-character/story isolation and exact/uncertain restart are verified; personal menus/output, physical results and NPC restoration remain closed.",
+      "paths": [
+        "apps/openmw/mwdialogue/filter.cpp",
+        "apps/openmw/mwdialogue/filter.hpp",
+        "apps/openmw/mwdialogue/quest.cpp",
+        "apps/openmw/mwdialogue/quest.hpp",
+        "apps/openmw/mwdialogue/topic.cpp",
+        "apps/openmw/mwdialogue/topic.hpp",
+        "apps/openmw/mwscript/dialoguestate.cpp",
+        "apps/openmw/mwscript/dialoguestate.hpp",
+        "apps/openmw/mwscript/dialogueextensions.cpp",
+        "apps/openmw/mwscript/dialogueextensions.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_dialogue_tests isolation",
+        "tes3mp_native_dialogue_tests rollback",
+        "tes3mp_native_dialogue_tests recovery",
+        "tes3mp_native_dialogue_tests stock",
+        "tes3mp_native_loadout_tests dialogue NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
+      ],
+      "disposition": "Bounded trusted scoped dialogue results and progression, wired to V84 gameplay durability; client dialogue admission and presentation remain closed.",
+      "removal_condition": "OpenMW supplies equivalent explicit scoped dialogue filtering, result execution and transactional progression interfaces"
+    },
+    {
       "id": "M5-002",
       "slice": "explicit script execution context and scoped reference/script-state lookup",
       "owner": "OpenMW MWScript InterpreterContext and stock reference callers",
@@ -25,14 +52,14 @@
         "tes3mp_native_script_context_tests cross-script-stock",
         "tes3mp_native_world_script_tests script-banks"
       ],
-      "disposition": "Scoped engine context and cross-script state/lifecycle seam, wired to V83 native character/story banks. Dialogue and NPC restoration remain closed.",
+      "disposition": "Scoped engine context and cross-script state/lifecycle seam, wired to native character/story banks. V84 adds staged dialogue progression; NPC restoration remains closed.",
       "removal_condition": "OpenMW supplies equivalent explicit transactional script context and scoped reference resolution"
     },
     {
       "id": "M5-001",
       "slice": "context-free shared world script transaction seam",
       "owner": "OpenMW MWScript compiler/interpreter and app-local script transaction",
-      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. V80 explicitly opts fresh campaigns into one winning shared script and 0-16 globals. Preparation composes with actor/inventory/player physics durability; invocation ordinals survive skipped world ticks and observers never execute. Exact and uncertain recovery bind script state with gameplay; V79 images retain their layout. Calendar ownership rejects. Capability 39 carries bounded committed literal messages through atomic reliable admission and the stock client UI. Session/invocation checks suppress duplicate output; baselines and recovery never replay it. Bootstrap shares host admission, emits fresh V80 and retains V79 on omission. Synthetic impaired two-desktop reentry/restart and native-window message captures pass. V81 explicitly admits 1-8 source-free personal stories for each bound character. The same compiler/core opcodes execute through scoped InterpreterContext; stock GSCR/GLOB state, ordered causal-event cursors and complete ownership/content policy join existing actor/inventory/player-physics transactions. Trusted calls stage bounded invocations; any rejected call invalidates the containing candidate. Atomic rejection/retry, isolated characters/stories, exact and uncertain recovery and V80 upgrade/downgrade rejection are exercised. Fresh V82 schedules each established online character/story once per host tick in the same actor/inventory/player-physics transaction. Durable per-instance schedule markers suppress replay; offline and skipped ticks never catch up. Late script failure discards all staged instances/gameplay; exact and uncertain recovery preserve scheduling, and V81 upgrade/downgrade rejects. V81 remains trusted-call-only. V83 admits 1-4 scripts per story and at most 16 mirrored script instances, with explicit initial running flags. Shared stock lifecycle/core opcodes and typed members mutate staged banks in admission order. Each character/story owns one global writer; stopped locals and member ordinals recover with gameplay. Dialogue, physical-reference operations and personal output delivery remain closed.",
+      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. V80 explicitly opts fresh campaigns into one winning shared script and 0-16 globals. Preparation composes with actor/inventory/player physics durability; invocation ordinals survive skipped world ticks and observers never execute. Exact and uncertain recovery bind script state with gameplay; V79 images retain their layout. Calendar ownership rejects. Capability 39 carries bounded committed literal messages through atomic reliable admission and the stock client UI. Session/invocation checks suppress duplicate output; baselines and recovery never replay it. Bootstrap shares host admission, emits fresh V80 and retains V79 on omission. Synthetic impaired two-desktop reentry/restart and native-window message captures pass. V81 explicitly admits 1-8 source-free personal stories for each bound character. The same compiler/core opcodes execute through scoped InterpreterContext; stock GSCR/GLOB state, ordered causal-event cursors and complete ownership/content policy join existing actor/inventory/player-physics transactions. Trusted calls stage bounded invocations; any rejected call invalidates the containing candidate. Atomic rejection/retry, isolated characters/stories, exact and uncertain recovery and V80 upgrade/downgrade rejection are exercised. Fresh V82 schedules each established online character/story once per host tick in the same actor/inventory/player-physics transaction. Durable per-instance schedule markers suppress replay; offline and skipped ticks never catch up. Late script failure discards all staged instances/gameplay; exact and uncertain recovery preserve scheduling, and V81 upgrade/downgrade rejects. V81 remains trusted-call-only. V83 admits 1-4 scripts per story and at most 16 mirrored script instances, with explicit initial running flags. Shared stock lifecycle/core opcodes and typed members mutate staged banks in admission order. Each character/story owns one global writer; stopped locals and member ordinals recover with gameplay. V84 adds trusted scoped dialogue result execution through the same bank compiler/context. Physical-reference operations and personal output delivery remain closed.",
       "paths": [
         "apps/openmw/mwscript/worldscript.cpp",
         "apps/openmw/mwscript/worldscript.hpp"

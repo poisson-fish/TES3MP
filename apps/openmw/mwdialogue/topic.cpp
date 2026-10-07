@@ -9,8 +9,12 @@ namespace MWDialogue
     Topic::Topic() {}
 
     Topic::Topic(const ESM::RefId& topic)
-        : mTopic(topic)
-        , mName(MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>().find(topic)->mStringId)
+        : Topic(topic, MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>().find(topic)->mStringId)
+    {
+    }
+
+    Topic::Topic(const ESM::RefId& topic, std::string name)
+        : mTopic(topic), mName(std::move(name))
     {
     }
 

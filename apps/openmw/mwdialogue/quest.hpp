@@ -6,6 +6,7 @@
 namespace ESM
 {
     struct QuestState;
+    struct Dialogue;
 }
 
 namespace MWDialogue
@@ -22,6 +23,7 @@ namespace MWDialogue
         Quest(const ESM::RefId& topic);
 
         Quest(const ESM::QuestState& state);
+        Quest(const ESM::QuestState& state, const ESM::Dialogue& dialogue);
 
         std::string_view getName() const override;
         ///< May be an empty string
@@ -29,12 +31,14 @@ namespace MWDialogue
         int getIndex() const;
 
         void setIndex(int index);
+        void setIndex(int index, bool notify);
         ///< Calling this function with a non-existent index will throw an exception.
 
         bool isFinished() const;
         void setFinished(bool finished);
 
         bool addEntry(const JournalEntry& entry) override;
+        bool addEntry(const JournalEntry& entry, const ESM::Dialogue& dialogue, bool notify);
         ///< Add entry and adjust index accordingly. Returns true if the quest should be restarted.
         ///
         /// \note Redundant entries are ignored, but the index is still adjusted.

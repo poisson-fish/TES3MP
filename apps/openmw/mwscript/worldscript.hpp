@@ -16,6 +16,7 @@ namespace MWScript
     struct ExecutionContext;
     class ReferenceResolver;
     class ScriptState;
+    class DialogueState;
     struct GlobalScriptDesc;
     // Bounded subset of the stock compiler/interpreter. Callers supply
     // explicitly owned globals/banks and stage the returned state in their transaction.
@@ -48,22 +49,26 @@ namespace MWScript
         const ESM::RefId& id() const { return mId; }
         const Compiler::Locals& declarations() const { return mDeclarations; }
         bool bankCapable() const { return mBank; }
+        Interpreter::Program compileResult(std::string_view source) const;
         State initial() const;
         void validate(const State& state) const;
         Invocation execute(const State& before, Interpreter::ExecutionTrace* trace = nullptr) const;
         Invocation execute(const State& before, const ExecutionContext& execution,
             const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
             Interpreter::ExecutionTrace* trace = nullptr, ScriptState* bank = nullptr,
-            GlobalScriptDesc* caller = nullptr) const;
+            GlobalScriptDesc* caller = nullptr, DialogueState* dialogue = nullptr,
+            const Interpreter::Program* result = nullptr) const;
 
     private:
         Invocation executeImpl(const State&, Interpreter::ExecutionTrace*, const ExecutionContext*,
-            const MWWorld::ESMStore*, const ReferenceResolver*, ScriptState*, GlobalScriptDesc*) const;
+            const MWWorld::ESMStore*, const ReferenceResolver*, ScriptState*, GlobalScriptDesc*,
+            DialogueState*, const Interpreter::Program*) const;
         ESM::RefId mId;
         Compiler::Locals mDeclarations;
         Interpreter::Program mProgram;
         std::vector<ESM::Global> mGlobals;
         bool mBank = false;
+        std::vector<std::pair<ESM::RefId, Compiler::Locals>> mMembers;
     };
 }
 

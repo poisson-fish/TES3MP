@@ -58,6 +58,12 @@ tes3mp_verify_target_dependencies(tes3mp_native_world_script_tests
     ALLOWED tes3mp_native_world_script tes3mp_server_core tes3mp_native_loadout openmw-lib)
 set_target_properties(tes3mp_native_world_script tes3mp_native_world_script_tests PROPERTIES FOLDER "TES3MP/NativeProbe")
 
+add_executable(tes3mp_native_dialogue_tests dialogue_tests.cpp)
+target_compile_features(tes3mp_native_dialogue_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_native_dialogue_tests PRIVATE tes3mp_native_world_script tes3mp_server_core openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_dialogue_tests ALLOWED tes3mp_native_world_script tes3mp_server_core openmw-lib)
+set_target_properties(tes3mp_native_dialogue_tests PROPERTIES FOLDER "TES3MP/NativeProbe")
+
 # Scoped stock reference/faction callers on staged state; no live quest admission.
 add_executable(tes3mp_native_script_context_tests script_context_tests.cpp)
 target_compile_features(tes3mp_native_script_context_tests PRIVATE cxx_std_20)

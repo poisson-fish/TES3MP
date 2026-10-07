@@ -4,11 +4,13 @@
 #include "locals.hpp"
 #include "miscextensions.hpp"
 #include "scriptstate.hpp"
+#include "dialogueextensions.hpp"
 
 #include <components/compiler/context.hpp>
 #include <components/compiler/errorhandler.hpp>
 #include <components/compiler/fileparser.hpp>
 #include <components/compiler/extensions.hpp>
+#include <components/compiler/extensions0.hpp>
 #include <components/compiler/quickfileparser.hpp>
 #include <components/compiler/exception.hpp>
 #include <components/compiler/scanner.hpp>
@@ -79,8 +81,8 @@ namespace MWScript
                 : InterpreterContext(&locals, {}), mGlobals(globals), mPresentation(presentation) {}
             Context(Locals& locals, std::vector<ESM::Global>& globals, std::vector<std::string>& presentation,
                 const ExecutionContext& execution, const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-                ScriptState* bank)
-                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank), mGlobals(globals), mPresentation(presentation) {}
+                ScriptState* bank, DialogueState* dialogue)
+                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank, dialogue), mGlobals(globals), mPresentation(presentation) {}
 
             int getGlobalShort(std::string_view id) const override { return global(id).getInteger(); }
             int getGlobalLong(std::string_view id) const override { return global(id).getInteger(); }
@@ -209,6 +211,7 @@ namespace MWScript
         }
         require(!mBank || std::ranges::any_of(members, [&](const auto& entry) { return entry.first == mId; }),
             "Caller lacks bank ownership");
+        mMembers = members;
         Compiler::Extensions extensions;
         if (mBank)
         {
@@ -272,16 +275,16 @@ namespace MWScript
     }
 
     WorldScript::Invocation WorldScript::execute(const State& before, Interpreter::ExecutionTrace* trace) const
-    { return executeImpl(before, trace, nullptr, nullptr, nullptr, nullptr, nullptr); }
+    { return executeImpl(before, trace, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr); }
 
     WorldScript::Invocation WorldScript::execute(const State& before, const ExecutionContext& execution,
         const MWWorld::ESMStore& content, const ReferenceResolver& resolver, Interpreter::ExecutionTrace* trace,
-        ScriptState* bank, GlobalScriptDesc* caller) const
-    { return executeImpl(before, trace, &execution, &content, &resolver, bank, caller); }
+        ScriptState* bank, GlobalScriptDesc* caller, DialogueState* dialogue, const Interpreter::Program* result) const
+    { return executeImpl(before, trace, &execution, &content, &resolver, bank, caller, dialogue, result); }
 
     WorldScript::Invocation WorldScript::executeImpl(const State& before, Interpreter::ExecutionTrace* trace,
         const ExecutionContext* execution, const MWWorld::ESMStore* content, const ReferenceResolver* resolver,
-        ScriptState* bank, GlobalScriptDesc* caller) const
+        ScriptState* bank, GlobalScriptDesc* caller, DialogueState* dialogue, const Interpreter::Program* program) const
     {
         validate(before);
         Invocation result{before, {}};
@@ -291,24 +294,57 @@ namespace MWScript
             const auto binding = bank->resolve(*execution, mId);
             const auto* target = std::get_if<MWWorld::Ptr>(&caller->mTarget);
             require(&binding.instance == caller && &binding.declarations == &mDeclarations
-                && caller->mLocals.getScriptId() == mId && caller->mRunning && before.script.mRunning
+                && caller->mLocals.getScriptId() == mId && (program || (caller->mRunning && before.script.mRunning))
                 && target && target->isEmpty(), "Bank caller/target mismatch");
         }
         auto restored = Locals::restore(before.script.mLocals, mId, mDeclarations);
         auto& locals = caller ? caller->mLocals : restored;
         auto context = execution
-            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank)
+            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank, dialogue)
             : std::make_unique<Context>(locals, result.state.globals, result.presentation);
         Interpreter::Interpreter interpreter;
         Interpreter::installOpcodes(interpreter);
         if (mBank) Misc::installScriptOpcodes(interpreter);
+        if (dialogue) Dialogue::installJournalOpcodes(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
-        interpreter.run(mProgram, *context, MaximumExecutedInstructions, trace);
+        interpreter.run(program ? *program : mProgram, *context, MaximumExecutedInstructions, trace);
         result.state.script.mLocals.mVariables.clear();
         require(locals.write(result.state.script.mLocals, mDeclarations), "World script locals unavailable");
         if (caller) result.state.script.mRunning = caller->mRunning;
         validate(result.state);
         return result;
+    }
+
+    Interpreter::Program WorldScript::compileResult(std::string_view text) const
+    {
+        require(mBank && text.size() <= MaximumSourceBytes && text.find('\0') == std::string_view::npos,
+            "Dialogue result source exceeds bounds or lacks bank");
+        CompilerContext context(mGlobals, mMembers);
+        Compiler::Extensions extensions;
+        Misc::registerScriptOpcodes(extensions);
+        Compiler::Dialogue::registerExtensions(extensions);
+        context.setExtensions(&extensions);
+        std::string source = "begin " + std::string(mId.getRefIdString()) + "\n";
+        for (const auto kind : {'s', 'l', 'f'})
+            for (const auto& local : mDeclarations.get(kind))
+                source += std::string(kind == 's' ? "short " : kind == 'l' ? "long " : "float ") + local + "\n";
+        source.append(text); source += "\nend\n";
+        Errors errors; errors.setWarningsMode(2);
+        Compiler::FileParser parser(errors, context);
+        std::istringstream stream(source);
+        Compiler::Scanner scanner(errors, stream, &extensions);
+        try { scanner.scan(parser); }
+        catch (const Compiler::SourceException&) { throw std::invalid_argument("Invalid dialogue result: " + errors.first); }
+        require(errors.isGood() && !errors.countWarnings(), "Unsupported dialogue result instruction");
+        // Result blocks cannot introduce or alter the actor's declarations.
+        for (const char kind : {'s', 'l', 'f'})
+            require(parser.getLocals().get(kind) == mDeclarations.get(kind), "Dialogue result changed declarations");
+        auto program = parser.getProgram();
+        require(program.mInstructions.size() <= MaximumInstructions, "Dialogue result program exceeds bounds");
+        for (const auto& literal : program.mStrings)
+            require(literal.size() <= MaximumMessageBytes && literal.find_first_of("%^") == std::string::npos,
+                "Dialogue result literal exceeds bounds");
+        return program;
     }
 }

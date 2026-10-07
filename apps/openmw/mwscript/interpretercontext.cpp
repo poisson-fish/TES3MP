@@ -23,6 +23,7 @@
 
 #include "globalscripts.hpp"
 #include "locals.hpp"
+#include "dialoguestate.hpp"
 
 namespace MWScript
 {
@@ -204,7 +205,7 @@ namespace MWScript
 
     InterpreterContext::InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
         const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-        MWMechanics::NpcStats* detachedPlayerStats, ScriptState* scriptState)
+        MWMechanics::NpcStats* detachedPlayerStats, ScriptState* scriptState, DialogueState* dialogueState)
         : mLocals(locals)
         , mPlayerStats(detachedPlayerStats)
         , mContent(&content)
@@ -212,8 +213,10 @@ namespace MWScript
         , mExecution(execution)
         , mResolver(&resolver)
         , mScriptState(scriptState)
+        , mDialogueState(dialogueState)
     {
         execution.validate();
+        if (dialogueState) dialogueState->validateExecution(execution);
         if (detachedPlayerStats && execution.ownership != ExecutionContext::Ownership::Character)
             throw std::invalid_argument("Shared script cannot own character stats");
     }
@@ -222,6 +225,29 @@ namespace MWScript
     {
         if (mExecution)
             throw std::runtime_error("Script service lacks scoped transaction");
+    }
+
+    DialogueState* InterpreterContext::getDialogueState() const
+    {
+        if (mExecution && !mDialogueState)
+            throw std::runtime_error("Dialogue lacks scoped transaction");
+        if (mDialogueState) mDialogueState->validateExecution(*mExecution);
+        return mDialogueState;
+    }
+
+    std::optional<std::variant<int, float>> InterpreterContext::getDialogueLocal(const ESM::RefId& id, std::string_view name) const
+    {
+        auto binding = getScopedScript(id);
+        const char kind = binding.declarations.getType(std::string(name));
+        if (kind == ' ') return {};
+        const auto member = getScopedMember(id, name, kind, true);
+        switch (kind)
+        {
+            case 's': return int(member.locals.mShorts.at(member.index));
+            case 'l': return member.locals.mLongs.at(member.index);
+            case 'f': return member.locals.mFloats.at(member.index);
+            default: throw std::invalid_argument("Invalid dialogue local type");
+        }
     }
 
     ScriptState::Binding InterpreterContext::getScopedScript(const ESM::RefId& id) const

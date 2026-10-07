@@ -19,17 +19,35 @@
 #include "../mwworld/esmstore.hpp"
 
 #include "ref.hpp"
+#include "interpretercontext.hpp"
+#include "dialoguestate.hpp"
+#include <type_traits>
 
 namespace MWScript
 {
     namespace Dialogue
     {
+        void requireStockDialogue(Interpreter::Runtime& runtime)
+        {
+            if (static_cast<InterpreterContext&>(runtime.getContext()).getExecutionContext())
+                throw std::runtime_error("Dialogue service lacks scoped transaction");
+        }
         template <class R>
         class OpJournal : public Interpreter::Opcode0
         {
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                auto* staged = static_cast<InterpreterContext&>(runtime.getContext()).getDialogueState();
+                if (staged)
+                {
+                    // Explicit references still revalidate; Journal itself is personal.
+                    if constexpr (std::is_same_v<R, ExplicitRef>) R()(runtime, false);
+                    ESM::RefId quest = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
+                    runtime.pop(); const int index = runtime[0].mInteger; runtime.pop();
+                    staged->journal(quest, index);
+                    return;
+                }
                 MWWorld::Ptr ptr = R()(runtime, false); // required=false
                 if (ptr.isEmpty())
                     ptr = MWBase::Environment::get().getWorld()->getPlayerPtr();
@@ -64,7 +82,9 @@ namespace MWScript
                 Interpreter::Type_Integer index = runtime[0].mInteger;
                 runtime.pop();
 
-                MWBase::Environment::get().getJournal()->setJournalIndex(quest, index);
+                if (auto* staged = static_cast<InterpreterContext&>(runtime.getContext()).getDialogueState())
+                    staged->setJournalIndex(quest, index);
+                else MWBase::Environment::get().getJournal()->setJournalIndex(quest, index);
             }
         };
 
@@ -76,7 +96,8 @@ namespace MWScript
                 ESM::RefId quest = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
 
-                int index = MWBase::Environment::get().getJournal()->getJournalIndex(quest);
+                auto* staged = static_cast<InterpreterContext&>(runtime.getContext()).getDialogueState();
+                int index = staged ? staged->journalIndex(quest) : MWBase::Environment::get().getJournal()->getJournalIndex(quest);
 
                 runtime.push(index);
             }
@@ -87,6 +108,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 const MWWorld::Store<ESM::Dialogue>& dialogues
                     = MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>();
                 MWWorld::Ptr playerPtr = MWBase::Environment::get().getWorld()->getPlayerPtr();
@@ -123,6 +145,9 @@ namespace MWScript
                 ESM::RefId topic = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
 
+                if (auto* staged = static_cast<InterpreterContext&>(runtime.getContext()).getDialogueState())
+                { staged->addTopic(topic); return; }
+
                 if (!MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>().search(topic))
                 {
                     runtime.getContext().report(
@@ -139,6 +164,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime, unsigned int arg0) override
             {
+                requireStockDialogue(runtime);
                 MWBase::DialogueManager* dialogue = MWBase::Environment::get().getDialogueManager();
                 while (arg0 > 0)
                 {
@@ -163,6 +189,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 if (!ptr.getRefData().isEnabled())
@@ -194,6 +221,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 MWBase::Environment::get().getDialogueManager()->goodbye();
             }
         };
@@ -204,6 +232,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
                 Interpreter::Type_Integer value = runtime[0].mInteger;
                 runtime.pop();
@@ -218,6 +247,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
                 Interpreter::Type_Integer value = runtime[0].mInteger;
                 runtime.pop();
@@ -232,6 +262,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 runtime.push(ptr.getClass().getNpcStats(ptr).getReputation());
@@ -244,6 +275,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
@@ -257,6 +289,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 ESM::RefId faction1 = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
 
@@ -275,6 +308,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 ESM::RefId faction1 = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
 
@@ -290,6 +324,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 ESM::RefId faction1 = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
 
@@ -309,20 +344,26 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireStockDialogue(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 MWBase::Environment::get().getDialogueManager()->clearInfoActor(ptr);
             }
         };
 
-        void installOpcodes(Interpreter::Interpreter& interpreter)
+        void installJournalOpcodes(Interpreter::Interpreter& interpreter)
         {
             interpreter.installSegment5<OpJournal<ImplicitRef>>(Compiler::Dialogue::opcodeJournal);
             interpreter.installSegment5<OpJournal<ExplicitRef>>(Compiler::Dialogue::opcodeJournalExplicit);
             interpreter.installSegment5<OpSetJournalIndex>(Compiler::Dialogue::opcodeSetJournalIndex);
             interpreter.installSegment5<OpGetJournalIndex>(Compiler::Dialogue::opcodeGetJournalIndex);
-            interpreter.installSegment5<OpFillJournal>(Compiler::Dialogue::opcodeFillJournal);
             interpreter.installSegment5<OpAddTopic>(Compiler::Dialogue::opcodeAddTopic);
+        }
+
+        void installOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            installJournalOpcodes(interpreter);
+            interpreter.installSegment5<OpFillJournal>(Compiler::Dialogue::opcodeFillJournal);
             interpreter.installSegment3<OpChoice>(Compiler::Dialogue::opcodeChoice);
             interpreter.installSegment5<OpForceGreeting<ImplicitRef>>(Compiler::Dialogue::opcodeForceGreeting);
             interpreter.installSegment5<OpForceGreeting<ExplicitRef>>(Compiler::Dialogue::opcodeForceGreetingExplicit);

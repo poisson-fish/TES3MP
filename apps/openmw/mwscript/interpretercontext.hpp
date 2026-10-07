@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <variant>
 
 #include <components/esm/refid.hpp>
 #include <components/interpreter/context.hpp>
@@ -20,6 +21,7 @@ namespace MWMechanics { class NpcStats; }
 namespace MWScript
 {
     class Locals;
+    class DialogueState;
 
     class MissingImplicitRefError : public std::runtime_error
     {
@@ -38,6 +40,7 @@ namespace MWScript
         std::optional<ExecutionContext> mExecution;
         const ReferenceResolver* mResolver = nullptr;
         ScriptState* mScriptState = nullptr;
+        DialogueState* mDialogueState = nullptr;
         std::shared_ptr<GlobalScriptDesc> mGlobalScriptDesc;
 
         void requireUnscopedService() const;
@@ -76,7 +79,8 @@ namespace MWScript
 
         InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
             const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-            MWMechanics::NpcStats* detachedPlayerStats = nullptr, ScriptState* scriptState = nullptr);
+            MWMechanics::NpcStats* detachedPlayerStats = nullptr, ScriptState* scriptState = nullptr,
+            DialogueState* dialogueState = nullptr);
         ///< Scoped callers supply staged locals/stats. Unprovided services reject;
         ///< no fallback to the stock protagonist, world globals or script manager.
 
@@ -89,6 +93,8 @@ namespace MWScript
         MWMechanics::NpcStats& getPlayerStats() const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
+        DialogueState* getDialogueState() const;
+        std::optional<std::variant<int, float>> getDialogueLocal(const ESM::RefId& script, std::string_view name) const;
 
         // Stock script lifecycle calls; scoped calls only change an admitted
         // source-free instance's staged running flag, never invoke it inline.

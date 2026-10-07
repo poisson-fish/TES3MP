@@ -1,54 +1,20 @@
 # Current state and next action
 
-**Active: M5 [PLAN.md](PLAN.md), native script banks. M4 closed, 2026-10-06.**
+**Active: M5 [PLAN.md](PLAN.md), native dialogue transactions. M4 closed, 2026-10-06.**
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
-**V77 exploration accepted:** radius 0–7 anchors share 256 cells; caps: 37 actors,
-8,192 references/region, 256 navigation tiles/actor. Connected regions share collision;
-streamed geometry retains state/frozen hulls/contact witnesses.
-Synthetic `build/logs/exploration-{bootstrap-radius2,discovery-03,regions-03,host-07}.log`:
-27-cell export, exhaustion/retry, 12-cell navigation/contact,
-geometry rejection/release, overlapping demand/split/regroup/rollback/recovery.
-`build/logs/exploration-{cell-actors-02,placed-actors-01,boundary}.log`:
-collision/combat/flight regression, unsupported actor rejection, engine independence.
-Scripts/leveled/corpses reject; full AI packages remain M5.
+**V77 exploration:** radius 0–7; 256 cells, 37 actors, 8,192 references/region,
+256 navigation tiles/actor. Shared collision/streaming retain state and frozen hulls.
+Synthetic paired split/regroup/restart under 100ms ±25ms/10% loss/reorder:
+`build/exploration-desktop-{06,restart-01}/result.json`. Scripts/leveled/corpses reject;
+full AI packages remain M5.
 
-**Synthetic exploration:**
-`build/exploration-desktop-{06,restart-01}/result.json`: two desktops cross
-3→6→3 via AutoMove, split/regroup/unload/reentry/reconnect;
-restart preserves item identities/counts and adjacent-cell damage.
-Desktop crossings: 100ms delay, ±25ms jitter, 10% loss/reorder. `build/exploration-desktop-presentation-02/result.json`:
-actors/peer recovered; screenshots inspected.
-
-**V74–V76:** 143 selectors/141 lifecycles; capability 34/35 presentation.
-`build/logs/{target-recipients-08,source-limits-02,spell-presentation-transaction-04,spell-passive-self-18,spell-passive-stats-08,world-collision-09}.log`.
-Stock AI excludes powers; WhenUsed needs equipment; passives Self,
-travel players, Soultrap creatures. Two summons are stock placeholders.
-Animated ground rejects. Bind intervention destinations.
-
-**V78:** fresh players cannot simulate; campaign-configured starters. Completion/recovery
-persists stock bodies/stats/spells/resources/safe points/appearances; capabilities 6/36.
-Catalog pairs: 8,192/race, 65,536 total.
-`build/logs/character-{catalog-bounds,appearances-stock,appearances-tr}.log`: ten races/both sexes, stock/TR.
-Starter grant/validation/recovery: `build/logs/character-starters-native.log`.
-Desktop starters: `build/m4-user-acceptance-starters-20261004-210941/starter-installation.json`;
-session accepted 2026-10-04.
-Delayed lanes resync; empty inventories clear.
-Gear/angles preserve body/motion.
-Synthetic `build/logs/{chargen-installer-15,chargen-installation,chargen-install-protocol,chargen-install-server-delivery,chargen-install-server-reverse,chargen-install-restart,appearance-protocol,appearance-adapter,appearance-installer,chargen-clock,appearance-clock-adapter,public-outfit-adapter,public-outfit-body-contract,remote-locomotion-coordinates,chargen-control}.log`.
-
-**Synthetic character acceptance:**
-`build/character-desktop-fixture-02/{complete-03,restart-02}/result.json`,
-`build/character-acceptance-02/{drop,pickup-restart,reentry,movement}/result.json`,
-`build/character-tr-acceptance/{complete,restart-facing}/result.json`:
-stock/TR creation/recovery, empty inventories, outfits/drop/pickup,
-interior reentry/facing/reconnect; screenshots inspected. Appearance-only TR mods.
-`build/chargen-ui-{pick,generate-03,create}/result.json`: MyGUI pick/questions/custom,
-Back/refresh/birthsign/completion; custom names. Refresh retains the modal;
-transitions/resume respect closed dialogs; physical OS input unverified.
-Resume bounds inactivity, retaining expiry/generation/replay rejection
-(`build/logs/resume-inactivity.log`).
+**V78 characters:** stock/TR creation, starters, inventory/appearance installation,
+reentry/reconnect/restart verified synthetically; starter session accepted 2026-10-04.
+`build/character-desktop-fixture-02/{complete-03,restart-02}/result.json`.
+Creation cannot simulate before completion. TR appearance-only; physical OS input unverified.
+Resume retains inactivity/expiry/generation/replay bounds (`build/logs/resume-inactivity.log`).
 
 **Death/respawn:** capability 37; life cleanup preserves ordinary inventory.
 `build/logs/respawn-{protocol,adapter,native}.log`, `player-lives-regression.log`,
@@ -60,28 +26,15 @@ revival/Seyda Neen safe-point respawn, 2026-10-04; unarmed confirmed.
 Single-cell preview disables travel. Excluded scripts/scripted inventory require M5;
 restore only proven content.
 
-**Melee accepted, 2026-10-05:** Argonian recoil fix; fatigue/HUD match; death label.
-`build/logs/melee-recoil-{baseline,fixed}.log`.
-Replica stock bounds/visibility; server rolls. Shieldless creatures need no inventory.
-`build/logs/melee-contact-geometry.log`, `build/melee-contact-validation-01/result.json`:
-crab contact/dagger damage.
-
-**Shared corpse/recovery accepted, 2026-10-05:** peer visibility/opening/transfer/reconnect/restart
-without duplication.
-`build/m4-user-acceptance-peer-loot-20261005-221147/operator-acceptance.json`;
-exact player stacks/bodies: `build/logs/peer-loot-{reconnect-retry,restart}.log`.
-Neighbor-creature/numeric activation/transfer passed
-(`build/logs/shared-corpse-creature-native-02.log`, `build/shared-player-corpse-validation-01/result.json`).
-Creature respawn: plain stores/absent destinations.
-
-**Body/door/NPC accepted, 2026-10-06:** `build/m4-user-acceptance-body-door-npc-v78-20261005-230100/{door-pass,restart-pass,door-repro,operator-acceptance}.json`:
-split/regroup/reconnect/restart preserved bodies/inventories/resources/NPC identities.
-Automated doors passed; recorder exhaustion fixed:
-`build/m4-user-acceptance-body-door-npc-v78-20261005-230100/capture-limit-result.json`
-doors/travel/quit survive exhaustion.
-Stale/resampled inventory preserves state; contradictions reject atomically
-(`build/logs/door-stale-baseline-fixed.log`). Relay reclaims idle endpoints
-(`build/logs/door-relay-expiry.log`).
+**M4 combat/body acceptance:** melee accepted 2026-10-05; Argonian recoil,
+fatigue/HUD and crab-contact damage passed (`build/logs/melee-recoil-{baseline,fixed}.log`).
+Peer/creature corpse transfers, reconnect/restart preserve exact identities/counts
+(`build/logs/peer-loot-{reconnect-retry,restart}.log`). Shared corpse accepted 2026-10-05;
+body/door/NPC accepted 2026-10-06:
+`build/m4-user-acceptance-body-door-npc-v78-20261005-230100/operator-acceptance.json`.
+Split/regroup/restart preserve bodies/inventories/resources/NPC identities;
+stale/resampled inventory rejects contradictions atomically. Doors/travel/quit
+survive capture exhaustion; relay reclaims idle endpoints.
 
 **V79 player cutover:** capability 38; latest-wins controls/acknowledgements, fixed
 stock physics/shared player/NPC/door hulls, durable frames/resources and bounded replay.
@@ -152,6 +105,15 @@ Synthetic `build/logs/m5-script-banks-{state,host-05,legacy-state,legacy-host,tr
 late rejection/defer/rollback/retry/stale, offline/skipped ticks, stopped-state and
 exact/uncertain recovery; V81/V82 preserved; incompatible policies reject.
 
-**Next:** dialogue
-([M5 contract](DECISIONS.md#m5-implementation-contract)). Personal output delivery,
-physical-reference operations and NPC restoration remain closed.
+**V84 scoped dialogue:** stock INFO ordering/comparisons, Journal/owned globals/typed locals,
+Choice/TalkedToPC; stock results stage bank writes, journal indices/finished flags/entry IDs,
+known topics and contextual receipts with gameplay. ≤16 DIAL/64 INFO/16 conditions;
+64 journal entries/story; 1 MiB image. Synthetic
+`build/logs/m5-dialogue-{isolation,rollback,recovery,stock,host-05,bank-regression,shared-regression}.log`:
+two-character/story isolation, late rejection/defer, rollback/retry/stale, exact/uncertain
+old/new restart, silent replay; content/policy and upgrade/downgrade rejection.
+Trusted scoped speaker fixture; unprovided services reject. Journal text/timestamps,
+client dialogue intents/menus, personal output and physical results remain closed.
+
+**Next:** dialogue intent/personal presentation and further staged filter/result services
+([M5 contract](DECISIONS.md#m5-implementation-contract)); NPC restoration remains closed.

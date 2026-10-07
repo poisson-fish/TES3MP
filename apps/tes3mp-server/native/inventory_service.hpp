@@ -388,6 +388,8 @@ namespace TES3MP::Native
         bool interactionVisible(const Transform& player, uint64_t object) const;
         void validate(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command) const;
         void retireCommittedEffects() noexcept;
+        SharedWorldScript::Result stagePersonalInvocation(PreparedNativeInventory&, const MWScript::ExecutionContext&,
+            const MWScript::ReferenceResolver&, const PersonalScripts::DialogueCall*);
 
     public:
         // App-local trusted gameplay state, never client-authored social values.
@@ -444,6 +446,10 @@ namespace TES3MP::Native
         // Trusted native calls only. Stage into a prepared host tick; this never
         // commits separately, schedules scripts, or publishes personal output.
         SharedWorldScript::Result stagePersonalScript(PreparedNativeInventory&, const MWScript::ExecutionContext&);
+        // Trusted runtime seam. Resolver revalidates the staged speaker/scope/life;
+        // networking and personal dialogue presentation are not admitted here.
+        SharedWorldScript::Result stagePersonalDialogue(PreparedNativeInventory&, const MWScript::ExecutionContext&,
+            const PersonalScripts::DialogueCall&, const MWScript::ReferenceResolver&);
         InventoryService(const InventoryService&) = delete;
         InventoryService& operator=(const InventoryService&) = delete;
         PreparedCommand prepare(const CanonicalServerState& players, const ServerApp::InventoryCommandBinding& command);

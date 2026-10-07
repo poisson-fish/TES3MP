@@ -52,7 +52,7 @@ add_openmw_dir (mwdialogue
     )
 
 add_openmw_dir (mwscript
-    locals itemlocals scriptmanagerimp compilercontext interpretercontext worldscript cellextensions miscextensions
+    locals itemlocals scriptmanagerimp compilercontext interpretercontext worldscript dialoguestate cellextensions miscextensions
     guiextensions soundextensions skyextensions statsextensions containerextensions
     aiextensions controlextensions extensions globalscripts ref dialogueextensions
     animationextensions transformationextensions consoleextensions userextensions

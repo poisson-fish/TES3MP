@@ -5591,7 +5591,8 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool personalBanks = effectFamily == "script-banks";
+        const bool personalDialogue = effectFamily == "dialogue";
+        const bool personalBanks = personalDialogue || effectFamily == "script-banks";
         const bool personalScheduling = personalBanks || effectFamily == "personal-scheduling";
         const bool personalScript = personalScheduling || effectFamily == "personal-state";
         const bool sharedScript = personalScript || effectFamily == "shared-script";
@@ -6286,9 +6287,35 @@ namespace TES3MP::Native::Testing
                             "set ambient_counter_83 to ambient_counter_83 + 10\nStopScript relay_q19\nMessageBox \"Private relay.\""}})
                     {
                         ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId(name);
-                        script.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n" + body + "\nend " + name;
+                        script.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n"
+                            + (personalDialogue ? std::string{} : body) + "\nend " + name;
                         out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
                     }
+                if (personalDialogue)
+                {
+                    ESM::NPC speaker = npc; speaker.mId = ESM::RefId::stringRefId("speaker_r29");
+                    speaker.mScript = ESM::RefId::stringRefId("ledger_x73");
+                    out.startRecord(ESM::NPC::sRecordId, 0); speaker.save(out); out.endRecord(ESM::NPC::sRecordId);
+                    for (const char* name : {"journey_t37", "passage_k61", "followup_p82", "refusal_x5"})
+                    {
+                        ESM::Dialogue dialogue; dialogue.mId = ESM::RefId::stringRefId(name); dialogue.mStringId = name;
+                        dialogue.blank();
+                        dialogue.mType = std::string_view(name) == "journey_t37" ? ESM::Dialogue::Journal : ESM::Dialogue::Topic;
+                        out.startRecord("DIAL"); dialogue.save(out); out.endRecord("DIAL");
+                        ESM::DialInfo info; info.blank(); info.mId = ESM::RefId::stringRefId(std::string(name) + "_info");
+                        if (dialogue.mType == ESM::Dialogue::Journal)
+                        { info.mData.mJournalIndex = 10; info.mResponse = "A milestone."; }
+                        else
+                        {
+                            info.mActor = speaker.mId;
+                            info.mResultScript = "set calls to calls + 1\nset token to token + 1\n"
+                                "set ambient_counter_83 to ambient_counter_83 + 1\n"
+                                "set relay_q19.calls to relay_q19.calls + 3\nJournal journey_t37 10\nAddTopic followup_p82\n";
+                            if (std::string_view(name) == "refusal_x5") info.mResultScript += "Goodbye\n";
+                        }
+                        out.startRecord("INFO"); info.save(out); out.endRecord("INFO");
+                    }
+                }
             }
             if (encounterProfile == "vanilla-multi-loop")
             {
@@ -9188,7 +9215,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (personalBanks ? "native-inventory-83\nmanifest " : personalScheduling ? "native-inventory-82\nmanifest " : personalScript ? "native-inventory-81\nmanifest " : sharedScript ? "native-inventory-80\nmanifest " : playerPhysics ? "native-inventory-79\nmanifest " : characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (personalDialogue ? "native-inventory-84\nmanifest " : personalBanks ? "native-inventory-83\nmanifest " : personalScheduling ? "native-inventory-82\nmanifest " : personalScript ? "native-inventory-81\nmanifest " : sharedScript ? "native-inventory-80\nmanifest " : playerPhysics ? "native-inventory-79\nmanifest " : characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -9222,7 +9249,11 @@ namespace TES3MP::Native::Testing
             if (lifecycle) out << "respawn " << std::dec << (playerLives ? 20 : boundEquipment ? 90 : 3) << "\n";
             if (characterCreation) out << "starting_items 1\n\"common_shirt_01\" 1 8\n";
             if (sharedScript) out << "shared_script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\"\n";
-            if (personalBanks) out << "personal_scripts 2 story 91 scripts 2 script \"ledger_x73\" running 1 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\" "
+            if (personalDialogue) out << "personal_scripts 2 story 91 scripts 2 script \"ledger_x73\" running 0 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\" "
+                "dialogues 4 \"journey_t37\" \"passage_k61\" \"followup_p82\" \"refusal_x5\" "
+                "story 92 scripts 2 script \"ledger_x73\" running 0 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\" "
+                "dialogues 4 \"journey_t37\" \"passage_k61\" \"followup_p82\" \"refusal_x5\"\n";
+            else if (personalBanks) out << "personal_scripts 2 story 91 scripts 2 script \"ledger_x73\" running 1 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\" "
                 "story 92 scripts 2 script \"ledger_x73\" running 1 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\"\n";
             else if (personalScript) out << "personal_scripts 2 story 91 script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\" "
                 "story 92 script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\"\n";
@@ -9431,6 +9462,126 @@ namespace TES3MP::Native::Testing
                     }
                     return result;
                 };
+                if (personalDialogue)
+                {
+                    require(policy->dialogues(), "V84 did not admit dialogue policy");
+                    const auto ref = [](std::string_view name) { return ESM::RefId::stringRefId(name); };
+                    MWWorld::ManualRef speaker(source.store(), ref("speaker_r29"));
+                    struct Resolver final : MWScript::ReferenceResolver
+                    {
+                        MWScript::ExecutionContext expected;
+                        MWWorld::Ptr actor;
+                        bool unavailable = false;
+                        MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool) const override
+                        {
+                            require(execution == expected && execution.sourceReference == 79 && execution.sourceLife == 2,
+                                "Host dialogue source/context changed");
+                            if (unavailable) throw MWScript::ScriptContextUnavailable();
+                            require(id.empty(), "Host dialogue resolved an unadmitted reference");
+                            return actor;
+                        }
+                    } resolver;
+                    resolver.actor = speaker.getPtr();
+                    const PersonalScripts::DialogueCall call{ref("passage_k61"), -1, 50, false, "NPC Door Contact Test"};
+                    const auto progress = [&](const auto& owner, std::array<int, 4> expected) {
+                        const auto values = state(owner); require(values.size() == expected.size(), "Host dialogue instances changed");
+                        for (size_t i = 0; i < values.size(); ++i)
+                        {
+                            const auto& value = values[i];
+                            require(value.runtime.runtime.globals.front().mValue.getInteger() == expected[i]
+                                && value.runtime.runtime.script.mLocals.mVariables[1].second.getInteger() == expected[i]
+                                && value.members[0].runtime.script.mLocals.mVariables[1].second.getInteger() == expected[i] * 3,
+                                "Dialogue bank/global effects crossed character/story");
+                            require(value.dialogue.quests.size() == size_t(expected[i] != 0)
+                                && value.dialogue.entries.size() == size_t(expected[i] != 0)
+                                && value.dialogue.topics.size() == size_t(expected[i] != 0), "Dialogue journal/topic isolation differs");
+                            if (expected[i]) require(value.dialogue.quests.front().mState == 10
+                                && value.dialogue.topics.front() == ref("followup_p82"), "Committed progression differs");
+                        }
+                    };
+                    progress(service, {0, 0, 0, 0});
+                    const auto before = image(service);
+                    service.synchronizeCells(authority);
+                    auto candidate = native.prepareNativePlayerTick(authority, id<ServerTick>(5), 1.f/30, {}, &world, {}, {});
+                    auto stale = native.prepareNativePlayerTick(authority, id<ServerTick>(5), 1.f/30, {}, &world, {}, {});
+                    const auto scheduled = policy->prepareScheduled(state(service), 5, std::array<uint64_t, 2>{1, 2}, source.store(), resolver);
+                    require(scheduled.result.executed, "Dialogue host scheduler did not stage occurrence");
+                    auto execution = scheduled.state[0].last; ++execution.invocation;
+                    execution.sourceReference = 79; execution.sourceLife = 2; execution.causalEvent = 901;
+                    resolver.expected = execution;
+                    auto result = native.stagePersonalDialogue(*candidate, execution, call, resolver);
+                    require(result.executed && result.outcome == SharedWorldScript::Outcome::Committed
+                        && result.presentation.empty(), "Host dialogue result did not stage");
+                    require(!native.stagePersonalDialogue(*candidate, execution, call, resolver).executed,
+                        "Same transaction replay executed dialogue");
+                    auto other = scheduled.state[1].last; ++other.invocation;
+                    other.sourceReference = 79; other.sourceLife = 2; other.causalEvent = 901;
+                    resolver.expected = other;
+                    require(native.stagePersonalDialogue(*candidate, other, call, resolver).executed,
+                        "Second character dialogue did not execute independently");
+                    std::vector<std::byte> proposed, durable;
+                    require(candidate->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                        && image(service) == before, "Rejected dialogue durability leaked gameplay/progression");
+                    progress(service, {0, 0, 0, 0});
+                    require(candidate->commit([&](auto bytes) { durable.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                        && durable == proposed && image(service) == durable, "Dialogue retry changed its coherent candidate");
+                    progress(service, {1, 1, 0, 0});
+                    require(stale->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Rejected,
+                        "Stale dialogue transaction replaced progress");
+                    const auto saved = image(service);
+                    const auto persisted = state(service);
+                    const auto replay = policy->prepareDialogue(persisted, execution, call.topic, call.choice, call.disposition,
+                        call.talkedToPlayer, call.cellName, source.store(), resolver);
+                    require(replay.result.outcome == SharedWorldScript::Outcome::Committed && !replay.result.executed,
+                        "Durable dialogue replay did not remain silent");
+                    for (bool wait : {false, true})
+                    {
+                        auto failed = native.prepareNativePlayerTick(authority, id<ServerTick>(6), 1.f/30, {}, &world, {}, {});
+                        auto next = persisted[0].last; next.invocation += 2; next.causalEvent = 902;
+                        resolver.expected = next; resolver.unavailable = wait;
+                        auto request = call; if (!wait) request.topic = ref("refusal_x5");
+                        auto rejected = native.stagePersonalDialogue(*failed, next, request, resolver);
+                        require(rejected.outcome == (wait ? SharedWorldScript::Outcome::Deferred : SharedWorldScript::Outcome::Rejected),
+                            "Host dialogue failure classification differs");
+                        bool persistedFailure = false;
+                        require(failed->commit([&](auto) { persistedFailure = true; return CanonicalDurabilityResult::Committed; })
+                            == CanonicalDurabilityResult::Rejected && !persistedFailure && image(service) == saved,
+                            "Failed dialogue published gameplay or reached durability");
+                    }
+                    resolver.unavailable = false;
+                    auto established = records;
+                    for (size_t i = 0; i < 2; ++i)
+                    { established[i].characterProfile = completed[i]; established[i].savedPlayer = authority.players()[i]; }
+                    auto restoredRegistry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, established));
+                    InventoryHost restarted(descriptor, manifest, *restoredRegistry, *crypto, saved);
+                    auto& restoredNative = dynamic_cast<InventoryService&>(restarted.service());
+                    require(image(restarted.service()) == saved, "Exact dialogue restart changed gameplay/progression");
+                    progress(restarted.service(), {1, 1, 0, 0});
+                    restarted.service().synchronizeCells(authority);
+                    auto uncertain = restoredNative.prepareNativePlayerTick(authority, id<ServerTick>(6), 1.f/30, {}, &world, {}, {});
+                    auto next = persisted[0].last; next.invocation += 2; next.causalEvent = 902;
+                    resolver.expected = next;
+                    require(restoredNative.stagePersonalDialogue(*uncertain, next, call, resolver).executed,
+                        "Restart could not retry failed dialogue occurrence");
+                    std::vector<std::byte> uncertainImage;
+                    require(uncertain->commit([&](auto bytes) { uncertainImage.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+                        && restarted.service().inventoryImage().empty(), "Uncertain dialogue durability did not close authority");
+                    InventoryHost oldRestart(descriptor, manifest, *restoredRegistry, *crypto, saved);
+                    progress(oldRestart.service(), {1, 1, 0, 0});
+                    InventoryHost newRestart(descriptor, manifest, *restoredRegistry, *crypto, uncertainImage);
+                    require(image(newRestart.service()) == uncertainImage, "Uncertain dialogue restart changed candidate");
+                    progress(newRestart.service(), {2, 1, 0, 0});
+                    const auto recovered = state(newRestart.service());
+                    require(!policy->prepareDialogue(recovered, next, call.topic, call.choice, call.disposition,
+                        call.talkedToPlayer, call.cellName, source.store(), resolver).result.executed,
+                        "Uncertain new-state restart duplicated dialogue effects");
+                    std::cout << "dialogue host: two-character/story isolation; gameplay+bank+journal+topics+receipt atomic; "
+                        "late rejection/defer; durability rollback/retry/stale; exact/uncertain old/new recovery (trusted scoped speaker fixture)\n";
+                    return;
+                }
                 if (personalScheduling)
                 {
                     require(policy->scheduled() && counts(service) == std::vector<uint64_t>{3, 2, 3, 2},

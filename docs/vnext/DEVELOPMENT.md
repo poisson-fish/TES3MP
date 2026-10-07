@@ -68,7 +68,11 @@ markers recover with gameplay. V81 stays trusted-only. V83 uses `story ID script
 1–4 members/story, ≤16 mirrored instances total. Admission order governs one visit/member/tick;
 StartScript enables later members, StopScript retains locals. One global writer/story;
 bank locals/flags/ordinals/markers join gameplay recovery. Fresh campaigns only.
-Personal output stays closed; bootstrap emits V80.
+V84 appends `dialogues COUNT "RECORD"...` per story (1–16 records, ≤64 INFO,
+16 conditions/INFO). Trusted scoped speaker calls use its primary bank script;
+results/journal indices/finished flags/entry IDs/known topics/receipts commit with gameplay.
+No physical results, journal text/timestamps or client dialogue admission/presentation.
+V83/V84 images never silently migrate. Personal output stays closed; bootstrap emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.

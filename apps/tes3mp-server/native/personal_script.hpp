@@ -3,12 +3,13 @@
 
 #include "world_script.hpp"
 #include <apps/openmw/mwscript/executioncontext.hpp>
+#include <apps/openmw/mwscript/dialoguestate.hpp>
 #include <memory>
 
 namespace TES3MP::Native
 {
-    // Explicitly admitted source-free scripts per character/story. Reference
-    // effects remain closed. Scheduled policies suspend
+    // Explicitly admitted source-free banks and scoped dialogue results share
+    // character/story state. Physical effects remain closed. Scheduled policies suspend
     // offline characters and execute once per admitted host tick without catch-up.
     class PersonalScripts
     {
@@ -16,7 +17,7 @@ namespace TES3MP::Native
         static constexpr size_t MaximumInstances = 16;
         static constexpr size_t MaximumScriptsPerBank = 4;
         static constexpr size_t MaximumInvocationsPerTransaction = 16;
-        static constexpr size_t MaximumImageBytes = 528384;
+        static constexpr size_t MaximumImageBytes = 1048576;
         struct Definition
         {
             struct Member { std::shared_ptr<const SharedWorldScript> script; bool running = false; };
@@ -24,6 +25,7 @@ namespace TES3MP::Native
             std::shared_ptr<const SharedWorldScript> script;
             std::vector<Member> members;
             bool running = true;
+            std::vector<ESM::Dialogue> dialogues;
         };
         struct Instance
         {
@@ -34,6 +36,9 @@ namespace TES3MP::Native
             // The first runtime owns globals; additional members own only GSCR
             // state/ordinals. Encoding lends them the canonical globals.
             std::vector<SharedWorldScript::State> members;
+            MWScript::DialogueState::State dialogue;
+            ESM::RefId lastTopic, lastInfo;
+            int lastChoice = -1;
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -43,11 +48,19 @@ namespace TES3MP::Native
             SharedWorldScript::Result result;
             size_t invocations = 0; // Budget charge: member calls, or one stopped-bank receipt.
         };
+        struct DialogueCall
+        {
+            ESM::RefId topic;
+            int choice = -1, disposition = 0;
+            bool talkedToPlayer = false;
+            std::string cellName;
+        };
         PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false,
             bool banks = false);
         uint64_t campaign() const { return mCampaign; }
         bool scheduled() const { return mScheduled; }
         bool banks() const { return mBanks; }
+        bool dialogues() const { return mDialogues; }
         State initial() const;
         std::vector<char> encode(const State&) const;
         State restore(std::span<const char>) const;
@@ -55,6 +68,9 @@ namespace TES3MP::Native
             const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction) const;
         Prepared prepareScheduled(const State&, uint64_t worldTick, std::span<const uint64_t> activeCharacters,
             const MWWorld::ESMStore&, const MWScript::ReferenceResolver&) const;
+        Prepared prepareDialogue(const State&, const MWScript::ExecutionContext&, const ESM::RefId& topic,
+            int choice, int disposition, bool talkedToPlayer, std::string_view cellName,
+            const MWWorld::ESMStore&, const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction) const;
 
     private:
         uint64_t mCampaign;
@@ -62,6 +78,9 @@ namespace TES3MP::Native
         CredentialDigest mIdentity;
         bool mScheduled;
         bool mBanks;
+        bool mDialogues = false;
+        struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
+        std::vector<std::vector<ResultProgram>> mResults;
         void validate(const Instance&, size_t) const;
         Prepared prepareBank(const State&, size_t, const MWScript::ExecutionContext&, const MWWorld::ESMStore&,
             const MWScript::ReferenceResolver&, size_t budget) const;

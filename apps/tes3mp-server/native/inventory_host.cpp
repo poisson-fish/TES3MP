@@ -75,6 +75,7 @@ namespace TES3MP::Native
                 ESM::RefId script;
                 std::vector<ESM::RefId> globals;
                 std::vector<std::pair<ESM::RefId, bool>> bank;
+                std::vector<ESM::RefId> dialogues;
             };
             std::vector<PersonalRecord> personalScripts;
             bool personalScheduling = false;
@@ -98,7 +99,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 83; ++candidate)
+            for (unsigned candidate = 3; candidate <= 84; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -340,7 +341,7 @@ namespace TES3MP::Native
                         if (!in || !story || !stories.insert(story).second)
                             throw std::invalid_argument("Personal story identity invalid or repeated");
                         Startup::PersonalRecord entry{story, {}, {}};
-                        if (descriptorVersion == 83)
+                        if (descriptorVersion >= 83)
                         {
                             key("scripts"); size_t scripts = 0; in >> scripts;
                             if (!in || !scripts || scripts > PersonalScripts::MaximumScriptsPerBank
@@ -366,6 +367,19 @@ namespace TES3MP::Native
                             auto global = record();
                             if (!owned.insert(global).second) throw std::invalid_argument("Repeated personal global ownership");
                             entry.globals.push_back(global);
+                        }
+                        if (descriptorVersion >= 84)
+                        {
+                            key("dialogues"); size_t count = 0; in >> count;
+                            if (!in || !count || count > MWScript::DialogueState::MaximumRecords)
+                                throw std::invalid_argument("Personal dialogue record budget exceeded");
+                            std::set<ESM::RefId> owned;
+                            for (size_t j = 0; j < count; ++j)
+                            {
+                                auto id = record();
+                                if (!owned.insert(id).second) throw std::invalid_argument("Repeated personal dialogue ownership");
+                                entry.dialogues.push_back(id);
+                            }
                         }
                         personalScripts.push_back(std::move(entry));
                     }
@@ -487,7 +501,7 @@ namespace TES3MP::Native
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,
-                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems), sharedScript, std::move(sharedGlobals), std::move(personalScripts), descriptorVersion >= 82, descriptorVersion == 83};
+                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems), sharedScript, std::move(sharedGlobals), std::move(personalScripts), descriptorVersion >= 82, descriptorVersion >= 83};
         }
     }
     struct InventoryHost::Impl
@@ -1156,6 +1170,12 @@ namespace TES3MP::Native
                     }
                     auto script = admitSharedWorldScript(loadout, entry.script, entry.globals, crypto, records);
                     PersonalScripts::Definition definition{0, entry.story, script};
+                    for (const auto& id : entry.dialogues)
+                    {
+                        const auto* dialogue = loadout.store().get<ESM::Dialogue>().search(id);
+                        if (!dialogue) throw std::invalid_argument("Personal dialogue absent from winning content");
+                        definition.dialogues.push_back(*dialogue);
+                    }
                     if (start.personalBanks)
                     {
                         definition.running = entry.bank.front().second;

@@ -5495,6 +5495,19 @@ namespace TES3MP::Native
     SharedWorldScript::Result InventoryService::stagePersonalScript(PreparedNativeInventory& candidate,
         const MWScript::ExecutionContext& execution)
     {
+        PersonalReferenceResolver resolver;
+        return stagePersonalInvocation(candidate, execution, resolver, nullptr);
+    }
+
+    SharedWorldScript::Result InventoryService::stagePersonalDialogue(PreparedNativeInventory& candidate,
+        const MWScript::ExecutionContext& execution, const PersonalScripts::DialogueCall& call,
+        const MWScript::ReferenceResolver& resolver)
+    { return stagePersonalInvocation(candidate, execution, resolver, &call); }
+
+    SharedWorldScript::Result InventoryService::stagePersonalInvocation(PreparedNativeInventory& candidate,
+        const MWScript::ExecutionContext& execution, const MWScript::ReferenceResolver& resolver,
+        const PersonalScripts::DialogueCall* dialogue)
+    {
         auto* transaction = dynamic_cast<ActorTransaction*>(&candidate);
         if (auto* physics = dynamic_cast<PlayerPhysicsTransaction*>(&candidate))
             transaction = dynamic_cast<ActorTransaction*>(physics->native.get());
@@ -5516,12 +5529,14 @@ namespace TES3MP::Native
             bool finished = false;
             ~RejectUnfinished() { if (!finished) invalid = true; }
         } guard{transaction->personalInvalid};
-        PersonalReferenceResolver resolver;
         const auto& before = transaction->personalScripts ? transaction->personalScripts->state : *mPersonalScriptState;
         if (transaction->personalInvocations >= PersonalScripts::MaximumInvocationsPerTransaction
             && std::ranges::none_of(before, [&](const auto& entry) { return entry.last == execution; })) return rejected;
-        auto prepared = mBinding.mPersonalScripts->prepare(before, execution, mRuntime.mStore, resolver,
-            PersonalScripts::MaximumInvocationsPerTransaction - transaction->personalInvocations);
+        const auto budget = PersonalScripts::MaximumInvocationsPerTransaction - transaction->personalInvocations;
+        auto prepared = dialogue ? mBinding.mPersonalScripts->prepareDialogue(before, execution, dialogue->topic,
+            dialogue->choice, dialogue->disposition, dialogue->talkedToPlayer, dialogue->cellName,
+            mRuntime.mStore, resolver, budget)
+            : mBinding.mPersonalScripts->prepare(before, execution, mRuntime.mStore, resolver, budget);
         auto result = prepared.result;
         if (result.outcome != SharedWorldScript::Outcome::Committed)
             transaction->personalInvalid = true;

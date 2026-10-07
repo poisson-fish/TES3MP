@@ -3,6 +3,7 @@
 
 #include <utility>
 #include <vector>
+#include <string_view>
 
 #include "../mwworld/ptr.hpp"
 
@@ -12,6 +13,7 @@ namespace ESM
     struct Dialogue;
     class RefId;
 }
+namespace MWScript { class InterpreterContext; class DialogueState; }
 
 namespace MWDialogue
 {
@@ -19,9 +21,20 @@ namespace MWDialogue
 
     class Filter
     {
+    public:
+        // All reads are from the same staged character/story invocation.
+        struct Scoped
+        {
+            MWScript::InterpreterContext& script;
+            MWScript::DialogueState& dialogue;
+            int disposition;
+            std::string_view cellName;
+        };
+    private:
         MWWorld::Ptr mActor;
         int mChoice;
         bool mTalkedToPlayer;
+        const Scoped* mScoped = nullptr;
 
         bool testActor(const ESM::DialInfo& info) const;
         ///< Is this the right actor for this \a info?
@@ -56,6 +69,7 @@ namespace MWDialogue
         using Response = std::pair<const ESM::Dialogue*, const ESM::DialInfo*>;
 
         Filter(const MWWorld::Ptr& actor, int choice, bool talkedToPlayer);
+        Filter(const MWWorld::Ptr& actor, int choice, bool talkedToPlayer, const Scoped&);
 
         std::vector<Response> list(const ESM::Dialogue& dialogue, bool fallbackToInfoRefusal, bool searchAll,
             bool invertDisposition = false) const;

@@ -45,6 +45,12 @@ namespace TES3MP::Native
             std::string_view campaignContent, CredentialCrypto& crypto, std::span<const ESM::Script> bank = {});
         const Compiler::Locals& declarations() const { return mRuntime.declarations(); }
         bool bankCapable() const { return mRuntime.bankCapable(); }
+        Interpreter::Program compileResult(std::string_view source) const { return mRuntime.compileResult(source); }
+        MWScript::WorldScript::Invocation executeResult(const State& state, const MWScript::ExecutionContext& execution,
+            const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver, MWScript::ScriptState& bank,
+            MWScript::GlobalScriptDesc& caller, MWScript::DialogueState& dialogue, const Interpreter::Program& program,
+            Interpreter::ExecutionTrace& trace) const
+        { return mRuntime.execute(state.runtime, execution, content, resolver, &trace, &bank, &caller, &dialogue, &program); }
         State initial() const;
         std::vector<char> encode(const State& state) const;
         State restore(std::span<const char> image) const;

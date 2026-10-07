@@ -1,5 +1,12 @@
 #include "personal_script.hpp"
 #include <apps/openmw/mwscript/scriptstate.hpp>
+#include <apps/openmw/mwscript/interpretercontext.hpp>
+#include <apps/openmw/mwdialogue/filter.hpp>
+#include <apps/openmw/mwworld/class.hpp>
+#include <components/esm3/esmwriter.hpp>
+#include <sstream>
+#include <bit>
+#include <cmath>
 #include <algorithm>
 #include <limits>
 
@@ -10,6 +17,7 @@ namespace TES3MP::Native
         constexpr uint64_t Magic = 0x3154535054335354;
         constexpr uint64_t ScheduledMagic = 0x3254535054335354;
         constexpr uint64_t BankMagic = 0x3354535054335354;
+        constexpr uint64_t DialogueMagic = 0x3454535054335354;
         void require(bool value)
         { if (!value) throw std::invalid_argument("Invalid or incompatible personal script state"); }
         void word(std::vector<char>& bytes, uint64_t value)
@@ -25,6 +33,106 @@ namespace TES3MP::Native
                 for (size_t i = 0; i < 8; ++i) result |= uint64_t(static_cast<unsigned char>(value[i])) << (8 * i);
                 return result;
             }
+        };
+        void ref(std::vector<char>& bytes, const ESM::RefId& id)
+        {
+            const std::string_view name = id.empty() ? std::string_view{} : id.getRefIdString();
+            require(name.size() <= MWScript::WorldScript::MaximumNameBytes && name.find('\0') == std::string_view::npos);
+            word(bytes, name.size()); bytes.insert(bytes.end(), name.begin(), name.end());
+        }
+        ESM::RefId ref(Cursor& cursor)
+        {
+            const auto count = cursor.word(); require(count <= MWScript::WorldScript::MaximumNameBytes);
+            const auto bytes = cursor.take(size_t(count));
+            require(std::ranges::find(bytes, '\0') == bytes.end());
+            return ESM::RefId::stringRefId(std::string_view(bytes.data(), bytes.size()));
+        }
+        void progression(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        {
+            ref(bytes, state.lastTopic); ref(bytes, state.lastInfo); word(bytes, std::bit_cast<uint32_t>(state.lastChoice));
+            word(bytes, state.dialogue.quests.size());
+            for (const auto& quest : state.dialogue.quests)
+            { ref(bytes, quest.mTopic); word(bytes, std::bit_cast<uint32_t>(quest.mState)); word(bytes, quest.mFinished); }
+            word(bytes, state.dialogue.entries.size());
+            for (const auto& entry : state.dialogue.entries) { ref(bytes, entry.topic); ref(bytes, entry.info); }
+            word(bytes, state.dialogue.topics.size());
+            for (const auto& topic : state.dialogue.topics) ref(bytes, topic);
+        }
+        void progression(Cursor& cursor, PersonalScripts::Instance* state)
+        {
+            const auto topic = ref(cursor), info = ref(cursor); const auto choice = cursor.word(); require(choice <= UINT32_MAX);
+            if (state) { state->lastTopic = topic; state->lastInfo = info; state->lastChoice = std::bit_cast<int32_t>(uint32_t(choice)); }
+            auto count = cursor.word(); require(count <= MWScript::DialogueState::MaximumRecords);
+            for (size_t i = 0; i < count; ++i)
+            {
+                auto id = ref(cursor); const auto index = cursor.word(), finished = cursor.word();
+                require(index <= UINT32_MAX && finished <= 1);
+                if (state) state->dialogue.quests.push_back({id, std::bit_cast<int32_t>(uint32_t(index)), static_cast<unsigned char>(finished)});
+            }
+            count = cursor.word(); require(count <= MWScript::DialogueState::MaximumEntries);
+            for (size_t i = 0; i < count; ++i)
+            { auto id = ref(cursor), entry = ref(cursor); if (state) state->dialogue.entries.push_back({id, entry}); }
+            count = cursor.word(); require(count <= MWScript::DialogueState::MaximumRecords);
+            for (size_t i = 0; i < count; ++i) { auto id = ref(cursor); if (state) state->dialogue.topics.push_back(id); }
+        }
+        struct Bank final : MWScript::ScriptState
+        {
+            const MWScript::ExecutionContext& expected;
+            std::vector<const SharedWorldScript*> scripts;
+            std::vector<MWScript::GlobalScriptDesc> instances;
+            Bank(const MWScript::ExecutionContext& execution, const PersonalScripts::Definition& definition,
+                const PersonalScripts::Instance& state) : expected(execution), scripts{definition.script.get()}
+            {
+                for (const auto& member : definition.members) scripts.push_back(member.script.get());
+                instances.reserve(scripts.size());
+                for (size_t i = 0; i < scripts.size(); ++i)
+                {
+                    const auto& member = i ? state.members[i - 1] : state.runtime;
+                    auto& descriptor = instances.emplace_back();
+                    descriptor.mLocals = MWScript::Locals::restore(member.runtime.script.mLocals,
+                        member.runtime.script.mId, scripts[i]->declarations());
+                    descriptor.mRunning = member.runtime.script.mRunning;
+                }
+            }
+            Binding resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id) override
+            {
+                require(execution == expected);
+                for (size_t i = 0; i < instances.size(); ++i)
+                    if (instances[i].mLocals.getScriptId() == id) return {instances[i], scripts[i]->declarations()};
+                throw std::invalid_argument("Script lacks character/story bank ownership");
+            }
+            void write(PersonalScripts::Instance& state) const
+            {
+                for (size_t i = 0; i < scripts.size(); ++i)
+                {
+                    auto& member = i ? state.members[i - 1] : state.runtime;
+                    member.runtime.script.mRunning = instances[i].mRunning;
+                    member.runtime.script.mLocals.mVariables.clear();
+                    require(instances[i].mLocals.write(member.runtime.script.mLocals, scripts[i]->declarations()));
+                }
+            }
+        };
+        struct FilterContext final : MWScript::InterpreterContext
+        {
+            const std::vector<ESM::Global>& globals;
+            FilterContext(const MWScript::ExecutionContext& execution, const MWWorld::ESMStore& content,
+                const MWScript::ReferenceResolver& resolver, Bank& bank, MWScript::DialogueState& dialogue,
+                const std::vector<ESM::Global>& values)
+                : InterpreterContext(nullptr, execution, content, resolver, nullptr, &bank, &dialogue), globals(values) {}
+            const ESM::Variant& global(std::string_view id) const
+            {
+                auto found = std::ranges::find(globals, ESM::RefId::stringRefId(id), &ESM::Global::mId);
+                require(found != globals.end()); return found->mValue;
+            }
+            char getGlobalType(std::string_view id) const override
+            {
+                auto found = std::ranges::find(globals, ESM::RefId::stringRefId(id), &ESM::Global::mId);
+                if (found == globals.end()) return ' ';
+                return found->mValue.getType() == ESM::VT_Float ? 'f' : found->mValue.getType() == ESM::VT_Short ? 's' : 'l';
+            }
+            int getGlobalShort(std::string_view id) const override { return global(id).getInteger(); }
+            int getGlobalLong(std::string_view id) const override { return global(id).getInteger(); }
+            float getGlobalFloat(std::string_view id) const override { return global(id).getFloat(); }
         };
         void context(std::vector<char>& bytes, const MWScript::ExecutionContext& value)
         {
@@ -46,6 +154,9 @@ namespace TES3MP::Native
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         size_t scripts = 0;
         require(!mBanks || mScheduled);
+        mDialogues = std::ranges::any_of(mDefinitions, [](const auto& entry) { return !entry.dialogues.empty(); });
+        require(!mDialogues || mBanks);
+        mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
             const auto& entry = mDefinitions[i];
@@ -63,10 +174,60 @@ namespace TES3MP::Native
             }
             for (size_t j = 0; j < i; ++j)
                 require(entry.character != mDefinitions[j].character || entry.story != mDefinitions[j].story);
+            require(!mDialogues || (!entry.dialogues.empty() && entry.dialogues.size() <= MWScript::DialogueState::MaximumRecords));
+            size_t infos = 0;
+            for (size_t d = 0; d < entry.dialogues.size(); ++d)
+            {
+                const auto& dialogue = entry.dialogues[d];
+                require(dialogue.mId.is<ESM::StringRefId>() && !dialogue.mId.empty()
+                    && dialogue.mId.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                    && dialogue.mId.getRefIdString().find('\0') == std::string_view::npos
+                    && (dialogue.mType == ESM::Dialogue::Topic || dialogue.mType == ESM::Dialogue::Journal));
+                for (size_t j = 0; j < d; ++j) require(entry.dialogues[j].mId != dialogue.mId);
+                infos += dialogue.mInfo.size(); require(infos <= MWScript::DialogueState::MaximumInfos);
+                std::vector<ESM::RefId> identities;
+                for (const auto& info : dialogue.mInfo)
+                {
+                    require(!info.mId.empty() && info.mId.is<ESM::StringRefId>()
+                        && info.mId.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                        && info.mId.getRefIdString().find('\0') == std::string_view::npos
+                        && info.mQuestStatus >= ESM::DialInfo::QS_None && info.mQuestStatus <= ESM::DialInfo::QS_Restart
+                        && info.mResponse.size() <= 4096 && info.mResultScript.size() <= MWScript::WorldScript::MaximumSourceBytes
+                        && info.mSelects.size() <= 16 && std::ranges::find(identities, info.mId) == identities.end());
+                    for (const auto& name : {info.mActor, info.mRace, info.mClass, info.mFaction, info.mPcFaction, info.mCell})
+                        require(name.empty() || (name.is<ESM::StringRefId>()
+                            && name.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                            && name.getRefIdString().find('\0') == std::string_view::npos));
+                    for (const auto& select : info.mSelects)
+                    {
+                        require(select.mVariable.size() <= MWScript::WorldScript::MaximumNameBytes
+                            && select.mVariable.find('\0') == std::string::npos);
+                        if (const auto* value = std::get_if<float>(&select.mValue)) require(std::isfinite(*value));
+                    }
+                    identities.push_back(info.mId);
+                    if (dialogue.mType == ESM::Dialogue::Topic)
+                        mResults[i].push_back({dialogue.mId, info.mId, entry.script->compileResult(info.mResultScript)});
+                }
+            }
         }
         // Includes every script's content/source/defaults/limits digest and the
         // complete ordered ownership policy. No session identities or pointers.
         auto binding = encode(initial());
+        if (mDialogues)
+        {
+            constexpr std::string_view limits = "scoped-dialogue-results-1;16;64;16;8192;4096;64;128;1048576";
+            binding.insert(binding.end(), limits.begin(), limits.end());
+            std::ostringstream output(std::ios::binary); ESM::ESMWriter writer;
+            writer.setVersion(ESM::VER_130); writer.setFormatVersion(ESM::CurrentSaveGameFormatVersion); writer.save(output);
+            for (const auto& entry : mDefinitions)
+                for (const auto& dialogue : entry.dialogues)
+                {
+                    writer.startRecord("DIAL"); dialogue.save(writer); writer.endRecord("DIAL");
+                    for (const auto& info : dialogue.mInfo)
+                    { writer.startRecord("INFO"); info.save(writer); writer.endRecord("INFO"); }
+                }
+            writer.close(); const auto policy = output.str(); binding.insert(binding.end(), policy.begin(), policy.end());
+        }
         require(crypto.sha256(std::as_bytes(std::span(binding)), mIdentity));
     }
 
@@ -93,7 +254,7 @@ namespace TES3MP::Native
         const auto& last = state.last;
         require(last.ownership == MWScript::ExecutionContext::Ownership::Character && last.campaign == mCampaign
             && last.character == expected.character && last.story == expected.story && last.physicalScope == 1
-            && !last.sourceReference && !last.sourceLife
+            && (mDialogues || (!last.sourceReference && !last.sourceLife))
             && (mBanks ? last.invocation >= state.runtime.tick : last.invocation == state.runtime.tick)
             && last.causalEvent <= state.eventCursor
             && (!last.causalEvent || last.causalEvent == state.eventCursor)
@@ -103,13 +264,29 @@ namespace TES3MP::Native
         for (const auto& member : state.members)
             require(member.tick <= last.invocation && member.runtime.globals.empty());
         if (last.invocation) last.validate();
+        if (mDialogues)
+        {
+            auto execution = last; if (!execution.invocation) execution.invocation = 1;
+            auto progress = state.dialogue;
+            MWScript::DialogueState dialogue(execution, progress, expected.dialogues);
+            require(state.lastTopic.empty() == !last.sourceReference && state.lastTopic.empty() == state.lastInfo.empty());
+            if (!state.lastTopic.empty())
+            {
+                const auto& topic = dialogue.record(state.lastTopic, ESM::Dialogue::Topic);
+                require(last.causalEvent && state.lastChoice >= -1
+                    && std::ranges::any_of(topic.mInfo, [&](const auto& info) { return info.mId == state.lastInfo; }));
+            }
+            else require(state.lastChoice == -1);
+        }
+        else require(state.dialogue.quests.empty() && state.dialogue.entries.empty() && state.dialogue.topics.empty()
+            && state.lastTopic.empty() && state.lastInfo.empty() && state.lastChoice == -1);
     }
 
     std::vector<char> PersonalScripts::encode(const State& state) const
     {
         require(state.size() == mDefinitions.size());
         std::vector<char> bytes;
-        word(bytes, mBanks ? BankMagic : mScheduled ? ScheduledMagic : Magic);
+        word(bytes, mDialogues ? DialogueMagic : mBanks ? BankMagic : mScheduled ? ScheduledMagic : Magic);
         for (auto value : mIdentity.bytes) bytes.push_back(static_cast<char>(std::to_integer<unsigned char>(value)));
         word(bytes, state.size());
         for (size_t i = 0; i < state.size(); ++i)
@@ -129,6 +306,7 @@ namespace TES3MP::Native
                     word(bytes, encoded.size()); bytes.insert(bytes.end(), encoded.begin(), encoded.end());
                 }
             }
+            if (mDialogues) progression(bytes, state[i]);
         }
         require(bytes.size() <= MaximumImageBytes);
         return bytes;
@@ -138,7 +316,7 @@ namespace TES3MP::Native
     {
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
-        require(input.word() == (mBanks ? BankMagic : mScheduled ? ScheduledMagic : Magic));
+        require(input.word() == (mDialogues ? DialogueMagic : mBanks ? BankMagic : mScheduled ? ScheduledMagic : Magic));
         const auto identity = input.take(32);
         require(std::equal(identity.begin(), identity.end(), reinterpret_cast<const char*>(mIdentity.bytes.data())));
         const auto count = input.word(); require(count == mDefinitions.size());
@@ -159,6 +337,7 @@ namespace TES3MP::Native
                     require(memberSize && memberSize <= SharedWorldScript::MaximumImageBytes); preflight.take(memberSize);
                 }
             }
+            if (mDialogues) progression(preflight, nullptr);
         }
         require(preflight.bytes.empty());
         State state;
@@ -178,6 +357,7 @@ namespace TES3MP::Native
                     member.runtime.globals.clear(); entry.members.push_back(std::move(member));
                 }
             }
+            if (mDialogues) progression(input, &entry);
             validate(entry, i); state.push_back(std::move(entry));
         }
         require(encode(state) == std::vector<char>(bytes.begin(), bytes.end()));
@@ -240,32 +420,8 @@ namespace TES3MP::Native
             prepared.state = before;
             auto& state = prepared.state[index];
             const auto& definition = mDefinitions[index];
-            std::vector<const SharedWorldScript*> scripts{definition.script.get()};
-            for (const auto& member : definition.members) scripts.push_back(member.script.get());
-            struct Bank final : MWScript::ScriptState
-            {
-                const MWScript::ExecutionContext& expected;
-                const std::vector<const SharedWorldScript*>& scripts;
-                std::vector<MWScript::GlobalScriptDesc> instances;
-                Bank(const MWScript::ExecutionContext& context, const std::vector<const SharedWorldScript*>& policy)
-                    : expected(context), scripts(policy) {}
-                Binding resolve(const MWScript::ExecutionContext& context, const ESM::RefId& id) override
-                {
-                    require(context == expected);
-                    for (size_t i = 0; i < instances.size(); ++i)
-                        if (instances[i].mLocals.getScriptId() == id) return {instances[i], scripts[i]->declarations()};
-                    throw std::invalid_argument("Script lacks character/story bank ownership");
-                }
-            } bank(execution, scripts);
-            bank.instances.reserve(scripts.size());
-            for (size_t i = 0; i < scripts.size(); ++i)
-            {
-                const auto& member = i ? state.members[i - 1] : state.runtime;
-                auto& descriptor = bank.instances.emplace_back();
-                descriptor.mLocals = MWScript::Locals::restore(member.runtime.script.mLocals,
-                    member.runtime.script.mId, scripts[i]->declarations());
-                descriptor.mRunning = member.runtime.script.mRunning;
-            }
+            Bank bank(execution, definition, state);
+            const auto& scripts = bank.scripts;
             for (size_t i = 0; i < scripts.size(); ++i)
             {
                 auto& descriptor = bank.instances[i];
@@ -285,15 +441,8 @@ namespace TES3MP::Native
                 member.tick = invocation.state.tick;
                 ++prepared.invocations;
             }
-            // Includes member writes to already visited/stopped scripts and self
-            // aliases. No separate caller-local copy can overwrite those writes.
-            for (size_t i = 0; i < scripts.size(); ++i)
-            {
-                auto& member = i ? state.members[i - 1] : state.runtime;
-                member.runtime.script.mRunning = bank.instances[i].mRunning;
-                member.runtime.script.mLocals.mVariables.clear();
-                require(bank.instances[i].mLocals.write(member.runtime.script.mLocals, scripts[i]->declarations()));
-            }
+            bank.write(state);
+            state.lastTopic = {}; state.lastInfo = {}; state.lastChoice = -1;
             state.last = execution; state.eventCursor = std::max(state.eventCursor, execution.causalEvent);
             prepared.image = encode(prepared.state);
             prepared.invocations = std::max(size_t(1), prepared.invocations);
@@ -304,6 +453,70 @@ namespace TES3MP::Native
         {
             prepared.state.clear(); prepared.image.clear(); prepared.invocations = 0;
             result.outcome = SharedWorldScript::Outcome::Rejected; result.executed = false; result.presentation.clear();
+            result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+        }
+        return prepared;
+    }
+
+    PersonalScripts::Prepared PersonalScripts::prepareDialogue(const State& before,
+        const MWScript::ExecutionContext& execution, const ESM::RefId& topic, int choice, int disposition,
+        bool talkedToPlayer, std::string_view cellName, const MWWorld::ESMStore& content,
+        const MWScript::ReferenceResolver& resolver, size_t budget) const
+    {
+        Prepared prepared; auto& result = prepared.result; result.invocationTick = execution.invocation;
+        try
+        {
+            execution.validate(); (void)encode(before);
+            require(mDialogues && execution.campaign == mCampaign && execution.physicalScope == 1
+                && execution.ownership == MWScript::ExecutionContext::Ownership::Character
+                && execution.sourceReference && execution.sourceLife && execution.causalEvent
+                && choice >= -1 && disposition >= 0 && disposition <= 100 && cellName.size() <= 256);
+            const auto found = std::ranges::find_if(mDefinitions, [&](const auto& entry) {
+                return entry.character == execution.character && entry.story == execution.story; });
+            require(found != mDefinitions.end());
+            const auto index = size_t(found - mDefinitions.begin()); const auto& current = before[index];
+            result.script = current.runtime.runtime.script.mId;
+            if (execution == current.last)
+            {
+                require(topic == current.lastTopic && choice == current.lastChoice);
+                result.outcome = SharedWorldScript::Outcome::Committed; return prepared;
+            }
+            require(budget && budget <= MaximumInvocationsPerTransaction
+                && current.last.invocation != UINT64_MAX && execution.invocation == current.last.invocation + 1
+                && execution.causalEvent > current.eventCursor && current.runtime.tick != UINT64_MAX);
+            prepared.state = before; auto& state = prepared.state[index];
+            MWScript::DialogueState dialogue(execution, state.dialogue, found->dialogues);
+            const auto& record = dialogue.record(topic, ESM::Dialogue::Topic);
+            Bank bank(execution, *found, state);
+            FilterContext script(execution, content, resolver, bank, dialogue, state.runtime.runtime.globals);
+            const auto actor = script.resolveReference({});
+            require(actor.hasLiveReference() && actor.getClass().getScript(actor) == result.script);
+            MWDialogue::Filter::Scoped scoped{script, dialogue, disposition, cellName};
+            MWDialogue::Filter filter(actor, choice, talkedToPlayer, scoped);
+            const auto response = filter.search(record, false);
+            require(response.second != nullptr);
+            const auto program = std::ranges::find_if(mResults[index], [&](const auto& value) {
+                return value.topic == topic && value.info == response.second->mId; });
+            require(program != mResults[index].end());
+            auto invocation = found->script->executeResult(state.runtime, execution, content, resolver,
+                bank, bank.instances.front(), dialogue, program->program, result.trace);
+            state.runtime.runtime.globals = std::move(invocation.state.globals);
+            ++state.runtime.tick;
+            bank.write(state);
+            state.last = execution; state.eventCursor = execution.causalEvent;
+            state.lastTopic = topic; state.lastInfo = response.second->mId; state.lastChoice = choice;
+            prepared.image = encode(prepared.state); prepared.invocations = 1;
+            result.outcome = SharedWorldScript::Outcome::Committed; result.executed = true;
+        }
+        catch (const MWScript::ScriptContextUnavailable& error)
+        {
+            prepared.state.clear(); prepared.image.clear(); prepared.invocations = 0;
+            result.outcome = SharedWorldScript::Outcome::Deferred; result.diagnostic = error.what();
+        }
+        catch (const std::exception& error)
+        {
+            prepared.state.clear(); prepared.image.clear(); prepared.invocations = 0;
+            result.outcome = SharedWorldScript::Outcome::Rejected; result.executed = false;
             result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
         }
         return prepared;
@@ -340,7 +553,7 @@ namespace TES3MP::Native
                 require(prepared.invocations < MaximumInvocationsPerTransaction
                     && current.last.invocation != std::numeric_limits<uint64_t>::max());
                 auto execution = current.last;
-                ++execution.invocation; execution.causalEvent = 0;
+                ++execution.invocation; execution.causalEvent = 0; execution.sourceReference = execution.sourceLife = 0;
                 auto invocation = prepare(prepared.state, execution, content, resolver,
                     MaximumInvocationsPerTransaction - prepared.invocations);
                 result = std::move(invocation.result);

@@ -7,7 +7,7 @@ namespace TES3MP::Native
     inline constexpr uint64_t WorldScriptCampaignMagic = 0x3053435754335354;
     inline constexpr size_t MaximumWorldScriptImageBytes = 32768;
     inline constexpr uint64_t PersonalScriptCampaignMagic = 0x3153435054335354;
-    inline constexpr size_t MaximumPersonalScriptImageBytes = 528384;
+    inline constexpr size_t MaximumPersonalScriptImageBytes = 1048576;
     inline std::pair<std::span<const char>, std::span<const char>> readPersonalScriptCampaign(std::span<const char> bytes)
     {
         size_t offset = 0;

@@ -32,6 +32,12 @@ namespace MWDialogue
     {
     }
 
+    Quest::Quest(const ESM::QuestState& state, const ESM::Dialogue& dialogue)
+        : Topic(state.mTopic, dialogue.mStringId), mIndex(state.mState), mFinished(state.mFinished != 0)
+    {
+        if (state.mTopic != dialogue.mId) throw std::invalid_argument("Quest content identity mismatch");
+    }
+
     std::string_view Quest::getName() const
     {
         const ESM::Dialogue* dialogue = MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>().find(mTopic);
@@ -50,9 +56,12 @@ namespace MWDialogue
     }
 
     void Quest::setIndex(int index)
+    { setIndex(index, true); }
+
+    void Quest::setIndex(int index, bool notify)
     {
         // The index must be set even if no related journal entry was found
-        MWBase::Environment::get().getLuaManager()->questUpdated(mTopic, index);
+        if (notify) MWBase::Environment::get().getLuaManager()->questUpdated(mTopic, index);
         mIndex = index;
     }
 
@@ -71,6 +80,13 @@ namespace MWDialogue
         const ESM::Dialogue* dialogue
             = MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>().find(entry.mTopic);
 
+        return addEntry(entry, *dialogue, true);
+    }
+
+    bool Quest::addEntry(const JournalEntry& entry, const ESM::Dialogue& record, bool notify)
+    {
+        const ESM::Dialogue* dialogue = &record;
+
         auto info = std::find_if(
             dialogue->mInfo.begin(), dialogue->mInfo.end(), [&](const auto& i) { return i.mId == entry.mInfoId; });
 
@@ -83,7 +99,7 @@ namespace MWDialogue
         if (info->mData.mJournalIndex > mIndex)
         {
             mIndex = info->mData.mJournalIndex;
-            MWBase::Environment::get().getLuaManager()->questUpdated(mTopic, mIndex);
+            if (notify) MWBase::Environment::get().getLuaManager()->questUpdated(mTopic, mIndex);
         }
 
         for (TEntryIter iter(mEntries.begin()); iter != mEntries.end(); ++iter)

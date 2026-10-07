@@ -17,6 +17,7 @@ namespace MWScript
     namespace Dialogue
     {
         void installOpcodes(Interpreter::Interpreter& interpreter);
+        void installJournalOpcodes(Interpreter::Interpreter& interpreter);
     }
 }
 

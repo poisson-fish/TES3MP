@@ -25,6 +25,8 @@
 #include "../mwmechanics/npcstats.hpp"
 
 #include "selectwrapper.hpp"
+#include "../mwscript/interpretercontext.hpp"
+#include "../mwscript/dialoguestate.hpp"
 
 namespace
 {
@@ -164,8 +166,10 @@ bool MWDialogue::Filter::testActor(const ESM::DialInfo& info) const
 
 bool MWDialogue::Filter::testPlayer(const ESM::DialInfo& info) const
 {
-    const MWWorld::Ptr player = MWMechanics::getPlayer();
-    MWMechanics::NpcStats& stats = player.getClass().getNpcStats(player);
+    if (mScoped && info.mPcFaction.empty() && info.mData.mPCrank == -1)
+        return info.mCell.empty() || Misc::StringUtils::ciStartsWith(mScoped->cellName, info.mCell.getRefIdString());
+    const MWWorld::Ptr player = mScoped ? mScoped->script.getPlayer() : MWMechanics::getPlayer();
+    MWMechanics::NpcStats& stats = mScoped ? mScoped->script.getPlayerStats() : player.getClass().getNpcStats(player);
 
     // check player faction and rank
     if (!info.mPcFaction.empty())
@@ -197,7 +201,8 @@ bool MWDialogue::Filter::testPlayer(const ESM::DialInfo& info) const
     if (!info.mCell.empty())
     {
         // supports partial matches, just like getPcCell
-        std::string_view playerCell = MWBase::Environment::get().getWorld()->getCellName(player.getCell());
+        std::string_view playerCell = mScoped ? mScoped->cellName
+            : MWBase::Environment::get().getWorld()->getCellName(player.getCell());
         if (!Misc::StringUtils::ciStartsWith(playerCell, info.mCell.getRefIdString()))
             return false;
     }
@@ -221,7 +226,8 @@ bool MWDialogue::Filter::testDisposition(const ESM::DialInfo& info, bool invert)
     if (isCreature)
         return true;
 
-    int actorDisposition = MWBase::Environment::get().getMechanicsManager()->getDerivedDisposition(mActor);
+    int actorDisposition = mScoped ? mScoped->disposition
+        : MWBase::Environment::get().getMechanicsManager()->getDerivedDisposition(mActor);
     // For service refusal, the disposition check is inverted. However, a value of 0 still means "always succeed".
     return invert ? (info.mData.mDisposition == 0 || actorDisposition < info.mData.mDisposition)
                   : (actorDisposition >= info.mData.mDisposition);
@@ -233,6 +239,12 @@ bool MWDialogue::Filter::testFunctionLocal(const MWDialogue::SelectWrapper& sele
 
     if (scriptName.empty())
         return false; // no script
+
+    if (mScoped)
+    {
+        const auto value = mScoped->script.getDialogueLocal(scriptName, select.getName());
+        return value && std::visit([&](const auto number) { return select.selectCompare(number); }, *value);
+    }
 
     std::string name = select.getName();
 
@@ -265,6 +277,25 @@ bool MWDialogue::Filter::testFunctionLocal(const MWDialogue::SelectWrapper& sele
 
 bool MWDialogue::Filter::testSelectStruct(const SelectWrapper& select) const
 {
+    if (mScoped)
+    {
+        // Reject unknown services before any singleton read. Ordering and all
+        // accepted comparisons below remain the stock filter implementation.
+        switch (select.getFunction())
+        {
+            case ESM::DialogueCondition::Function_Global:
+            case ESM::DialogueCondition::Function_Local:
+            case ESM::DialogueCondition::Function_NotLocal:
+            case ESM::DialogueCondition::Function_Journal:
+            case ESM::DialogueCondition::Function_Choice:
+            case ESM::DialogueCondition::Function_TalkedToPc:
+            case ESM::DialogueCondition::Function_NotId:
+            case ESM::DialogueCondition::Function_NotFaction:
+            case ESM::DialogueCondition::Function_NotClass:
+            case ESM::DialogueCondition::Function_NotRace: break;
+            default: throw std::invalid_argument("Dialogue filter lacks scoped service");
+        }
+    }
     if (select.getFunction() == ESM::DialogueCondition::Function_Choice && mChoice == -1)
         // If not currently in a choice, we reject all conditions that test against choices.
         return false;
@@ -302,6 +333,15 @@ bool MWDialogue::Filter::testSelectStructNumeric(const SelectWrapper& select) co
     {
         case ESM::DialogueCondition::Function_Global:
         {
+            if (mScoped)
+            {
+                auto& script = mScoped->script;
+                const auto kind = script.getGlobalType(select.getName());
+                if (kind == ' ') throw std::invalid_argument("Dialogue global lacks story ownership");
+                const auto value = kind == 'f' ? script.getGlobalFloat(select.getName())
+                    : static_cast<float>(kind == 's' ? script.getGlobalShort(select.getName()) : script.getGlobalLong(select.getName()));
+                return select.selectCompare(value);
+            }
             const auto& world = MWBase::Environment::get().getWorld();
             if (world->getGlobalVariableType(select.getName()) == ' ')
                 return true; // ignore this filter if the global doesn't exist
@@ -351,13 +391,14 @@ bool MWDialogue::Filter::testSelectStructNumeric(const SelectWrapper& select) co
 
 int MWDialogue::Filter::getSelectStructInteger(const SelectWrapper& select) const
 {
-    MWWorld::Ptr player = MWMechanics::getPlayer();
+    // Scoped Journal/Choice/TalkedToPC need no physical player lookup.
+    MWWorld::Ptr player = mScoped ? MWWorld::Ptr{} : MWMechanics::getPlayer();
 
     switch (select.getFunction())
     {
         case ESM::DialogueCondition::Function_Journal:
-
-            return MWBase::Environment::get().getJournal()->getJournalIndex(select.getId());
+            return mScoped ? mScoped->dialogue.journalIndex(select.getId())
+                : MWBase::Environment::get().getJournal()->getJournalIndex(select.getId());
 
         case ESM::DialogueCondition::Function_Item:
         {
@@ -573,7 +614,7 @@ int MWDialogue::Filter::getSelectStructInteger(const SelectWrapper& select) cons
 
 bool MWDialogue::Filter::getSelectStructBoolean(const SelectWrapper& select) const
 {
-    MWWorld::Ptr player = MWMechanics::getPlayer();
+    MWWorld::Ptr player = mScoped ? MWWorld::Ptr{} : MWMechanics::getPlayer();
 
     switch (select.getFunction())
     {
@@ -718,6 +759,17 @@ MWDialogue::Filter::Filter(const MWWorld::Ptr& actor, int choice, bool talkedToP
 {
 }
 
+MWDialogue::Filter::Filter(const MWWorld::Ptr& actor, int choice, bool talkedToPlayer, const Scoped& context)
+    : Filter(actor, choice, talkedToPlayer)
+{
+    const auto* execution = context.script.getExecutionContext();
+    if (!execution || execution->ownership != MWScript::ExecutionContext::Ownership::Character
+        || actor.isEmpty() || context.script.resolveReference({}) != actor
+        || choice < -1 || context.disposition < 0 || context.disposition > 100)
+        throw std::invalid_argument("Invalid scoped dialogue filter context");
+    mScoped = &context;
+}
+
 MWDialogue::Filter::Response MWDialogue::Filter::search(
     const ESM::Dialogue& dialogue, const bool fallbackToInfoRefusal) const
 {
@@ -731,12 +783,21 @@ MWDialogue::Filter::Response MWDialogue::Filter::search(
 
 bool MWDialogue::Filter::couldPotentiallyMatch(const ESM::DialInfo& info) const
 {
+    if (mScoped) throw std::invalid_argument("Scoped potential dialogue matching is not admitted");
     return testActor(info) && matchesStaticFilters(info, mActor);
 }
 
 std::vector<MWDialogue::Filter::Response> MWDialogue::Filter::list(
     const ESM::Dialogue& dialogue, bool fallbackToInfoRefusal, bool searchAll, bool invertDisposition) const
 {
+    if (mScoped)
+    {
+        if (&dialogue != &mScoped->dialogue.record(dialogue.mId, ESM::Dialogue::Topic)
+            || dialogue.mInfo.size() > MWScript::DialogueState::MaximumInfos)
+            throw std::invalid_argument("Dialogue filter record lacks bounded story ownership");
+        for (const auto& info : dialogue.mInfo)
+            if (info.mSelects.size() > 16) throw std::invalid_argument("Dialogue select budget exceeded");
+    }
     std::vector<MWDialogue::Filter::Response> infos;
 
     bool infoRefusal = false;
@@ -762,9 +823,9 @@ std::vector<MWDialogue::Filter::Response> MWDialogue::Filter::list(
         // No response is valid because of low NPC disposition,
         // search a response in the topic "Info Refusal"
 
-        const MWWorld::Store<ESM::Dialogue>& dialogues = MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>();
-
-        const ESM::Dialogue& infoRefusalDialogue = *dialogues.find(ESM::RefId::stringRefId("Info Refusal"));
+        const ESM::Dialogue& infoRefusalDialogue = mScoped
+            ? mScoped->dialogue.record(ESM::RefId::stringRefId("Info Refusal"), ESM::Dialogue::Topic)
+            : *MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>().find(ESM::RefId::stringRefId("Info Refusal"));
 
         for (const auto& info : infoRefusalDialogue.mInfo)
             if (testActor(info) && testPlayer(info) && testSelectStructs(info)

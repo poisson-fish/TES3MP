@@ -30,6 +30,7 @@ namespace MWDialogue
         Topic();
 
         Topic(const ESM::RefId& topic);
+        Topic(const ESM::RefId& topic, std::string name);
 
         virtual ~Topic() = default;
 

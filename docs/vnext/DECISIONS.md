@@ -244,6 +244,11 @@ after focused evidence.
 
 ## Integrity and migration
 
+**Scoped dialogue (V84).** Stock filters/result bytecode use explicit content and staged
+Quest/Topic progression. Journal/topic identities, bank writes and contextual receipts
+commit with gameplay; Lua/UI callbacks stay closed. Bind bounded winning DIAL/INFO policy;
+revalidate speaker scope/life/script. Unstaged filters and physical results reject.
+
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound
 state atomically. No checkpoint-only acknowledgments or parallel files.
