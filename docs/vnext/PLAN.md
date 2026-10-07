@@ -36,18 +36,13 @@ retain small fixtures.
 
 ## M4 - Fight together using OpenMW mechanics
 
-**Closed, 2026-10-06:** completed acceptance and explicit owner sign-off in this
-chat close M4, including combined encounter acceptance and V79 player cutover.
-[CURRENT.md](CURRENT.md) preserves retained evidence, runtime bounds and attribution
-of owner sign-off; older capture records leaving full M4 open predate closure.
-
-**Accepted outcome:** server-owned OpenMW melee/ranged/magic mechanics, NPC
-navigation/collision/door avoidance, effects/wear, life-indexed death/respawn,
-shared corpse loot and coherent recovery for the declared bounded loadout.
-Exploration retains adjacent-cell combat/visibility, split/regroup/unload and
-reentry/reconnect/restart without duplicate simulation or outcomes. V79 shared
-player physics meets the reconciliation budgets in
-[DECISIONS.md](DECISIONS.md#m4-actor-simulation); older campaigns retain migration.
+**Closed, 2026-10-06:** owner sign-off includes combined encounters and V79 player
+cutover. [CURRENT](CURRENT.md) retains evidence/bounds/attribution; older open
+captures predate closure. Accepted native melee/ranged/magic, NPC navigation/
+collision/doors, effects/wear, lives/respawn/corpse loot and coherent recovery.
+Exploration preserves adjacent combat, split/regroup/unload/reentry/reconnect/restart
+without duplicate simulation. V79 meets [reconciliation budgets](DECISIONS.md#m4-actor-simulation);
+older campaigns retain migration.
 
 **Retain as regression contract:** stock weapon/attack modes, unarmed
 fatigue/knockout/health, armor/block/resistances, spell sources/ranges/areas/order,
@@ -56,13 +51,12 @@ enchantments, AI, projectiles/ammunition, equipment/summons, presentation and
 actor/life identity. Preserve stock restrictions, single writers, bounded input,
 atomic failed writes and durable resources/RNG/effects/deaths/loot together.
 
-Combined acceptance covers sustained overlapping melee/ranged/magic from both
-desktops and NPCs with varied vanilla/TR equipment under latency/jitter/loss;
-simultaneous impacts, interruption, death, corpse-loot contention, respawn,
+Combined acceptance covers sustained overlapping melee/ranged/magic, two desktops/NPCs, varied vanilla/TR equipment,
+latency/jitter/loss, simultaneous impacts, interruption/death/loot contention/respawn,
 disconnect/restart during flight/effects/get-up and convergence without duplicate
-costs/damage/loot. Retain stock-speed render-frame body/casting/recovery sampling,
-callback suppression and shared collision. Focused automated captures establish
-their exercised paths; combined encounter closure includes owner acceptance.
+costs/damage/loot. Retain stock-speed body/casting/recovery sampling, callback
+suppression and shared collision. Captures prove exercised paths; owner acceptance
+closes combined encounters.
 
 **Boundary:** M5 owns general scripts, full AI packages and personal quest
 credit/rewards; M7 broadens compatibility. Authored corpses/summons never become
@@ -71,49 +65,38 @@ retire replaced independent writers only after replacement evidence.
 
 ## M5 - Complete scripted quests independently and together
 
-**Outcome:** unchanged engine scripts support a living shared world and independent
-progression. **Active, implementation unstarted:** M4 is closed. Begin with
-the shared-world-first slice below. Follow [current direction](DECISIONS.md#scripted-quest-execution-contract):
+**Outcome:** unchanged engine scripts support shared exploration, independent
+progression and optional parties with individual rewards. **Active, implementation
+unstarted:** M4 is closed. The [M5 contract](DECISIONS.md#m5-implementation-contract)
+owns behavior, party defaults, admission rules and acceptance; sequence bounded slices:
 
-1. **Shared world first:** execute one context-free world script once for two
-   desktops, preserving state through reentry/restart. Broaden ambient/object/door/NPC
-   scripts by supported operations; separate presentation. Inspect excluded Seyda
-   Neen content; restore only proven services.
-2. **Context and transactions:** refactor InterpreterContext, dialogue filters,
-   Journal/AddTopic and cross-script access. Prove separate journals/topics and stock
-   single-player behavior. Namespace story globals/locals/script instances/callbacks;
-   personal operations require character/story identity. Bound execution and commit
-   state, effects, RNG and event consumption together. ScriptManager distinguishes
-   committed/deferred/rejected; waits never deactivate scripts.
-3. **Runtime waits and diagnostics:** discover dependencies during execution;
-   persist bounded wake records and revalidate on changes. Log script/instruction,
-   context/reference/life, reads, effects and outcome; fix API semantics with
-   arbitrary-name regressions, without quest-specific handlers or prerequisite graphs.
-4. **Shared death:** consume attributed M4 life history through personal OnDeath
-   cursors and unavailable-aware health/existence/enumeration. Foreign kills defer
-   dependent work until respawn; preserve own failures and pause affected deadlines.
-   Explain waits; show authoritative remaining respawn time only when known.
-5. **NPC activities and divergence:** reserve conflicting scripted control for one
-   story while server AI/combat continues. Define completion, disconnect, death and
-   recovery rules before admission. Release alone cannot restore departed NPCs.
-   Scoped Disable/Delete, inventory/AI edits, relocation and spawns preserve others'
-   access; persistent physical divergence needs coherent instances across affected
-   cells. Restoration/item-access policies remain unresolved; never reset rewards.
-6. **Lua and recovery:** propagate context through bindings/storage/events/timers;
-   prove Lua-state and engine-effect rollback before admission. Persist personal state,
-   invocations/waits/reservations/scoped references coherently. Keep story identity ready
-   for optional shared-party stories; party formation/progress merging remain deferred.
-7. **Content proof:** advance Seyda Neen activation, ring rewards, departure, scripted
-   routines and taxman branches; then one unchanged TR quest independently/together.
-   A finishes; B completes without A/items. Verify concurrent dialogue/recovery;
-   API coverage bounds compatibility.
+1. **Shared world first:** one context-free engine script executes once across two
+   desktops. Prove atomic failure, presentation separation and reentry/restart.
+   Inspect excluded Seyda Neen content; restore only proven operations.
+2. **Context and transactions:** scope InterpreterContext, reference lookup, dialogue
+   filters, journals/topics and cross-script state. Prove isolated characters and
+   stock callers; introduce committed/deferred/rejected outcomes.
+3. **Waits and death:** persist runtime dependencies, attributed life-event cursors
+   and affected clocks. Prove foreign/own/pre-quest/helper credit, fair access after
+   repeated foreign deaths, retry/restart and bounded diagnostics.
+4. **Physical scope and acquisition:** implement reservations, durable activities,
+   coherent instances across cells and provenance-based acquisition/depletion.
+   Prove escorts/departures, stock AI packages, scoped inventory/spawns and
+   recovery-copy restrictions.
+5. **Lua and recovery:** carry context through bindings/storage/events/timers; prove
+   rollback before admission. Generalize coherent recovery already required by earlier
+   slices. No quest handlers, prerequisite graphs or inference of ambiguous origins.
+6. **Content proof:** Seyda Neen activation/ring/departure/routines/taxman, then one
+   unchanged TR quest. A finishes; B completes without A/items. Exercise concurrent
+   dialogue, failed writes, waiting/reserved restart and retained M4 behavior.
+7. **Party addition:** compatible enrollment, shared choices/events, helper roles,
+   per-character costs/rewards and durable receipts. Prove late join, disagreement,
+   offline/leader loss, leave/kick/rejoin and independent continuation. General
+   progress merging stays deferred; parties do not delay the first shared-script slice.
 
-**Acceptance:** arbitrary names; OnDeath/polling, indirect dependencies, foreign/own
-and pre-quest/helper credit, stale lives, late joins, legitimate repeats, duplicate
-callbacks, failed writes and restart while waiting/reserved. Local/item writes before
-unavailable reads leak nothing. No duplicate public spawns/authored-corpse revival.
-Prove reservation contention and instance isolation. Use stock script harness/filtered
-native tests individually.
+**Acceptance:** satisfy the contract's proof obligations using arbitrary-name fixtures
+and unchanged content; no mutation leaks, duplicate public loot/spawns/rewards or
+authored-corpse revival. Run stock script harness/filtered native tests individually.
 
 **Retire:** bespoke quests, duplicate logic, old ABI/unscoped callers after replacement
 evidence; retain engine serialization and unsupported-API diagnostics.

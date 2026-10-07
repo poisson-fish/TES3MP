@@ -1,16 +1,14 @@
 # Multiplayer modded OpenMW
 
 Build cooperative multiplayer OpenMW for compatible modpacks, including Tamriel
-Rebuilt. Players explore and fight together and complete campaigns independently;
-another's actions or absence must not permanently block their opportunities.
-Personal progression remains a target. Clients retain OpenMW graphics and
-visual mods.
+Rebuilt. Players explore/fight together and complete campaigns independently;
+others cannot permanently block opportunities. Clients retain OpenMW graphics/visual mods.
 
 ## Chosen route
 
-Reuse and refactor OpenMW content, mechanics, world and scripting on an authoritative
-dedicated server. Separate simulation from presentation and make player context explicit.
-Do not create independent gameplay formulas, manual catalogs or a quest language.
+Refactor OpenMW content/mechanics/world/scripting on an authoritative dedicated
+server. Separate simulation/presentation; make player context explicit. No
+independent gameplay formulas, manual catalogs or quest language.
 
 ```text
 Shared gameplay loadout
@@ -27,20 +25,18 @@ OpenMW clients: input, prediction, UI, graphics, audio
 Networking remains engine-independent. [CURRENT.md](CURRENT.md) names the next
 action and separates synthetic/live evidence; migrate with one writer.
 
-M4 is closed with owner sign-off on 2026-10-06: V79 player physics cutover,
-combat/death/loot/respawn/body/door/NPC and combined encounter acceptance passed.
+M4 closed with owner sign-off, 2026-10-06; [CURRENT](CURRENT.md) retains evidence.
 [M5](PLAN.md#m5---complete-scripted-quests-independently-and-together) is active,
-implementation unstarted. Begin with one authoritative shared world script;
-independent progression follows the same engine scripting route.
+implementation unstarted. Begin with one authoritative shared world script.
 
 ## Product boundaries
 
-- Shared world, independent progression; no synchronized attendance or quest stages.
-  [Progression design](DECISIONS.md#cooperative-progression-design) proposes shared
-  NPC lives and personal story state. Temporary unavailability is acceptable;
-  private campaigns are not the default; quest adaptations cannot be required. M5 owns
-  contextual scripts, deferred dependencies and scoped permanent changes.
-  Item replenishment remains unresolved; retries cannot duplicate rewards.
+- Shared world, independent progression; others cannot permanently consume opportunities.
+  The [M5 contract](DECISIONS.md#m5-implementation-contract) adopts personal consequences,
+  local story instances and bounded recovery copies through proven acquisition routes.
+  Its later party addition coordinates compatible stories with individual rewards;
+  joining never merges histories. Private campaigns are not the default; quest edits
+  cannot be required. Implementation and API compatibility still require evidence.
 - Match gameplay plugins, ordering, scripts and resources. Visual-only
   differences may remain client-local.
 - Target supported OpenMW APIs. MWSE/native-engine-only support and multiplayer

@@ -26,48 +26,41 @@ Never persist pointers, render objects or sessions.
 
 ## M4 actor simulation
 
-**Runtime ownership.** App-local OpenMW commands/snapshots/activity/identity share
-authoritative AI/physics/combat/loot inventories. Preserve stock callers and dependency checks.
+**Runtime/ticks.** App-local OpenMW owns AI/physics/combat/loot; preserve stock
+callers/boundaries. Stage intents/resources/effects/wear/deaths/loot/RNG/receipts;
+persist before publication. WhenUsed pays at launch; source identity survives
+movement. Door contact precedes physics; avoidance persists. Simulate the
+player/traveler area union once per actor; persist destinations/guards.
+Saturation pauses substeps; offline players freeze.
 
-**Gameplay animation.** Bind CPU movement/hit/release timing and collision;
-null presentation preserves mechanics. V22 persists wind-up selection and rechecks hit-key reach.
+**Gameplay animation.** CPU movement/hit/release/collision survives null presentation.
+V22 persists wind-up selection and rechecks hit-key reach.
 
-**Travel scheduling.** Simulate the player/traveler area union once per actor.
-Persist destinations/guards. Saturation pauses substeps; offline players freeze.
-
-**Composed ticks.** Stage intents, simulation, resources, effects, wear, death/
-loot, RNG and receipts; persist before publication. WhenUsed pays at launch;
-source identity survives movement. Door contact precedes physics. Persist avoidance.
-
-**Committed ground collision.** Inventory owns durable ground references. Detached
-membership/transforms drive shared physics, projectile/visibility queries and navigation
-before simulation. Durability swaps scenes without allocation. Recovery rebuilds from
-validated inventory, preserving actor frames; world changes replan travel. Animated
+**Ground collision.** Durable inventory membership/transforms drive physics,
+projectile/visibility/navigation before simulation. Durability swaps scenes without
+allocation. Recovery preserves actor frames; world changes replan travel. Animated
 ground hulls reject.
 
-**Casting authority.** Retain caster kind/ID/life through flight, effects and
-death. NPC respawn clears body effects; attribution survives. NPC commands never
-enter client input. Death cancels flights.
+**Casting.** Retain caster kind/ID/life through flight/effects/death; respawn clears
+body effects, not attribution. Death cancels flights; NPC commands never enter
+client input. Selection orders distance then ID; stock ratings gate plans.
+Sources/lives/targets/payment/RNG/KF/effects persist together; inactive areas pause,
+launch revalidates.
 
-Native player selection orders distance then ID; stock ratings gate plans.
-Persist sources, lives, targets, payment, RNG, KF phases and effects together;
-inactive areas pause, launch revalidates.
+**Passives.** Select constants by item/effect ordinal before combat; retain equipped
+rolls, replace sources on replacement/respawn. Recovery never rerolls. Modifiers
+overlay detached stats.
 
-**Equipped passive sources.** Select constants by item and effect ordinal before
-combat. Rolls persist while equipped; replacement and respawn install new sources.
-Recovery validates them without rolling. Modifiers overlay detached stats.
+**Consumers.** Stock awareness uses canonical sneak/facing. Movement image 3 retains
+life-bound jump/inertia/falling and grounded landing-damage frames; fresh campaigns
+bind resources. Abilities/constants share ordered preparation/rolls; suppressing
+Invisibility preserves other ordinals.
 
-**Connected consumers.** Stock awareness receives canonical sneak/facing context.
-Life-bound jump controls, inertia and falling persist in movement scene image 3;
-landing damage retains the grounded frame. Bind resources to fresh campaigns.
-Abilities/constants share ordered preparation and retained rolls; suppressing
-Invisibility preserves other ordinals. General scripts remain M5.
-
-**Combat latency/presentation.** Predict presentation; server commits consequences.
-Use server-time contacts, reliable action/life events and latest-wins motion.
-Stock damage/knockout/recovery rules and actor-bound clips/targets/clocks persist.
-Inactivity pauses; death clears. Recovery never repeats equipment; breakage removes
-passives. Player release/payment/interruption commit atomically; offline casts pause.
+**Presentation.** Predict visuals; server-time contacts, reliable action/life events
+and latest-wins motion govern outcomes. Persist stock damage/knockout/recovery,
+actor-bound clips/targets/clocks; inactivity pauses, death clears. Recovery never
+reequips; breakage removes passives. Release/payment/interruption commit atomically;
+offline casts pause.
 
 **V64 aim.** T3MC bounds world aim; persist flight direction, authored-key payment
 and swept contact. Misses use target life zero; receipts retain skipped-flight endpoints.
@@ -77,7 +70,6 @@ T3C9/capability 27 feeds stock Light/NightEye/Detect; snapshots restore loops/ex
 Actions suppress Invisibility without deleting sources/rerolling. V56/T3D0/capability 28
 feeds eight inherited movement magnitudes with server-owned source/caster/deadline.
 WaterBreathing index zero differs from legacy ResistMagicka by source identity.
-M4 collision/combat acceptance precedes movement cutover.
 
 **AI source navigation.** Stock target rules gate disposition per record. Command
 pursues its living, life-matched caster. Expiry restores authored travel atomically;
@@ -93,97 +85,175 @@ snap at 256 units/epoch changes. Older campaigns retain inherited movement;
 movement skills await M5. At 100ms ±25ms/10% loss, corrections allow max 35/mean 8
 units with one fixed-step tolerance; exclude discontinuities.
 
-## Cooperative progression design
+## M5 implementation contract
 
-**Requirement:** late joiners can complete campaigns independently. Others cannot
-permanently block opportunities; personal choices retain consequences. Use OpenMW
-APIs without mandatory quest edits.
+**Status:** base policy agreed; party defaults below are drafted as a later M5
+addition. Implementation unstarted. Others may temporarily interrupt opportunities,
+never permanently consume them; personal choices retain consequences. Unchanged
+scripts use proven OpenMW APIs, without mandatory quest edits or bespoke handlers.
+[PLAN](PLAN.md#m5---complete-scripted-quests-independently-and-together) owns sequencing.
 
-### Shared world, personal progression
+### Ownership and physical scope
 
-**Direction:** NPCs share one world and return after death. Temporary unavailability
-is acceptable. Journals, relationships, faction progress, rewards and script
-history are personal.
-
-**Lifecycle contract (M4).** Stable placement/life generations, attributed death
-events, corpse inventories and deadlines survive unload/restart. Old requests
-cannot affect new lives. OpenMW supplies reconstruction data; authored corpses,
-summons, scripted spawns and deleted placements are not permanent spawn points.
-M4 records causal events; M5 owns personal quest credit.
-
-**V25 deadline rule:** descriptor-bound 30 Hz deadlines exclude downtime/time
-skips. Initially living content placements restore actor/inventory with fresh item
-identities. Capture delay: 27,000 ticks. Wider spawn policy awaits evidence.
-
-| State | Ownership and lifetime |
+| Scope | Canonical state |
 |---|---|
-| NPC body, combat/AI, corpse and inventory | Shared life; authoritative respawn. |
-| Character credit, choices, relationships and rewards | Personal; survives NPC revival. |
-| Placement identity and life generation | Server-owned; separates new deaths from replays. |
+| Shared world | Ordinary exploration, NPC lives/combat, public loot, time/weather. |
+| Character/story | Journals/topics/choices, relationships/factions, script globals/locals/instances/cursors, acquisition rights and rewards. |
+| Story encounter | Incompatible physical outcomes; actors/inventories/AI, doors/geometry, collision/navigation, projectiles/summons and scripts. |
 
-Reset health/effects, AI and placement through [stock respawn](../../apps/openmw/mwclass/npc.cpp);
-preserve story locals. Never refill looted corpses or apply stale-life requests.
-Renewable loot/camping need policies. [Death counting](../../apps/openmw/mwmechanics/actors.cpp)
-aggregates record IDs; personal participation must distinguish party, summon,
-environmental and pre-quest credit across revival.
+World globals/scripts need explicit ownership. Every physical instance has one
+server writer. Characters inhabit one physical scope at a time; clients present
+commits and never simulate canonical scripts.
+
+Before a story's removal, relocation, spawn, inventory/AI edit or access change
+would deny others an opportunity, allocate a coherent scope. Discovering this
+mid-invocation rolls back and retries after preparation. Fork from validated
+committed state and proven source reconstruction; never rewind live public combat.
+Persist A's escorted NPC at its destination while B retains B's starting opportunity.
+Never teleport A's outcome home or merge scoped mutations into public state.
+
+Scope includes every interacting dependency across affected cells, including
+exterior escorts. Lookups, enumeration, dialogue, collision and combat resolve
+the same scope; no cross-scope hits, transfers or invisible blockers. Expand before
+crossing; saturation suspends safely. Scope creation/unload/rejoin never renews
+loot. Return players to shared exploration at a safe boundary; retain consequences.
+Show encounter ownership, separation and helper status.
+Player-supplied inventory retains original identities; forks never copy it.
 
 ### Scripted quest execution contract
 
-**Current direction (unimplemented):** restore shared world scripts first, once per
-instance across player interest; separate ambient presentation. Classify supported
-operations, not names; object/NPC/door scripts may require personal context.
-Prove services before removing guards.
+Carry campaign/story/physical-scope, character, source reference/life, invocation
+and causal-event identities through calls, callbacks, dialogue and timers. Personal
+access without context rejects; no fallback to the single-player protagonist.
+Run shared scripts once per scheduled instance, independent of observer count.
 
-**Context:** world or character/story identity, source reference/life and causal
-event. Personal access without identity rejects. Calls/timers retain scope;
-locals/cursors survive respawn. Party/credit/merging rules remain deferred.
+Results are **committed**, **deferred**, or **rejected**. Stage locals/globals,
+inventories/effects, RNG, events/cursors, timers and presentation together; discard
+everything on defer/rejection. Persist before publication. A retry consumes neither
+costs nor events twice; distinct legitimate occurrences remain executable. Prove
+Lua storage/state/effect rollback before admitting bindings/events/timers.
 
-| Operation/state | Rule |
-|---|---|
-| Journal/topics/choices, relationships, faction progress, player inventory | Initiating character; shared-story credit needs explicit rules. |
-| Globals/locals, script instances/cursors | Story namespace; shared scripts/world globals have explicit ownership. |
-| Combat, native activation, AI/respawn | One authoritative physical writer. |
-| Scripted removal/relocation, inventory/AI edits, spawns | Scoped changes preserve others' access; coherent instances for physical divergence. |
-| Unsupported/ambiguous operations | Atomic rejection with API/context diagnostics. |
+Discover dependencies during execution; persist wake conditions and revalidate.
+Distinguish temporary unavailability from absence caused by this story's own
+outcome. Never deactivate waiting scripts or return invented health/existence.
+Pause affected story deadlines during system waits; shared time continues.
+Unsupported clock arithmetic rejects rather than silently extending all timers.
+Show wait reasons and authoritative respawn estimates only when known.
 
-**Availability:** reservations prevent conflicting story control while shared simulation
-continues. Prove release/disconnect/death/restart. Package completion cannot universally
-identify quest completion. Encounter restoration or instances must preserve departed
-NPCs/progress/rewards, covering inventories/collision/combat and exterior escorts.
-Restoration/item-access policies remain open.
+Declare numeric instruction/allocation, dependency, scope/cell/actor, queue,
+participant and diagnostic limits before admission. Unsupported operations,
+ambiguous origins or unbounded physical dependencies reject atomically. Report
+script/instruction, scope/reference/life, reads/effects and outcome. Compatibility
+is evidenced API coverage, not a promise to infer arbitrary author intent.
 
-**Runtime waits:** discover dependencies during execution; persist bounded wake
-records/revalidate. Personal OnDeath cursors consume attributed history, including
-pre-quest/helper eligibility. Foreign deaths defer until respawn; own consequences
-persist. Pause affected deadlines; never deactivate waiting scripts. Explain waits
-and authoritative respawn clocks/pauses; omit unknown estimates.
-Scoped removal needs an access policy.
+### Acquisition, rewards and death
 
-**Atomicity/diagnostics:** stage scripts/effects/RNG/events/timers/presentation; discard
-on defer/rejection. Deduplicate retries; preserve recurrence and Lua isolation.
-Bound diagnostics/waits. Fix generic APIs with arbitrary-name regressions; no quest handlers.
+Public loot remains shared. A finite quest resource needs an evidenced acquisition
+route and a durable right keyed by character/story and source origin/occurrence,
+not item name or inventory absence. If foreign ownership/depletion blocks an
+unclaimed right, offer one personal recovery copy through that route. Original
+public items remain transferable; acquiring one records the same entitlement.
+Voluntary sale/consumption/surrender spends the right. Dropping preserves identity;
+restart, new parties and new scopes cannot refresh it. Ambiguous routes reject
+automatic recovery; GetItemCount zero never authorizes a grant.
 
-**Owning seams:** [context](../../apps/openmw/mwscript/interpretercontext.cpp),
+Recovery copies prohibit foreign pickup/corpse loot/public trade; supported
+scripted use/consumption remains available. Preserve provenance through
+stack/split/drop and conversions; unsupported conversions reject before consumption.
+Copied encounter loot cannot create extra public possessions. Legitimate scripted
+rewards may leave once their transaction commits. Persist depletion and reward
+receipts; scene recreation is never a repeatable-content occurrence.
+
+M4 placement/life/death/corpse/deadline identity remains authoritative. Stock
+respawn restores initially living placements, preserving story locals; deadlines
+exclude downtime/time skips (V25 capture: 27,000 ticks at 30 Hz). Authored corpses,
+summons, deleted placements and scripted spawns are not public respawn sources.
+Never refill looted corpses or apply old-life requests.
+
+Personal OnDeath cursors consume attributed history only on commit. Own failures
+persist; foreign deaths wait. Credit requires causal participation or explicit
+encounter enrollment, never proximity; preserve summon ownership, environmental
+attribution and eligible pre-quest events. Help-only events do not advance the
+helper's story. Reserve a waiting story's next eligible opportunity and isolate
+it if necessary, preventing endless obstruction by repeated foreign kills.
+
+### Activities and party addition
+
+Reservations serialize short conflicting operations with fair bounded acquisition
+and deadlock prevention. Long activities belong to durable scopes, not global
+locks. Package completion is not quest completion. Solo owner disconnect suspends
+coherently; helpers may leave. Resume never resets progress, costs or rewards.
+
+**Party draft:** persistent opt-in membership coordinates compatible personal
+stories in one encounter. It does not merge histories. Validate relevant physical
+state, choices and prerequisites before enrollment; incompatible players catch up
+independently or join as helpers. Automatic merging of arbitrary progress is deferred.
+Enrollment delegates shared choices to a selected controller; dissenters withdraw
+or split safely before commitment. Helpers use real health/gear/resources and
+receive no story advancement/reward. Party size initially respects supported
+runtime limits; broader player scale remains M7.
+
+Freeze participating characters/stories and membership revision for each causal
+step. Execute its shared physical outcome once; evaluate personal conditions,
+costs, progression and reward effects separately for every eligible participant.
+Shared objectives happen once; personal acquisition rights/costs remain per-character.
+Each eligible player receives their own stock-context reward, never a divided
+pool or a copy of the leader's entire result. Differing personal outcomes may
+coexist; incompatible physical writes split/defer before commitment. Prove effect
+ownership; do not guess that identical AddItem calls are all rewards.
+
+Commit the shared outcome, all admitted personal results and per-character reward
+receipts atomically. Receipt identity includes causal occurrence/effect/recipient;
+changing party or instance cannot repay it. Late enrollment grants no past rewards.
+Disconnect preserves earned entitlements but suspends enrollment in future steps;
+catch-up requires compatibility. Remaining participants may select a controller
+at a safe boundary; otherwise suspend. Offline rewards already earned remain
+durable. Leave/kick/dissolve preserves each character's committed consequences,
+pending rewards and independent continuation without duplicating items/scenes.
+
+### Recovery and proof obligations
+
+Persist scopes/source origins, lives, acquisition/depletion, invocations/waits,
+reservations, clocks/RNG, script state, party/enrollment/controller revisions and
+reward receipts coherently with gameplay. Bind content/policy/runtime versions;
+exclude pointers/sessions. Recovery stages and validates before installation;
+explicit migration or fresh campaigns, never silent reset. M6 generalizes this;
+M5 requires recovery from its first slice. Preserve engine serialization/v8 until
+explicit migration.
+
+Prove arbitrary-name escort/departure/divergence, foreign-held versus voluntarily
+spent items, indirect/polling dependencies, pre-quest/helper/stale-life credit,
+repeated foreign deaths, clock waits, contention, exterior scope isolation and
+failed writes after local/item mutations. Party checks cover separate rewards,
+personal costs, incompatible choices, late join, offline recipients, leader loss,
+leave/kick/rejoin and retry/restart without extra rewards or public loot. Then
+prove unchanged Seyda Neen branches and a TR quest: A finishes, B completes
+without A/items; compatible party members share events and each receive rewards.
+
+Refactor owning [context](../../apps/openmw/mwscript/interpretercontext.cpp),
 [dialogue](../../apps/openmw/mwscript/dialogueextensions.cpp),
+[filters](../../apps/openmw/mwdialogue/filter.cpp),
+[references](../../apps/openmw/mwscript/ref.cpp),
 [queries](../../apps/openmw/mwscript/statsextensions.cpp),
-[world operations](../../apps/openmw/mwscript/miscextensions.cpp),
-[scheduling](../../apps/openmw/mwscript/scriptmanagerimp.cpp).
-Preserve engine serialization/v8 until explicit migration.
+[items](../../apps/openmw/mwscript/containerextensions.cpp),
+[world operations](../../apps/openmw/mwscript/miscextensions.cpp) and
+[scheduler](../../apps/openmw/mwscript/scriptmanagerimp.cpp). Preserve stock callers,
+native authority and engine-independent networking; retire replaced writers only
+after focused evidence.
 
 ## Integrity and migration
 
-**Atomic coherent persistence.** Validate before allocation/mutation; stage gameplay/scripts/
-presentation without rejection leaks. Preserve miss/failure costs. Persist before publication;
-restore content/version-bound state atomically. No checkpoint-only acknowledgments or parallel files.
+**Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
+preserve miss/failure costs. Persist before publication; restore content/version-bound
+state atomically. No checkpoint-only acknowledgments or parallel files.
 
-**Borrowed lifetime.** Ptr copies retain weak destruction witnesses. Construction
-starts a new lifetime; assignment preserves the destination. Check witnesses
-before dereferencing, then registry/script ownership. Addresses/serialized checks
-cannot establish lifetime or authorize installation.
+**Borrowed lifetime.** Ptr copies retain weak destruction witnesses; construction
+starts lifetimes, assignment preserves destinations. Check witnesses before
+dereferencing, then ownership. Addresses/serialization cannot authorize installation.
 
-**Native inventory cutover.** Session image/dispositions, one inventory intent and
-actor tick/wear transact together; later intents reject in ingress order. Bind roles/
-placements/domain and record-plugin IDs. Recover identity/condition/light-time/charge without rerolls/auto-equip.
+**Inventory.** Session image/dispositions, one intent and actor tick/wear transact
+together; later intents reject in ingress order. Bind roles/placements/domain/record-plugin
+IDs. Recover identity/condition/light-time/charge without rerolls/auto-equip.
 
 **Versioned domains.** Retain prior [layouts](../../apps/tes3mp-server/native/inventory_host.hpp).
 Descriptor changes require fresh campaigns or explicit migration; recovery never
@@ -201,11 +271,10 @@ Baselines carry loot/doors/players/gear. Retain inherited movement and supported
 persist with inventory/doors, never reroll. Marker identity owns unscripted actors;
 clients suppress spawning.
 
-**Transfers/equipment.** Detached Take All atomically witnesses source/both revisions,
-stock order/stacking/corpse slot removal; never grants disposal/living access.
-Identity-bound 19 slots declare format-7 payload mode. Accepted intents invalidate
-revisions; unavailable effects reject. Appearance exposes equipped records, never
-private stacks/counts/authorization. Ground baselines suppress all bound placements.
+**Transfers/equipment.** Detached Take All witnesses source/revisions and stock
+order/stacking/corpse slots; no disposal/living access. Identity-bound 19 slots use
+format-7 payload mode. Accepted intents invalidate revisions; unavailable effects
+reject. Appearance exposes equipped records only; ground baselines suppress bound placements.
 
 **Cross-actor effects (V51).** Absorb benefits bind the original caster life;
 respawn never inherits them. Persist effects, benefits, resources and RNG together.
@@ -262,14 +331,13 @@ Remove descendants without respawn. Recovery validates sources/selectors/identit
 animation hashes. Reuse stock writers; scripts remain M5. Collision follows committed
 active areas. Wait/rest composes effects/resources/cleanup with game time, preserving action/respawn ticks.
 
-**Player lives (V72).** Wrap V71. Persist ID/generation/birth/spawn and attributed deaths;
-zero killer is environmental. Death clears body/sources/actions; external effects retain
+**Player lives (V72).** Wrap V71; persist ID/generation/birth/spawn/attributed deaths;
+zero killer is environmental. Death clears body/sources/actions, retaining external
 attribution. Command/Absorb/Soultrap require living matching casters. Online respawn
-restores configured stats/spawn, preserves ordinary inventory/social/Mark, increments
-generation. Cleanup/RNG/membership/relocation/zero velocity/epoch commit together.
-Recovery validates history/baselines; old-life timestamps reject. Capability 32 gates lives;
-37 admits a dead-life respawn request through that same transaction before the automatic
-deadline. UI waits for committed revival. Quest credit/wider spawn policy remain M5.
+restores stats/spawn, preserves inventory/social/Mark and increments generation.
+Cleanup/RNG/membership/relocation/zero-velocity/epoch commit together. Validate
+history/baselines; reject old-life timestamps. Capability 32 gates lives; 37 admits
+early dead-life respawn through this transaction. UI waits for committed revival.
 
 **Committed bodies (V73).** Persist stock death action/group/frame/RNG; sample active
 clocks without client cleanup. Capability 33 gates recipes; publish capability-30 aliases
@@ -294,13 +362,12 @@ results with caster/target lives through stock helpers. Snapshots own loops/clea
 bounded chunks commit atomically once. Reconnect restores loops without transient replay.
 Capability 33 retains legacy cues; presentation never persists.
 
-**Shared cell combat (V77).** Connected exteriors share physics/navigation; other
-regions isolate. Bound startup to 256 cells, 37 actors/summons, 8,192 references/region
-and 256 navigation tiles/actor. Radius 0–7 anchors share the cell budget without
-recursive discovery. Stream demand plus adjacent geometry; preserve frozen hulls/
-contacts/support. Fingerprint-validate detached resource swaps. Combat/visibility follows
-actor cells; occupancy simulates once, empty cells freeze. Persist flight/cast/spawn
-cells. Unsupported scripts/leveled/corpses reject; full AI packages remain M5.
+**Shared cells (V77).** Connected exteriors share physics/navigation; other regions
+isolate. Caps: 256 cells, 37 actors/summons, 8,192 references/region, 256 navigation
+tiles/actor. Radius 0–7 anchors share budgets without recursive discovery. Demand
+includes adjacent geometry/frozen hulls/contacts/support. Fingerprint-validate swaps.
+Combat/visibility follows actor cells; simulate occupancy once, freeze empty cells.
+Persist flight/cast/spawn cells; unsupported scripts/leveled/corpses reject.
 
 **Determinism and network boundaries.** Save order/ticks and RNG;
 measure consumption across platforms. Preserve session authentication,

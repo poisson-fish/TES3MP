@@ -118,7 +118,9 @@ This is owner sign-off alongside retained focused evidence, with no new capture
 claimed. Earlier artifacts marking full M4 open predate this sign-off.
 Accepted runtime bounds and M5/M7 compatibility work remain explicit above.
 
-**Next:** M5 shared-world-first slice: execute one context-free world script once
+**Next:** implement the [agreed M5 contract](DECISIONS.md#m5-implementation-contract)
+one slice at a time; party defaults are drafted for later M5. Implementation remains
+unstarted. Shared-world-first: execute one context-free world script once
 for two desktops; persist its state through reentry/restart and separate ambient
 presentation. Inspect the owning engine script scheduler/context and excluded
 Seyda Neen content; restore only proven operations. Retain M4 regression coverage.
