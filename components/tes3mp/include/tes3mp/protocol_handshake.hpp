@@ -14,7 +14,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::size_t MaximumOptionalCapabilityCount = 33;
+    inline constexpr std::size_t MaximumOptionalCapabilityCount = 34;
     inline constexpr std::size_t MaximumRequiredCapabilityCount = 32;
     inline constexpr std::size_t MaximumNegotiatedCapabilityCount
         = MaximumOptionalCapabilityCount + MaximumRequiredCapabilityCount;
@@ -55,6 +55,7 @@ namespace TES3MP
     inline constexpr std::uint32_t PlayerAppearanceCapabilityValue = 36;
     inline constexpr std::uint32_t PlayerRespawnCapabilityValue = 37;
     inline constexpr std::uint32_t PlayerPhysicsCapabilityValue = 38;
+    inline constexpr std::uint32_t AmbientPresentationCapabilityValue = 39;
 
     class CapabilityId
     {
@@ -82,6 +83,8 @@ namespace TES3MP
 
     inline constexpr CapabilityId actorCastReplicationCapability() noexcept
     { return *CapabilityId::fromValue(ActorCastReplicationCapabilityValue); }
+    inline constexpr CapabilityId ambientPresentationCapability() noexcept
+    { return *CapabilityId::fromValue(AmbientPresentationCapabilityValue); }
 
     inline constexpr CapabilityId actorCastLifecycleCapability() noexcept
     { return *CapabilityId::fromValue(ActorCastLifecycleCapabilityValue); }

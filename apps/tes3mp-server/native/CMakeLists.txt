@@ -86,7 +86,8 @@ tes3mp_verify_target_includes(tes3mp_native_character_tests
 set_target_properties(tes3mp_native_character_construction tes3mp_native_character_tests
     PROPERTIES FOLDER "TES3MP/NativeProbe")
 
-add_library(tes3mp_native_inventory_host STATIC inventory_host.cpp inventory_host.hpp environment.cpp environment.hpp)
+add_library(tes3mp_native_inventory_host STATIC inventory_host.cpp inventory_host.hpp environment.cpp environment.hpp
+    world_script_admission.hpp)
 target_compile_features(tes3mp_native_inventory_host PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_inventory_host PUBLIC tes3mp_native_inventory_service
     PRIVATE tes3mp_native_loadout tes3mp_native_placement_scene tes3mp_native_character_construction tes3mp_native_world_script openmw-lib)
@@ -96,9 +97,9 @@ tes3mp_verify_target_includes(tes3mp_native_inventory_host
     FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender" "transfer_rehearsal.hpp" "equipment_tests.hpp")
 
 add_executable(tes3mp_native_loadout_probe main.cpp)
-add_executable(tes3mp_native_bootstrap bootstrap.cpp)
-target_link_libraries(tes3mp_native_bootstrap PRIVATE tes3mp_native_loadout tes3mp_server_core)
-tes3mp_verify_target_dependencies(tes3mp_native_bootstrap ALLOWED tes3mp_native_loadout tes3mp_server_core)
+add_executable(tes3mp_native_bootstrap bootstrap.cpp world_script_admission.hpp)
+target_link_libraries(tes3mp_native_bootstrap PRIVATE tes3mp_native_loadout tes3mp_server_core tes3mp_native_world_script)
+tes3mp_verify_target_dependencies(tes3mp_native_bootstrap ALLOWED tes3mp_native_loadout tes3mp_server_core tes3mp_native_world_script)
 target_link_libraries(tes3mp_native_loadout_probe PRIVATE tes3mp_native_loadout)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_native_loadout)
 

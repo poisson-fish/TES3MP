@@ -5458,6 +5458,22 @@ namespace TES3MP::Native
         return transaction->sharedScript->result;
     }
 
+    std::optional<ReliableAmbientBatch> InventoryService::projectAmbient(const CanonicalServerState& players,
+        SessionId target, ServerTick tick, CanonicalRevision revision, const PreparedNativeInventory* candidate) const
+    {
+        const auto output = projectSharedScript(candidate);
+        const auto sessions = players.activeSessions();
+        const auto session = std::ranges::find_if(sessions, [&](const auto& entry) { return entry.sessionId() == target; });
+        if (session == sessions.end() || !output || output->outcome != SharedWorldScript::Outcome::Committed
+            || !output->executed || output->presentation.empty()) return {};
+        static_assert(MWScript::WorldScript::MaximumMessages == ReliableAmbientBatch::MaximumMessages);
+        static_assert(MWScript::WorldScript::MaximumMessageBytes == ReliableAmbientBatch::MaximumMessageBytes);
+        ReliableAmbientBatch batch{target, session->sessionGeneration(), tick, revision,
+            output->invocationTick, output->script.toString(), output->presentation};
+        if (!validAmbientBatch(batch)) throw std::invalid_argument("Invalid staged ambient output");
+        return batch;
+    }
+
     std::optional<PlayerPhysicsBaseline> InventoryService::projectPlayerPhysics(
         const CanonicalServerState& players, PlayerId player, const PreparedNativeInventory* candidate) const
     {

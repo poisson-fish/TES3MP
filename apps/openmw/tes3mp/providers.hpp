@@ -2,6 +2,7 @@
 #define OPENMW_TES3MP_PROVIDERS_HPP
 
 #include <tes3mp/actor_replication.hpp>
+#include <tes3mp/ambient_replication.hpp>
 #include <tes3mp/client_locomotion.hpp>
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/combat_replication.hpp>
@@ -155,6 +156,8 @@ namespace TES3MP::OpenMWAdapter
     {
     public:
         virtual ~PresentationProvider() = default;
+        virtual ProviderResult applyAmbient(const ReliableAmbientBatch&, MonotonicInstant) noexcept
+        { return ProviderResult::Accepted; }
         virtual ProviderResult setPlayerAppearances(bool, std::span<const PublicPlayerAppearance>) noexcept
         {
             return ProviderResult::Accepted;

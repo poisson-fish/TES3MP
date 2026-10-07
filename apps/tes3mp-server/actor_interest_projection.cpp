@@ -129,7 +129,8 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>>& combatEvents,
         const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>>& dialogueResults,
         const std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>>& weatherUpdates,
-        const std::vector<std::pair<TransportConnectionId, ReliableWorldTimeState>>& worldTimeUpdates)
+        const std::vector<std::pair<TransportConnectionId, ReliableWorldTimeState>>& worldTimeUpdates,
+        const std::vector<std::pair<TransportConnectionId, ReliableAmbientBatch>>& ambient)
     try
     {
         std::vector<std::vector<std::byte>> frames;
@@ -138,6 +139,7 @@ namespace TES3MP::ServerApp
             + actorViews.size() + objectBaselines.size() + combatViews.size() + combatEvents.size()
             + dialogueResults.size();
         frameCount += worldTimeUpdates.size();
+        frameCount += ambient.size();
         for (const auto& [connection, delivery] : weatherUpdates)
         {
             (void)connection;
@@ -233,6 +235,9 @@ namespace TES3MP::ServerApp
         for (const auto& [connection, state] : worldTimeUpdates)
             if (!appendWorldTimeMessage(frames, messages, connection, state))
                 return false;
+        for (const auto& [connection, batch] : ambient)
+            if (!validAmbientBatch(batch) || !add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
+                    MessageKind::ReliableAmbientBatch, encodeReliableAmbientBatch(batch))) return false;
         return messages.empty() || queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
     }
     catch (...)

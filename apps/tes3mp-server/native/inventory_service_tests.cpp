@@ -9394,6 +9394,16 @@ namespace TES3MP::Native::Testing
                 auto rejected = native.prepareNativePlayerTick(authority, id<ServerTick>(5), 1.f/30, {}, &world, {}, {});
                 auto stale = native.prepareNativePlayerTick(authority, id<ServerTick>(5), 1.f/30, {}, &world, {}, {});
                 const auto a = native.projectSharedScript(rejected.get()), b = native.projectSharedScript(rejected.get());
+                const auto aliceOutput = native.projectAmbient(authority, id<SessionId>(1), id<ServerTick>(5),
+                    id<CanonicalRevision>(5), rejected.get());
+                const auto bobOutput = native.projectAmbient(authority, id<SessionId>(2), id<ServerTick>(5),
+                    id<CanonicalRevision>(5), rejected.get());
+                require(aliceOutput && bobOutput && aliceOutput->messages == bobOutput->messages
+                    && aliceOutput->invocation == 5 && bobOutput->invocation == 5
+                    && aliceOutput->targetSessionId != bobOutput->targetSessionId
+                    && !native.projectAmbient(offline, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), rejected.get())
+                    && !native.projectAmbient(authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), nullptr),
+                    "Ambient output replayed from baseline or changed with observer count");
                 require(a && b && a->presentation == std::vector<std::string>{"The bell rings."}
                     && a->presentation == b->presentation && a->trace.executed > 0 && image(service) == before,
                     "Observer projection executed or leaked shared state");
@@ -9404,6 +9414,7 @@ namespace TES3MP::Native::Testing
                     return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
                     && calls(service) == 5 && image(service) == durable, "Shared retry lost composed physics/script state");
                 require(!native.projectSharedScript(rejected.get())
+                    && !native.projectAmbient(authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), rejected.get())
                     && stale->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Rejected
                     && calls(service) == 5, "Stale occurrence executed twice");
                 service.synchronizeCells(offline);

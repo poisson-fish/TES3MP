@@ -1334,6 +1334,29 @@ namespace TES3MP::OpenMWAdapter
         return ProviderResult::Accepted;
     }
 
+    ProviderResult DesktopAutomation::applyAmbient(const ReliableAmbientBatch& batch, MonotonicInstant now) noexcept
+    {
+        const auto result = mPresentation.applyAmbient(batch, now);
+        if (result != ProviderResult::Accepted) return result;
+        if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+        {
+            const auto json = [&](std::string_view text) {
+                mOutput << '"';
+                for (unsigned char c : text)
+                    if (c < 32) mOutput << "\\u00" << std::hex << std::setw(2) << std::setfill('0') << unsigned(c) << std::dec;
+                    else { if (c == '"' || c == '\\') mOutput << '\\'; mOutput << char(c); }
+                mOutput << '"';
+            };
+            mOutput << "{\"event\":\"ambient_presented\",\"session\":" << batch.targetSessionId.value()
+                << ",\"generation\":" << batch.targetSessionGeneration.value() << ",\"tick\":" << batch.serverTick.value()
+                << ",\"revision\":" << batch.canonicalRevision.value() << ",\"invocation\":" << batch.invocation << ",\"script\":";
+            json(batch.script); mOutput << ",\"messages\":[";
+            for (size_t i = 0; i < batch.messages.size(); ++i) { if (i) mOutput << ','; json(batch.messages[i]); }
+            mOutput << "]}\n"; mOutput.flush(); ++mEvidenceEvents;
+        }
+        return ProviderResult::Accepted;
+    }
+
     ProviderResult DesktopAutomation::applyWorldTime(
         const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept
     {

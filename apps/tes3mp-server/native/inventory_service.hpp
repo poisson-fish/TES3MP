@@ -433,6 +433,9 @@ namespace TES3MP::Native
         bool characterCreationEnabled() const { return mBinding.mCharacterCreation; }
         // Candidate output for later committed delivery; projection never executes.
         std::optional<SharedWorldScript::Result> projectSharedScript(const PreparedNativeInventory*) const;
+        bool hasSharedScript() const override { return bool(mBinding.mSharedScript); }
+        std::optional<ReliableAmbientBatch> projectAmbient(const CanonicalServerState&,
+            SessionId, ServerTick, CanonicalRevision, const PreparedNativeInventory*) const override;
         const InventoryServiceBinding& characterBinding() const { return mBinding; }
         InventoryService(const InventoryService&) = delete;
         InventoryService& operator=(const InventoryService&) = delete;

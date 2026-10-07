@@ -2,6 +2,7 @@
 #define TES3MP_CLIENT_SESSION_RUNTIME_HPP
 
 #include "actor_replication.hpp"
+#include "ambient_replication.hpp"
 #include "authentication.hpp"
 #include "character_creation_protocol.hpp"
 #include "client_locomotion.hpp"
@@ -28,7 +29,7 @@ namespace TES3MP
         LatestWinsActorSnapshot, ReliableActorInterestBaseline, ReliableInteractiveObjectInterestBaseline,
         ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
         LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ReliableCharacterProfile,
-        ReliableDialogueChoiceResult, ReliableWeatherState, ReliableWorldTimeState, ServerVrPoseSnapshot>;
+        ReliableDialogueChoiceResult, ReliableWeatherState, ReliableWorldTimeState, ServerVrPoseSnapshot, ReliableAmbientBatch>;
     // Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
 
     enum class ClientRuntimeResult : std::uint8_t
@@ -78,6 +79,7 @@ namespace TES3MP
         bool worldTimeBaselineCompleted = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
         std::vector<ReliableCombatEventBatch> combatEvents;
+        std::vector<ReliableAmbientBatch> ambient;
         std::vector<ReliableDialogueChoiceResult> dialogueChoiceResults;
     };
 
@@ -201,6 +203,7 @@ namespace TES3MP
         std::optional<LocomotionInputTick> mLastLocomotionInputTick;
         std::optional<LocomotionInputSequence> mLastLocomotionInputSequence;
         std::optional<LatestWinsCombatSnapshot> mCombatSnapshot;
+        std::optional<ReliableAmbientBatch> mLastAmbient;
         std::optional<AuthenticationRejectionReason> mAuthenticationRejection;
         std::optional<SessionRejected> mProtocolRejection;
     };

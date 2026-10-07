@@ -1,4 +1,5 @@
 #include "loadout.hpp"
+#include "world_script_admission.hpp"
 #include <components/misc/strings/lower.hpp>
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwworld/worldmodel.hpp>
@@ -182,9 +183,9 @@ try
         if (inspectArea) std::cout << "Read-only inspection at level 1, seed 0; runtime startup is still required.\n";
         return 0;
     }
-    if (argc < 6 || argc > 10)
+    if (argc < 6 || argc > 30)
     {
-        std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z] [NAV_SETTINGS] [player-physics|chargen]\n"
+        std::cout << "tes3mp_native_bootstrap OPENMW_CONFIG_DIR NEW_OUTPUT_DIR START NPC_A NPC_B [RADIUS] [SPAWN_X:SPAWN_Y:SPAWN_Z] [NAV_SETTINGS] [player-physics|chargen] [shared_script RECORD globals COUNT GLOBAL...]\n"
             "tes3mp_native_bootstrap --list-cells OPENMW_CONFIG_DIR NAME_FILTER (at most 64 results)\n"
             "tes3mp_native_bootstrap --inspect-area OPENMW_CONFIG_DIR START [RADIUS] (all connected areas)\n"
             "tes3mp_native_bootstrap --inspect-actors OPENMW_CONFIG_DIR CELL (placements and supported exits)\n"
@@ -198,6 +199,7 @@ try
             "up to 256 cells in bounded exterior areas/connected interiors; scripted/leveled actors require later services.\n"
             "The final player-physics option enables V79 authoritative player movement and character creation.\n"
             "chargen retains V78 migration compatibility. Fresh inventories are empty unless starters are configured.\n"
+            "shared_script requires player-physics and emits fresh V80; 0..16 explicit globals, no calendar ownership.\n"
             "Set the two registered player IDs in native.txt; their registrations must bind manifest.txt.\n"
             "Add connection/password/player_identity_file settings to server-content.cfg before launch.\n";
         return argc == 2 && std::string_view(argv[1]) == "--help" ? 0 : 2;
@@ -229,11 +231,28 @@ try
     }
     spawnPosition = loadout.playerSpawn(start, cells, spawnPosition);
     std::ostringstream material;
-    const bool playerPhysics = argc == 10 && std::string_view(argv[9]) == "player-physics";
-    const bool characterCreation = playerPhysics || (argc == 10 && std::string_view(argv[9]) == "chargen");
-    if (argc == 10 && !characterCreation) throw std::invalid_argument("Expected player-physics or chargen as final bootstrap option");
+    const bool playerPhysics = argc >= 10 && std::string_view(argv[9]) == "player-physics";
+    const bool characterCreation = playerPhysics || (argc >= 10 && std::string_view(argv[9]) == "chargen");
+    if (argc >= 10 && !characterCreation) throw std::invalid_argument("Expected player-physics or chargen bootstrap option");
+    ESM::RefId sharedScript;
+    std::vector<ESM::RefId> sharedGlobals;
+    if (argc > 10)
+    {
+        if (!playerPhysics || argc < 14 || std::string_view(argv[10]) != "shared_script"
+            || std::string_view(argv[12]) != "globals") throw std::invalid_argument("Invalid shared script bootstrap policy");
+        const int count = number(argv[13]);
+        if (count < 0 || count > int(MWScript::WorldScript::MaximumGlobals) || argc != 14 + count)
+            throw std::invalid_argument("Shared globals require an exact bounded count");
+        const auto record = [](std::string_view name) {
+            if (name.empty() || name.size() > MWScript::WorldScript::MaximumNameBytes)
+                throw std::invalid_argument("Shared record name outside bounds");
+            return TES3MP::Native::interiorCell(name);
+        };
+        sharedScript = record(argv[11]);
+        for (int i = 0; i < count; ++i) sharedGlobals.push_back(record(argv[14 + i]));
+    }
     const bool cellActors = argc >= 9;
-    const auto version = playerPhysics ? "native-inventory-79" : characterCreation ? "native-inventory-78"
+    const auto version = !sharedScript.empty() ? "native-inventory-80" : playerPhysics ? "native-inventory-79" : characterCreation ? "native-inventory-78"
         : cellActors ? "native-inventory-77" : "native-inventory-15";
     const auto navigationSettings = cellActors ? std::filesystem::absolute(std::filesystem::u8path(argv[8]))
         : std::filesystem::path{};
@@ -243,6 +262,13 @@ try
     if (cellActors) material << navigationSettings.string() << '\n';
     for (const auto& cell : cells) material << selector(cell) << '\n';
     auto crypto = TES3MP::makeProductionCredentialCrypto();
+    if (!crypto) throw std::runtime_error("Content identity unavailable");
+    if (!sharedScript.empty())
+    {
+        TES3MP::Native::admitSharedWorldScript(loadout, sharedScript, sharedGlobals, *crypto);
+        material << "shared_script " << sharedScript << '\n';
+        for (const auto& global : sharedGlobals) material << global << '\n';
+    }
     TES3MP::CredentialDigest digest;
     const auto input = material.str();
     if (!crypto || !crypto->sha256(std::as_bytes(std::span(input)), digest)) throw std::runtime_error("Content identity unavailable");
@@ -281,6 +307,12 @@ try
         if (!i) native << "areas " << cells.size() << '\n';
     }
     if (cellActors) native << "actors auto " << std::quoted(navigationSettings.string()) << "\nrespawn 27000\n";
+    if (!sharedScript.empty())
+    {
+        native << "shared_script " << std::quoted(std::string(sharedScript.getRefIdString())) << " globals " << sharedGlobals.size();
+        for (const auto& global : sharedGlobals) native << ' ' << std::quoted(std::string(global.getRefIdString()));
+        native << '\n';
+    }
     std::ostringstream server, client;
     // Appearance IDs must be disjoint from every allocated cell-space ID.
     const auto appearance = nextInterior;

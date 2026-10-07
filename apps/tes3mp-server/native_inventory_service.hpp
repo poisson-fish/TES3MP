@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_NATIVE_INVENTORY_SERVICE_HPP
 #include "inventory_interest_projection.hpp"
 #include <tes3mp/combat_replication.hpp>
+#include <tes3mp/ambient_replication.hpp>
 #include <tes3mp/native_inventory.hpp>
 
 namespace TES3MP::ServerApp
@@ -25,6 +26,9 @@ namespace TES3MP::ServerApp
         // Cache/scheduling lifetime follows committed sessions and native travel.
         // Canonical inventory/world state outlives these loaded cell resources.
         virtual void synchronizeCells(const CanonicalServerState&) {}
+        virtual bool hasSharedScript() const { return false; }
+        virtual std::optional<ReliableAmbientBatch> projectAmbient(const CanonicalServerState&,
+            SessionId, ServerTick, CanonicalRevision, const PreparedNativeInventory*) const { return {}; }
         virtual std::optional<NativeTravelDiagnostics> travelDiagnostics() const { return {}; }
         virtual std::optional<InventoryInterestDelivery> projectInventory(const CanonicalServerState& players,
             SessionId target, ServerTick tick, CanonicalRevision revision,

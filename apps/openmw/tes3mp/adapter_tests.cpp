@@ -52,10 +52,11 @@ namespace
     TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
         bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false,
         bool weather = false, bool worldTime = false, bool waitRest = false, bool instantMagic = false,
-        bool playerAppearances = false, bool respawn = false)
+        bool playerAppearances = false, bool respawn = false, bool ambient = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
+        if (ambient) capabilities.push_back(TES3MP::ambientPresentationCapability());
         if (pose)
             capabilities.push_back(TES3MP::vrPoseCapability());
         if (actors)
@@ -532,6 +533,10 @@ namespace
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
     {
     public:
+        std::vector<TES3MP::ReliableAmbientBatch> ambient;
+        TES3MP::OpenMWAdapter::ProviderResult applyAmbient(const TES3MP::ReliableAmbientBatch& batch,
+            TES3MP::MonotonicInstant) noexcept override
+        { ambient.push_back(batch); return TES3MP::OpenMWAdapter::ProviderResult::Accepted; }
         TES3MP::OpenMWAdapter::ProviderResult setPlayerAppearances(bool enabled,
             std::span<const TES3MP::PublicPlayerAppearance> appearances) noexcept override
         {
@@ -774,7 +779,7 @@ namespace
 #define require(value) require(static_cast<bool>(value), __LINE__)
 
 void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false, bool delayedSnapshot = false,
-    bool bodyProgress = false, bool respawnProgress = false, bool staleInventory = false)
+    bool bodyProgress = false, bool respawnProgress = false, bool staleInventory = false, int ambientProgress = 0)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
@@ -791,6 +796,7 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
         ClientSessionRuntime::create(*transport, *clock, timeouts, SessionGeneration::initial(), outbound));
     auto* runtimeObserver = runtime.get();
     std::vector capabilities{inventoryReplicationCapability()};
+    if (ambientProgress && ambientProgress != 4) capabilities.push_back(ambientPresentationCapability());
     if (bodyProgress) capabilities.push_back(playerAppearanceCapability());
     if (respawnProgress)
         for (const auto cap : {combatReplicationCapability(), playerLifeReplicationCapability(), playerRespawnCapability()})
@@ -804,7 +810,7 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
         reconnect, input, presentation, status);
     coordinator->frame(.01f);
     wire->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
-        encodeServerHello(serverHello(false,false,false,true,respawnProgress,2,false,false,false,false,false,bodyProgress,respawnProgress)), TransportChannel::ReliableOrdered);
+        encodeServerHello(serverHello(false,false,false,true,respawnProgress,2,false,false,false,false,false,bodyProgress,respawnProgress,ambientProgress && ambientProgress != 4)), TransportChannel::ReliableOrdered);
     coordinator->frame(.01f);
     wire->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         encodeAuthenticationAccepted(accepted(std::byte{7})), TransportChannel::ReliableOrdered);
@@ -842,6 +848,34 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
     };
     sendSpatial(1, first); sendInventory(1, first); coordinator->frame(.01f);
     require(presentation.inventories == 1 && presentation.lastGroundCell == first);
+    if (ambientProgress)
+    {
+        ReliableAmbientBatch batch{value<SessionId>(1), generation, value<ServerTick>(2),
+            value<CanonicalRevision>(2), 40, "arbitrary_ambient_42", {"The bell rings.", ""}};
+        const auto send = [&] { wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableAmbientBatch,
+            encodeReliableAmbientBatch(batch), TransportChannel::ReliableOrdered); coordinator->frame(.01f); };
+        if (ambientProgress == 4)
+        {
+            const auto clears = presentation.clears;
+            send(); require(presentation.ambient.empty() && presentation.clears > clears);
+            return;
+        }
+        send(); require(presentation.ambient.size() == 1 && presentation.ambient.back() == batch);
+        send(); require(presentation.ambient.size() == 1);
+        batch.invocation = 39; send(); require(presentation.ambient.size() == 1);
+        batch.invocation = 41; batch.serverTick = value<ServerTick>(3); batch.canonicalRevision = value<CanonicalRevision>(3);
+        send(); require(presentation.ambient.size() == 2);
+        sendSpatial(4, second); sendInventory(4, second); coordinator->frame(.01f);
+        require(presentation.ambient.size() == 2);
+        send(); require(presentation.ambient.size() == 2);
+        const auto clears = presentation.clears;
+        if (ambientProgress == 2) batch.targetSessionId = value<SessionId>(2);
+        else if (ambientProgress == 3) batch.targetSessionGeneration = value<SessionGeneration>(2);
+        else batch.messages = {"contradiction"};
+        send(); require(presentation.ambient.size() == 2);
+        require(presentation.clears > clears);
+        return;
+    }
     if (staleInventory)
     {
         sendSpatial(2, second); coordinator->frame(.01f);
@@ -1292,6 +1326,31 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "ambient")
+    {
+        ReliableAmbientBatch batch{value<SessionId>(1), SessionGeneration::initial(), value<ServerTick>(2),
+            value<CanonicalRevision>(2), 40, std::string(128, 's'), std::vector<std::string>(8, std::string(256, 'm'))};
+        const auto bytes = encodeReliableAmbientBatch(batch);
+        require(!bytes.empty() && decodeReliableAmbientBatch(bytes) == batch);
+        for (size_t size = 0; size < bytes.size(); ++size) require(!decodeReliableAmbientBatch(std::span(bytes).first(size)));
+        auto bad = bytes; bad.push_back(std::byte{0}); require(!decodeReliableAmbientBatch(bad));
+        bad = bytes; bad[0] = std::byte{2}; require(!decodeReliableAmbientBatch(bad));
+        bad = bytes; std::fill(bad.begin() + 1, bad.begin() + 9, std::byte{0}); require(!decodeReliableAmbientBatch(bad));
+        bad = bytes; bad[41] = bad[42] = std::byte{255}; require(!decodeReliableAmbientBatch(bad));
+        bad = bytes; bad[43 + 128] = std::byte{9}; require(!decodeReliableAmbientBatch(bad));
+        batch.messages.emplace_back("excess"); require(encodeReliableAmbientBatch(batch).empty());
+        batch.messages.resize(1); batch.messages[0].push_back('m'); require(encodeReliableAmbientBatch(batch).empty());
+        batch.messages = {std::string("a\0b", 3)}; require(encodeReliableAmbientBatch(batch).empty());
+        const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
+        const std::array required{ambientPresentationCapability()};
+        const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(versions, {}, required, testContentManifestId()));
+        require(std::holds_alternative<ServerHello>(negotiateClientHello(makeClientHello(testContentManifestId()), server)));
+        const auto legacy = std::get<CapabilityOffer>(CapabilityOffer::create(versions, {}, {}, testContentManifestId()));
+        require(!std::holds_alternative<ServerHello>(negotiateClientHello(ClientHello::fromOffer(legacy), server)));
+        for (int scenario : {1, 2, 3, 4}) teleportPresentation(false, false, false, false, false, false, scenario);
+        std::cout << "PASS ambient: bounded atomic decode, capability/session/generation, duplicate/stale/conflict rejection, presentation and reentry\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "player-physics")
     {
         const auto now = [](uint64_t ns) { return MonotonicInstant::fromNanoseconds(ns); };

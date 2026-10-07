@@ -61,6 +61,7 @@ namespace TES3MP
         ReliableWorldTimeState = 0x0112,
         ClientMagicUseCommand = 0x0113,
         ClientDoorObstruction = 0x0114,
+        ReliableAmbientBatch = 0x0115,
         LatestWinsSnapshot = 0x0200,
         LatestWinsActorSnapshot = 0x0201,
         LatestWinsEquipmentSnapshot = 0x0202,
@@ -111,6 +112,8 @@ namespace TES3MP
             case MessageKind::ClientMagicUseCommand:
             case MessageKind::ClientDoorObstruction:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };
+            case MessageKind::ReliableAmbientBatch:
+                return MessageDescriptor{ kind, MessageClass::ReliableOperation, 2300 };
             case MessageKind::ReliableGroundItemBaseline:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, NativeGroundMaximumPayloadBytes };
             case MessageKind::LatestWinsSnapshot:

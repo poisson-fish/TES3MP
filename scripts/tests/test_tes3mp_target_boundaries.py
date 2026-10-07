@@ -120,6 +120,8 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             "components/tes3mp/protocol/interactive_object_replication.cpp",
             "components/tes3mp/include/tes3mp/interactive_object_replication.hpp",
             "components/tes3mp/protocol/native_door.cpp",
+            "components/tes3mp/protocol/ambient_replication.cpp",
+            "components/tes3mp/include/tes3mp/ambient_replication.hpp",
             "components/tes3mp/include/tes3mp/native_door.hpp",
             "components/tes3mp/include/tes3mp/native_inventory.hpp",
             "components/tes3mp/include/tes3mp/inventory_replication.hpp",

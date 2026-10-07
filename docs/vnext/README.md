@@ -26,7 +26,7 @@ action and separates synthetic/live evidence; migrate with one writer.
 
 M4 closed with owner sign-off, 2026-10-06; [CURRENT](CURRENT.md) retains evidence.
 [M5](PLAN.md#m5---complete-scripted-quests-independently-and-together) is active.
-Shared-script host scheduling is implemented; ambient delivery and desktop proof remain pending.
+Shared execution, ambient delivery and two-desktop reentry/restart are proven synthetically.
 
 ## Product boundaries
 
@@ -54,4 +54,4 @@ Keep OpenMW 0.51.0 baseline `f4bec41444214a7903bebd178389ca22ca13f646`.
 [OPENMW_PATCH_REGISTRY.json](OPENMW_PATCH_REGISTRY.json) and existing `proofs/`
 serve dependency tooling, not planning.
 
-Code and tests establish implementation; documents establish intended behavior.
+Code/tests establish implementation; documents establish intent.

@@ -1,6 +1,6 @@
 # Current state and next action
 
-**Active: M5 [PLAN.md](PLAN.md), shared-script scheduling implemented. M4 closed, 2026-10-06.**
+**Active: M5 [PLAN.md](PLAN.md), shared-script delivery/proof implemented. M4 closed, 2026-10-06.**
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
@@ -112,8 +112,7 @@ Native abort resolved for now; reopen on recurrence.
 
 **M4 closed, 2026-10-06:** owner accepted overlapping two-client/NPC
 melee/ranged/magic, vanilla/TR gear, impairment, interruption/death/loot/respawn
-and recovery/convergence. Sign-off retains focused evidence; older open artifacts
-predate closure. Accepted bounds and M5/M7 work remain.
+and recovery/convergence. Retain accepted bounds and M5/M7 work.
 
 **M5 shared execution:** [runtime](../../apps/tes3mp-server/native/world_script.hpp)
 uses stock compiler/core opcodes, explicit globals, staged locals/messages,
@@ -122,17 +121,22 @@ Synthetic `build/logs/m5-world-script-{shared,rollback,recovery,admission,conten
 retry/failure/bounds/source/content checks; Fargoth declaration locals pass,
 Vodunius/chargen reject. Strict warnings reject skipped APIs.
 
-**V80 host scheduling:** fresh opt-in binds one script/0–16 globals;
+**V80 scheduling/delivery:** fresh bootstrap binds one script/0–16 globals;
 calendar ownership rejects. World-tick invocations join gameplay durability;
 ordinals survive skipped ticks. Installation/projection/reentry never execute
 scripts. Background ticks continue.
-Synthetic `build/logs/m5-world-script-host.log`: two views, rollback/retry/stale,
-offline/reentry, exact/uncertain restart, malformed images, ownership/source rejection,
-V79 exact recovery and upgrade/downgrade rejection.
-`build/logs/m5-world-script-host-{shared,rollback}.log`: seam regressions pass.
-`build/logs/m5-player-physics-regression.log`: V79 movement/recovery passed.
-Ambient delivery pending; NPC restoration/personal context/dialogue remain closed.
+Capability 39 delivers ≤8 literal messages of ≤256 bytes through atomic reliable admission
+and stock UI; session/invocation checks suppress duplicates. Baselines/recovery never replay output.
+Synthetic `build/logs/m5-ambient-{host,adapter,delivery,bootstrap,bootstrap-admission,bootstrap-zero}.log`:
+rollback/retry/stale, offline/reentry, exact/uncertain restart, malformed images,
+ownership/source/budget rejection, V79 recovery and upgrade/downgrade rejection.
+Inherited `build/logs/m5-world-script-host-{shared,rollback}.log` and
+`build/logs/m5-player-physics-regression.log` retain seam/movement recovery.
+`build/m5-ambient-desktop-{02,restart-01,ui-01}/result.json`: paired occurrences,
+eight-second absences, no missed-output replay, durable continuation, clean client exits;
+100ms ±25ms/10% loss/reorder. Native-window message screenshots inspected.
+NPC restoration/personal context/dialogue remain closed.
 
-**Next:** deliver bounded committed ambient output to both clients; add
-bootstrap admission and prove two-desktop reentry/restart under the
-[M5 contract](DECISIONS.md#m5-implementation-contract). Preserve old images and M4 behavior.
+**Next:** explicit character/story context for InterpreterContext/reference lookup;
+prove personal script isolation/rollback and stock callers under the
+[M5 contract](DECISIONS.md#m5-implementation-contract). Restore excluded NPC operations only after proof.

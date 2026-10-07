@@ -7,6 +7,7 @@
 #include "environment.hpp"
 #include "actor_campaign.hpp"
 #include "actor_processing_regions.hpp"
+#include "world_script_admission.hpp"
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/class.hpp>
@@ -437,24 +438,7 @@ namespace TES3MP::Native
             std::vector<std::unique_ptr<PlacementScene>>& scenes, std::span<const std::byte> restored)
         {
             if (!start.sharedScript.empty())
-            {
-                const auto* script = loadout.store().get<ESM::Script>().search(start.sharedScript);
-                if (!script) throw std::invalid_argument("Shared script absent from winning content");
-                std::vector<ESM::Global> globals;
-                for (const auto& id : start.sharedGlobals)
-                {
-                    const auto calendar = std::array{MWWorld::Globals::sGameHour, MWWorld::Globals::sDay,
-                        MWWorld::Globals::sMonth, MWWorld::Globals::sYear, MWWorld::Globals::sDaysPassed,
-                        MWWorld::Globals::sTimeScale};
-                    if (std::ranges::any_of(calendar, [&](auto name) { return id == name.getValue(); }))
-                        throw std::invalid_argument("Shared script cannot own calendar globals");
-                    const auto* global = loadout.store().get<ESM::Global>().search(id);
-                    if (!global) throw std::invalid_argument("Shared global absent from winning content");
-                    globals.push_back(*global);
-                }
-                start.binding.mSharedScript = std::make_shared<const SharedWorldScript>(
-                    *script, std::move(globals), loadout.contentFingerprint(), crypto);
-            }
+                start.binding.mSharedScript = admitSharedWorldScript(loadout, start.sharedScript, start.sharedGlobals, crypto);
             if (!start.startingItems.empty())
             {
                 MWClass::registerClasses();

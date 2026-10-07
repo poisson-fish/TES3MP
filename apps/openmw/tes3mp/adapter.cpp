@@ -40,7 +40,7 @@ namespace TES3MP::OpenMWAdapter
             nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(),
             nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
             playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
-            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability(), playerAppearanceCapability(), playerRespawnCapability(), playerPhysicsCapability() };
+            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability(), playerAppearanceCapability(), playerRespawnCapability(), playerPhysicsCapability(), ambientPresentationCapability() };
         std::ranges::sort(optional);
         optional.erase(std::unique(optional.begin(), optional.end()), optional.end());
         auto offer = std::get<CapabilityOffer>(
@@ -772,6 +772,12 @@ namespace TES3MP::OpenMWAdapter
                         }
                     }
                 }
+                for (const auto& output : advanced.ambient)
+                    if (mPresentation.applyAmbient(output, now) != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(ProviderResult::PresentationFailed);
+                        return;
+                    }
                 if (mGameRunning && mPresentation.advance(now) != ProviderResult::Accepted)
                 {
                     closeForProviderFailure(ProviderResult::PresentationFailed);

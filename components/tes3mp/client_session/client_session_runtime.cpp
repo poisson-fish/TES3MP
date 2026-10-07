@@ -522,6 +522,27 @@ namespace TES3MP
                 if (mResyncPending)
                     mResyncCombatObserved = true;
             }
+            else if (auto* ambient = std::get_if<ReliableAmbientBatch>(&message))
+            {
+                const auto sessionId = mSession->stateMachine().sessionId();
+                if (!sessionId || !negotiated(mSession->stateMachine(), ambientPresentationCapability())
+                    || ambient->targetSessionId != *sessionId
+                    || ambient->targetSessionGeneration != mSession->stateMachine().generation()) return reject();
+                if (mLastAmbient)
+                {
+                    if (ambient->script != mLastAmbient->script) return reject();
+                    if (ambient->invocation < mLastAmbient->invocation) continue;
+                    if (ambient->invocation == mLastAmbient->invocation)
+                    {
+                        if (*ambient != *mLastAmbient) return reject();
+                        continue;
+                    }
+                    if (ambient->serverTick <= mLastAmbient->serverTick
+                        || ambient->canonicalRevision <= mLastAmbient->canonicalRevision) return reject();
+                }
+                mLastAmbient = *ambient;
+                result.ambient.emplace_back(std::move(*ambient));
+            }
             else if (auto* events = std::get_if<ReliableCombatEventBatch>(&message))
             {
                 const auto sessionId = mSession->stateMachine().sessionId();
@@ -1176,6 +1197,13 @@ namespace TES3MP
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableAmbientBatch:
+                {
+                    auto value = decodeReliableAmbientBatch(frame->payload());
+                    if (!value) return fail(ClientRuntimeResult::ProtocolRejected);
+                    result.messages.emplace_back(std::move(*value));
                     break;
                 }
                 case MessageKind::ReliableCombatEventBatch:

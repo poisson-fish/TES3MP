@@ -4241,6 +4241,18 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
+    ProviderResult DesktopPresentation::applyAmbient(const ReliableAmbientBatch& batch, MonotonicInstant) noexcept
+    {
+        try
+        {
+            if (!mImpl || !validAmbientBatch(batch)) return ProviderResult::PresentationFailed;
+            auto window = MWBase::Environment::get().getWindowManager();
+            for (const auto& message : batch.messages) window->messageBox(message);
+            return ProviderResult::Accepted;
+        }
+        catch (...) { return ProviderResult::PresentationFailed; }
+    }
+
     void DesktopPresentation::appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const
     {
         mImpl->appendMeleeTargets(targets);

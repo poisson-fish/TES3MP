@@ -63,6 +63,7 @@ namespace TES3MP::OpenMWAdapter
             ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status);
 
         bool valid() const noexcept { return mOutput.is_open(); }
+        ProviderResult applyAmbient(const ReliableAmbientBatch&, MonotonicInstant) noexcept override;
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
         std::optional<LocomotionIntent> samplePlayerControls() noexcept override;

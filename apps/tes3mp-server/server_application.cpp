@@ -1676,9 +1676,21 @@ namespace TES3MP::ServerApp
                     }
                 }
             }
+            std::vector<std::pair<TransportConnectionId, ReliableAmbientBatch>> ambient;
+            if (mWiring->nativeInventory && mWiring->nativeInventory->hasSharedScript())
+                for (const auto& target : prepared.candidateState().activeSessions())
+                {
+                    const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                    const auto* session = connection ? mWiring->sessions.session(*connection) : nullptr;
+                    if (!session || !session->negotiatedHello() || !std::ranges::binary_search(
+                            session->negotiatedHello()->negotiatedCapabilities(), ambientPresentationCapability())) continue;
+                    auto output = mWiring->nativeInventory->projectAmbient(prepared.candidateState(), target.sessionId(),
+                        batch.scheduledTick().value(), prepared.candidateRevision(), prepared.candidateNativeInventory());
+                    if (output) ambient.emplace_back(*connection, std::move(*output));
+                }
             if (!admitCombinedInterestTickAtomically(mWiring->queues, routed, routedViews, actorBaselines, actorViews,
                     objectBaselines, inventoryBaselines, combatViews, combatEvents, dialogueChoiceResults,
-                    weatherUpdates, worldTimeUpdates))
+                    weatherUpdates, worldTimeUpdates, ambient))
             {
                 mFailure = changedObjectCells.empty() ? "tick output admission failed"
                                                       : "interactive object output admission failed";

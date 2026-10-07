@@ -6,8 +6,8 @@
    [PLAN.md](PLAN.md), and [DECISIONS.md](DECISIONS.md) for boundary/persistence changes.
 2. Inspect owning code/tests and `git status`; they establish behavior. Search
    history/retired documents only for specific unanswered questions.
-3. Advance bounded behavior with one writer; preserve migration. No additional plan.
-   Finish effect families through shared handlers/parameterized checks; follow dependencies.
+3. Advance bounded slices with one writer; preserve migration, share handlers/checks
+   and follow dependencies. No additional plan.
 4. Run the smallest affected check individually; stop, fix and rerun on failure.
 5. Review the diff; update CURRENT's behavior/limitations/evidence and durable
    decisions. Commit only when authorized; report only run checks.
@@ -50,8 +50,8 @@ python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTest
 python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTests.test_active_local_links_resolve *> build/logs/docs-links.log
 ```
 
-For C++, build the owning target in an existing tree, then run one executable/filter.
-Add required dependencies only; never aggregate `_tests_run`. Update CURRENT evidence.
+Build the owning C++ target in an existing tree; run one executable/filter.
+Add required dependencies only; never aggregate `_tests_run`; update CURRENT evidence.
 
 For shared NPC playtests, bootstrap with the optional final stock navigation settings:
 
@@ -68,9 +68,9 @@ Winning choices and creation/completion use the configured safe point.
 Optional trailing `starting_items COUNT`: quoted-record/quantity/slot triples
 (`-1` unequipped, at most 64). Grants commit once at completion; omission stays empty.
 Policy changes require fresh campaigns; scripted rewards remain M5.
-Fresh V80 uses V79 fields plus `shared_script "RECORD" globals COUNT "GLOBAL"...`
-(0–16); resolve winning content and reject calendar ownership. Bootstrap still emits
-V79. Change the descriptor version only for fresh campaigns.
+Append `shared_script RECORD globals COUNT GLOBAL...` after `player-physics`
+for fresh V80 bootstrap (0–16); admission validates winning content/ownership before
+publication. Omission retains V79; existing saves never upgrade.
 V77 requires established characters; V78 requires capabilities 6/36.
 Native desktop captures emit rendered race/head/hair/sex as `player_appearance_sample`.
 Compare distinct profiles through join/reentry/reconnect/restart; creation has no body.
@@ -83,13 +83,13 @@ groups; `baseline`, `checks`, `full`, unfiltered unittest discovery and default
 standalone presets are not narrow defaults. Linux/macOS presets remain in
 root CMakePresets.json.
 
-Record bounded logs/loadout/outcomes; distinguish synthetic/loadout/live evidence.
-Captures prove exercised paths only; mod data is external input.
+Record bounded synthetic/loadout/live evidence.
+Captures prove exercised paths; mod data is external input.
 
 ## Documentation contract
 
-Keep exactly five active Markdown files directly under `docs/vnext`:
-README (vision), CURRENT (state/evidence/next action, at most 850 words), PLAN (sole
-roadmap, at most 1,500), DEVELOPMENT (workflow), DECISIONS (constraints/proposals).
-Combined ceiling: 5,000 words; dependency proofs are exempt. Replace stale prose,
-preserve links and inherited/new evidence. No duplicate trackers/plans/diaries/reports.
+Keep exactly five active Markdown files under `docs/vnext`:
+README (vision), CURRENT (state/evidence/next action, ≤850 words), PLAN (sole roadmap,
+≤1,500), DEVELOPMENT (workflow), DECISIONS (constraints/proposals).
+Combined ceiling: 5,000 words; dependency proofs exempt. Replace stale handoffs;
+preserve links/evidence. No duplicate trackers/plans/diaries/reports.
