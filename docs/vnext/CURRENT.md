@@ -1,7 +1,8 @@
 # Current state and next action
 
-**M4 [PLAN.md](PLAN.md):** [host](../../apps/tes3mp-server/native/inventory_host.hpp):
-60 Hz NPC/door substeps; 30 Hz commits.
+**Active: M5 [PLAN.md](PLAN.md), implementation unstarted. M4 closed, 2026-10-06.**
+[Host](../../apps/tes3mp-server/native/inventory_host.hpp):
+60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
 **V77 exploration accepted:** radius 0–7 anchors share 256 cells; caps: 37 actors,
 8,192 references/region, 256 navigation tiles/actor. Connected regions share collision;
@@ -22,8 +23,9 @@ actors/peer recovered; screenshots inspected.
 
 **V74–V76:** 143 selectors/141 lifecycles; capability 34/35 presentation.
 `build/logs/{target-recipients-08,source-limits-02,spell-presentation-transaction-04,spell-passive-self-18,spell-passive-stats-08,world-collision-09}.log`.
-AI powers/animated ground reject; WhenUsed needs equipment; passives Self,
-travel players, Soultrap creatures. Two summons empty. Bind intervention destinations.
+Stock AI excludes powers; WhenUsed needs equipment; passives Self,
+travel players, Soultrap creatures. Two summons are stock placeholders.
+Animated ground rejects. Bind intervention destinations.
 
 **V78:** fresh players cannot simulate; starters are campaign-configured. Durable completion/
 recovery owns stock bodies/stats/spells/resources/safe points; capabilities 6/36.
@@ -107,4 +109,17 @@ Fresh campaigns require `player-physics`; V78 retains migration; movement skills
 128-input saturation now waits/retries; backpressure/adapter checks passed.
 Both fixed clients quit normally (0); combat/death/loot/respawn acceptance retained.
 Native abort resolved for now; reopen on recurrence.
-**Next:** remaining M4 PLAN exit gaps; M5 unstarted.
+
+**M4 closure, 2026-10-06:** owner confirmed completed acceptance and directed
+closeout in this chat after the combined encounter requirement was identified:
+overlapping two-client/NPC melee/ranged/magic, varied vanilla/TR equipment,
+impaired networking, interruption/death/loot/respawn and combat recovery/convergence.
+This is owner sign-off alongside retained focused evidence, with no new capture
+claimed. Earlier artifacts marking full M4 open predate this sign-off.
+Accepted runtime bounds and M5/M7 compatibility work remain explicit above.
+
+**Next:** M5 shared-world-first slice: execute one context-free world script once
+for two desktops; persist its state through reentry/restart and separate ambient
+presentation. Inspect the owning engine script scheduler/context and excluded
+Seyda Neen content; restore only proven operations. Retain M4 regression coverage.
+Documentation checks: `build/logs/docs-{budget,links}.log`.

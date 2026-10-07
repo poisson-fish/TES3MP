@@ -36,103 +36,44 @@ retain small fixtures.
 
 ## M4 - Fight together using OpenMW mechanics
 
-**Outcome:** players and actors use general OpenMW combat mechanics for the
-declared gameplay loadout, with server-owned AI, hits, effects, wear, death and loot.
+**Closed, 2026-10-06:** completed acceptance and explicit owner sign-off in this
+chat close M4, including combined encounter acceptance and V79 player cutover.
+[CURRENT.md](CURRENT.md) preserves retained evidence, runtime bounds and attribution
+of owner sign-off; older capture records leaving full M4 open predate closure.
 
-**Before M5:** verify bounded exploration: expand exterior
-discovery/streaming; prove adjacent-cell movement/combat/visibility;
-two players separate and regroup through unload, reconnect and restart under
-delay/jitter/loss. Preserve reference/life identity, state and access across areas,
-without duplicate simulation/outcomes. Require two-desktop travel evidence;
-synthetic crossings are insufficient. Then begin M5 scripting without
-waiting for every remaining M4 combat feature; full M4 sign-off still requires
-its exit criteria.
+**Accepted outcome:** server-owned OpenMW melee/ranged/magic mechanics, NPC
+navigation/collision/door avoidance, effects/wear, life-indexed death/respawn,
+shared corpse loot and coherent recovery for the declared bounded loadout.
+Exploration retains adjacent-cell combat/visibility, split/regroup/unload and
+reentry/reconnect/restart without duplicate simulation or outcomes. V79 shared
+player physics meets the reconciliation budgets in
+[DECISIONS.md](DECISIONS.md#m4-actor-simulation); older campaigns retain migration.
 
-Follow [approved runtime decisions](DECISIONS.md#m4-actor-simulation), in order:
+**Retain as regression contract:** stock weapon/attack modes, unarmed
+fatigue/knockout/health, armor/block/resistances, spell sources/ranges/areas/order,
+143 selectors/141 lifecycles including ExtraSpell and stock placeholders,
+enchantments, AI, projectiles/ammunition, equipment/summons, presentation and
+actor/life identity. Preserve stock restrictions, single writers, bounded input,
+atomic failed writes and durable resources/RNG/effects/deaths/loot together.
 
-1. Prove one native NPC navigating/colliding in an interior, smoothly replicated
-   to two clients under latency/jitter/loss and continuing when either disconnects.
-2. Add server-owned NPC-door contact/avoidance using shared OpenMW physics.
-3. Retain bounded simulation around active travelers after both players leave.
-   Cover processing range, cell boundaries, unload/restart and preserved
-   destinations/completion; never simulate an actor twice.
-4. Preserve autonomous casting through shared OpenMW selection, equipped WhenUsed,
-   visibility, animation-key release/recovery and interruption. Retain durable
-   source/caster/life, RNG, effects, expiry and two concurrent player casts;
-   broaden remaining unsupported effects before M4 exit.
-5. Complete combat before formal acceptance, retaining the verified swing base.
-   Retain stock zero-base-fatigue knockout, interrupted-cast cancellation without
-   unrelated tick rollback, and complete life-indexed death attribution within the
-   save byte budget. Preserve focused failure/recovery and death/loot deduplication
-   checks; M5 owns personal quest credit and rewards.
-   Retain the bounded **actor presentation smoothness** slice and extend body coverage:
-   attacks, hit reactions, falls, knockout loops and get-up
-   for self, remote players, one NPC and one creature; extend custom-body and casting
-   coverage through the same timeline. Measure render cadence, snapshot gaps
-   and clip duration against stock at matching weapon speed. Sample visual poses
-   each render frame between server timestamps;
-   preserve authoritative timing, pauses, interruption and callback suppression.
-   Accept with 60-FPS video/frame traces on both desktops showing smooth progression
-   and stock-speed recovery under loss/delay/jitter and reconnect/restart, without
-   duplicate hits or premature recovery. Keep movement cutover separate.
-   Finish unarmed damage while down, recovery, armor, block, resistances and wear.
-   Complete 143 built-in effects (CURRENT), including stock ExtraSpell.
-   Cover applicable spells/powers/abilities/diseases/enchantments, AI and targets,
-   ranges/areas/order, stacking, defenses/cures/expiry, derived stats, equipment,
-   controls, visuals, life ownership, atomic retry and reconnect/restart.
-   Preserve stock restrictions; admission alone is insufficient. Use shared stock/server
-   handlers and parameterized family lifecycle checks. Follow dependencies through
-   shields/stats/resources, conditions, concealment/detection, movement, AI,
-   objects/travel, bound equipment and multi-actor summons.
-   Match all stock OpenMW combat visuals/audio: casts, composite bolts, bolt
-   light/sound, hit/area effects, persistent loops, enchanted glow,
-   visibility/lighting and animation timing. Use committed events/active snapshots;
-   reconnect restores loops without replaying impacts. Distinguish gameplay,
-   source and presentation evidence. Check family members and semantic
-   exceptions; share stacking/expiry, atomic failure, reconnect and restart fixtures.
-   Generalize beyond one selected NPC: simulate neighboring combatants once each
-   and persist player death/respawn generations with stale-life rejection.
-   Then complete ranged execution: durable receipt recycling, ammunition recovery,
-   validated player contacts, NPC bows/crossbows/thrown weapons, and desktop input
-   and projectile presentation. Replace plain-source restrictions with generic
-   loadout support; preserve weapon selection, attack modes and animation bindings.
-   Prove sustained, overlapping melee/ranged/magic from both desktops and NPCs,
-   using varied vanilla/TR weapons, armor and effects under latency/jitter/loss.
-   Cover simultaneous impacts, interruption, death, corpse-loot contention, respawn,
-   disconnect and restart during flight/effects/get-up. Sequential headless actions
-   establish transaction evidence only; they cannot satisfy this live requirement.
-   Persist resources, swings, flight, recovery, knockout, attributed deaths and
-   loot together. Failed writes leak no resources, RNG, damage or successful events.
-   **Finish line:** both clients converge after reconnect/restart without duplicated
-   ammunition costs, damage or loot. Focused acceptance may run incrementally;
-   full M4 sign-off requires all implementation gaps and exit criteria closed.
-6. Accept V76 Target/destination/size/capability and committed collision on both
-   desktops: drop/pickup physics/projectile/visibility/navigation, rollback,
-   reload/restart and smoothness under latency/jitter/loss. Before player cutover,
-   accept V77 NPCs: door entry, two occupants, split interiors, combat,
-   flight isolation and state after reentry/reconnect/restart. Switch player
-   movement last using shared physics (V79), meeting DECISIONS.md's reconciliation
-   budgets. Retain inherited movement for older campaigns.
+Combined acceptance covers sustained overlapping melee/ranged/magic from both
+desktops and NPCs with varied vanilla/TR equipment under latency/jitter/loss;
+simultaneous impacts, interruption, death, corpse-loot contention, respawn,
+disconnect/restart during flight/effects/get-up and convergence without duplicate
+costs/damage/loot. Retain stock-speed render-frame body/casting/recovery sampling,
+callback suppression and shared collision. Focused automated captures establish
+their exercised paths; combined encounter closure includes owner acceptance.
 
-**Exit:** bounded slices are insufficient. All OpenMW-supported combat paths in
-the gameplay loadout work generically across actors, players, records and targets:
-armed weapon types/attack modes, unarmed fatigue/knockout/health,
-armor/block/resistances, spell ranges, areas, effects and durations,
-projectiles, enchantments, AI, death and loot. No unsupported combat
-path remains for M4. Vary content/effect combinations and prove two-client
-convergence, validated contacts, durable single outcomes and reconnect/restart.
-Meet shared collision and movement smoothness budgets. Persist respawn
-generations, deadlines and attributed deaths for M5; authored corpses and
-summons never become permanent spawns.
-
-**Retire:** independent combat/AI/effect resolvers, hardcoded respawn policy,
-duplicate settings and client gameplay writers; retain shared calculations/one canonical writer.
+**Boundary:** M5 owns general scripts, full AI packages and personal quest
+credit/rewards; M7 broadens compatibility. Authored corpses/summons never become
+permanent spawns. Preserve the accepted bounded runtime and shared calculations;
+retire replaced independent writers only after replacement evidence.
 
 ## M5 - Complete scripted quests independently and together
 
 **Outcome:** unchanged engine scripts support a living shared world and independent
-progression. Start after accepted exploration; remaining M4 exit criteria
-stay open. Follow [current direction](DECISIONS.md#scripted-quest-execution-contract):
+progression. **Active, implementation unstarted:** M4 is closed. Begin with
+the shared-world-first slice below. Follow [current direction](DECISIONS.md#scripted-quest-execution-contract):
 
 1. **Shared world first:** execute one context-free world script once for two
    desktops, preserving state through reentry/restart. Broaden ambient/object/door/NPC

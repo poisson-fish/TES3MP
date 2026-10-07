@@ -4,12 +4,13 @@ TES3MP vNext targets cooperative multiplayer modded OpenMW: explore content such
 as Tamriel Rebuilt, fight and quest together, and share actors, objects, time,
 weather, and persistent world consequences while retaining OpenMW graphics.
 
-The project is moving from a separate bounded gameplay implementation to an
-OpenMW-backed authoritative server. Existing networking, sessions, replication,
-and client integration are the migration base. A bounded native server runtime
-now owns inventory, doors, one NPC's travel and physical weapon combat, including
-durable death and corpse loot. Live graphical two-client combat and broad mod/quest
-compatibility remain unfinished. See the current status and next slice below.
+An OpenMW-backed authoritative server owns bounded shared inventory, doors,
+NPC simulation, melee/ranged/magic combat, effects, death, corpse loot and recovery.
+M4 is closed following completed acceptance and owner sign-off on 2026-10-06,
+including V79 player physics cutover and combined two-client/NPC combat acceptance.
+M5 is the active milestone: authoritative shared scripting and independent quest
+progression. Implementation is unstarted; broad mod/quest compatibility remains
+a target. See the current status and next slice below.
 
 ## Start here
 

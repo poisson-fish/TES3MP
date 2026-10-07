@@ -27,6 +27,12 @@ OpenMW clients: input, prediction, UI, graphics, audio
 Networking remains engine-independent. [CURRENT.md](CURRENT.md) names the next
 action and separates synthetic/live evidence; migrate with one writer.
 
+M4 is closed with owner sign-off on 2026-10-06: V79 player physics cutover,
+combat/death/loot/respawn/body/door/NPC and combined encounter acceptance passed.
+[M5](PLAN.md#m5---complete-scripted-quests-independently-and-together) is active,
+implementation unstarted. Begin with one authoritative shared world script;
+independent progression follows the same engine scripting route.
+
 ## Product boundaries
 
 - Shared world, independent progression; no synchronized attendance or quest stages.
@@ -39,7 +45,7 @@ action and separates synthetic/live evidence; migrate with one writer.
   differences may remain client-local.
 - Target supported OpenMW APIs. MWSE/native-engine-only support and multiplayer
   script compatibility require evidence.
-- Prove two desktop clients first. Preserve portability and VR interfaces;
+- Retain accepted two-desktop behavior. Preserve portability and VR interfaces;
   headset support, public scale and administration follow later.
 
 ## Start and resume
