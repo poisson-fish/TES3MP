@@ -125,6 +125,79 @@ namespace
         rejects([&] { PersonalScripts invalid(7, duplicate, crypto); }, "Personal allocation budget exceeded");
         std::cout << "personal: isolated stock globals/locals, exact/conflicting replay, event cursor, policy/bounds/recovery\n";
     }
+    void personalScheduling(CredentialCrypto& crypto)
+    {
+        auto core = std::make_shared<const SharedWorldScript>(pulse(), globals(), "campaign-one", crypto);
+        const std::vector<PersonalScripts::Definition> policy{{11, 31, core}, {22, 31, core}, {11, 32, core}};
+        PersonalScripts runtime(7, policy, crypto, true);
+        auto state = runtime.initial(); const auto initial = runtime.encode(state);
+        MWWorld::ESMStore content;
+        struct Resolver final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::runtime_error("Scheduled core script resolved a physical reference"); }
+        } resolver;
+        const std::array<uint64_t, 1> alice{11}, bob{22};
+        auto first = runtime.prepareScheduled(state, 3, alice, content, resolver);
+        require(first.result.outcome == SharedWorldScript::Outcome::Committed && first.invocations == 2
+            && first.result.presentation.empty() && runtime.encode(state) == initial,
+            "Scheduled preparation leaked state/output or counted inactive instances");
+        state.swap(first.state);
+        require(state[0].runtime.tick == 1 && state[0].scheduledTick == 3 && state[1].runtime.tick == 0
+            && state[2].runtime.tick == 1 && local(state[2].runtime, "calls") == 1,
+            "Scheduled state crossed characters/stories or caught up skipped ticks");
+        const auto saved = runtime.encode(state);
+        const auto replay = runtime.prepareScheduled(state, 3, alice, content, resolver);
+        require(replay.result.outcome == SharedWorldScript::Outcome::Committed && !replay.result.executed
+            && replay.image.empty(), "Same-tick schedule replayed");
+        auto other = runtime.prepareScheduled(state, 3, bob, content, resolver);
+        require(other.invocations == 1 && other.state[1].scheduledTick == 3, "Same-tick activation lost another owner");
+        const auto offline = runtime.prepareScheduled(state, 8, {}, content, resolver);
+        require(offline.result.outcome == SharedWorldScript::Outcome::Committed && !offline.result.executed
+            && offline.image.empty() && runtime.encode(state) == saved, "Offline scheduling mutated state");
+        PersonalScripts restarted(7, policy, crypto, true);
+        state = restarted.restore(saved);
+        auto next = restarted.prepareScheduled(state, 20, bob, content, resolver);
+        require(next.invocations == 1 && next.state[1].runtime.tick == 1 && next.state[1].scheduledTick == 20
+            && next.state[0].runtime.tick == 1, "Restart/offline catch-up added executions");
+        auto call = next.state[0].last; call.invocation = 2; call.causalEvent = 41;
+        auto trusted = restarted.prepare(next.state, call, content, resolver);
+        require(trusted.invocations == 1 && trusted.state[0].scheduledTick == 3,
+            "Trusted call changed the scheduling cursor");
+        auto continued = restarted.prepareScheduled(trusted.state, 21, alice, content, resolver);
+        require(continued.state[0].runtime.tick == 3 && continued.state[0].eventCursor == 41
+            && continued.state[0].last.causalEvent == 0, "Scheduled call forgot a trusted event receipt");
+        for (const std::vector<uint64_t> invalid : {std::vector<uint64_t>{11, 11}, {99},
+                std::vector<uint64_t>(PersonalScripts::MaximumInstances + 1, 11)})
+            require(runtime.prepareScheduled(state, 21, invalid, content, resolver).result.outcome
+                == SharedWorldScript::Outcome::Rejected, "Invalid active-character set admitted");
+        require(runtime.prepareScheduled(state, 2, alice, content, resolver).result.outcome
+            == SharedWorldScript::Outcome::Rejected, "Schedule accepted a backwards tick");
+        PersonalScripts legacy(7, policy, crypto);
+        rejects([&] { legacy.restore(saved); }, "Scheduled state silently downgraded");
+        rejects([&] { runtime.restore(legacy.encode(legacy.initial())); }, "Trusted state silently upgraded");
+        auto malformed = saved; std::fill_n(malformed.begin() + 120, 8, char(-1));
+        rejects([&] { runtime.restore(malformed); }, "Malformed scheduled script image admitted");
+        auto broken = std::make_shared<const SharedWorldScript>(script("set calls to 9\nwhile ( 1 )\nendwhile"),
+            globals(), "campaign-one", crypto);
+        PersonalScripts stalled(7, {{11, 31, core}, {11, 32, broken}}, crypto, true);
+        const auto before = stalled.initial(); const auto beforeImage = stalled.encode(before);
+        auto rejected = stalled.prepareScheduled(before, 1, alice, content, resolver);
+        require(rejected.result.outcome == SharedWorldScript::Outcome::Rejected && !rejected.result.executed
+            && rejected.state.empty() && rejected.image.empty() && rejected.invocations == 0
+            && rejected.result.presentation.empty() && stalled.encode(before) == beforeImage
+            && rejected.result.diagnostic.starts_with("character=11 story=32 scope=1 source=0 life=0 ")
+            && rejected.result.diagnostic.size() <= SharedWorldScript::MaximumDiagnosticBytes,
+            "Late scheduled failure retained an earlier instance's effects");
+        std::vector<PersonalScripts::Definition> maximum;
+        for (uint64_t story = 1; story <= PersonalScripts::MaximumInstances; ++story) maximum.push_back({11, story, core});
+        PersonalScripts full(7, maximum, crypto, true);
+        const auto bounded = full.prepareScheduled(full.initial(), 1, alice, content, resolver);
+        require(bounded.invocations == PersonalScripts::MaximumInvocationsPerTransaction
+            && bounded.image.size() <= PersonalScripts::MaximumImageBytes, "Full scheduled policy exceeded its budget");
+        std::cout << "personal scheduling: active ownership, silent replay, offline/skipped ticks, event cursors, "
+            "late failure rollback, bounded policy and exact/version-bound recovery\n";
+    }
     void shared(CredentialCrypto& crypto)
     {
         SharedWorldScript runtime(pulse(), globals(), "campaign-one", crypto);
@@ -315,6 +388,7 @@ int main(int argc, char** argv)
         else if (filter == "recovery") recovery(*crypto);
         else if (filter == "admission") admission(*crypto);
         else if (filter == "personal") personal(*crypto);
+        else if (filter == "personal-scheduling") personalScheduling(*crypto);
         else throw std::invalid_argument("Unknown filter");
         std::cout << "PASS shared-world-script " << filter << '\n'; return 0;
     }

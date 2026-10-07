@@ -7,6 +7,7 @@ namespace TES3MP::Native
     namespace
     {
         constexpr uint64_t Magic = 0x3154535054335354;
+        constexpr uint64_t ScheduledMagic = 0x3254535054335354;
         void require(bool value)
         { if (!value) throw std::invalid_argument("Invalid or incompatible personal script state"); }
         void word(std::vector<char>& bytes, uint64_t value)
@@ -36,8 +37,9 @@ namespace TES3MP::Native
         }
     }
 
-    PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto)
-        : mCampaign(campaign), mDefinitions(std::move(definitions))
+    PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
+        bool scheduled)
+        : mCampaign(campaign), mDefinitions(std::move(definitions)), mScheduled(scheduled)
     {
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         for (size_t i = 0; i < mDefinitions.size(); ++i)
@@ -71,7 +73,8 @@ namespace TES3MP::Native
             && !last.sourceReference && !last.sourceLife && last.invocation == state.runtime.tick
             && last.causalEvent <= state.eventCursor
             && (!last.causalEvent || last.causalEvent == state.eventCursor)
-            && (last.invocation || (!last.causalEvent && !state.eventCursor)));
+            && (last.invocation || (!last.causalEvent && !state.eventCursor && !state.scheduledTick))
+            && (mScheduled || !state.scheduledTick));
         if (last.invocation) last.validate();
     }
 
@@ -79,7 +82,7 @@ namespace TES3MP::Native
     {
         require(state.size() == mDefinitions.size());
         std::vector<char> bytes;
-        word(bytes, Magic);
+        word(bytes, mScheduled ? ScheduledMagic : Magic);
         for (auto value : mIdentity.bytes) bytes.push_back(static_cast<char>(std::to_integer<unsigned char>(value)));
         word(bytes, state.size());
         for (size_t i = 0; i < state.size(); ++i)
@@ -87,6 +90,7 @@ namespace TES3MP::Native
             validate(state[i], i);
             const auto image = mDefinitions[i].script->encode(state[i].runtime);
             context(bytes, state[i].last); word(bytes, state[i].eventCursor); word(bytes, image.size());
+            if (mScheduled) word(bytes, state[i].scheduledTick);
             bytes.insert(bytes.end(), image.begin(), image.end());
         }
         require(bytes.size() <= MaximumImageBytes);
@@ -97,7 +101,7 @@ namespace TES3MP::Native
     {
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
-        require(input.word() == Magic);
+        require(input.word() == (mScheduled ? ScheduledMagic : Magic));
         const auto identity = input.take(32);
         require(std::equal(identity.begin(), identity.end(), reinterpret_cast<const char*>(mIdentity.bytes.data())));
         const auto count = input.word(); require(count == mDefinitions.size());
@@ -107,6 +111,7 @@ namespace TES3MP::Native
         {
             preflight.take(72);
             const auto size = preflight.word(); require(size && size <= SharedWorldScript::MaximumImageBytes);
+            if (mScheduled) preflight.take(8);
             preflight.take(size);
         }
         require(preflight.bytes.empty());
@@ -115,7 +120,8 @@ namespace TES3MP::Native
         for (size_t i = 0; i < count; ++i)
         {
             auto last = context(input); const auto event = input.word(), size = input.word();
-            Instance entry{last, event, mDefinitions[i].script->restore(input.take(size))};
+            const auto scheduledTick = mScheduled ? input.word() : 0;
+            Instance entry{last, event, mDefinitions[i].script->restore(input.take(size)), scheduledTick};
             validate(entry, i); state.push_back(std::move(entry));
         }
         require(encode(state) == std::vector<char>(bytes.begin(), bytes.end()));
@@ -150,11 +156,74 @@ namespace TES3MP::Native
             result = std::move(invocation.result);
             if (result.outcome != SharedWorldScript::Outcome::Committed || !result.executed) return prepared;
             prepared.state = before;
-            prepared.state[index] = {execution, std::max(current.eventCursor, execution.causalEvent), std::move(invocation.state)};
+            prepared.state[index] = {execution, std::max(current.eventCursor, execution.causalEvent),
+                std::move(invocation.state), current.scheduledTick};
             prepared.image = encode(prepared.state);
+            prepared.invocations = 1;
         }
         catch (const std::exception& error)
         {
+            result.outcome = SharedWorldScript::Outcome::Rejected; result.executed = false; result.presentation.clear();
+            result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+        }
+        return prepared;
+    }
+
+    PersonalScripts::Prepared PersonalScripts::prepareScheduled(const State& before, uint64_t worldTick,
+        std::span<const uint64_t> activeCharacters, const MWWorld::ESMStore& content,
+        const MWScript::ReferenceResolver& resolver) const
+    {
+        Prepared prepared;
+        auto& result = prepared.result;
+        result.invocationTick = worldTick;
+        try
+        {
+            require(mScheduled && worldTick && before.size() == mDefinitions.size()
+                && activeCharacters.size() <= MaximumInstances);
+            for (size_t i = 0; i < activeCharacters.size(); ++i)
+            {
+                require(activeCharacters[i] && std::ranges::any_of(mDefinitions,
+                    [&](const auto& entry) { return entry.character == activeCharacters[i]; }));
+                require(std::find(activeCharacters.begin(), activeCharacters.begin() + i, activeCharacters[i])
+                    == activeCharacters.begin() + i);
+            }
+            // Validate the complete candidate before executing any instance.
+            (void)encode(before);
+            for (const auto& entry : before) require(entry.scheduledTick <= worldTick);
+            prepared.state = before;
+            for (size_t i = 0; i < before.size(); ++i)
+            {
+                const auto& current = before[i];
+                if (current.scheduledTick == worldTick || std::ranges::find(activeCharacters, current.last.character)
+                    == activeCharacters.end()) continue;
+                require(prepared.invocations < MaximumInvocationsPerTransaction
+                    && current.last.invocation != std::numeric_limits<uint64_t>::max());
+                auto execution = current.last;
+                ++execution.invocation; execution.causalEvent = 0;
+                auto invocation = prepare(prepared.state, execution, content, resolver);
+                result = std::move(invocation.result);
+                // Personal presentation remains closed; never send it as shared output.
+                result.presentation.clear();
+                if (result.outcome != SharedWorldScript::Outcome::Committed || !result.executed)
+                {
+                    result.diagnostic = "character=" + std::to_string(execution.character)
+                        + " story=" + std::to_string(execution.story) + " scope=1 source=0 life=0 " + result.diagnostic;
+                    result.diagnostic.resize(std::min(result.diagnostic.size(), SharedWorldScript::MaximumDiagnosticBytes));
+                    prepared.state.clear(); prepared.invocations = 0; result.executed = false;
+                    return prepared;
+                }
+                prepared.state.swap(invocation.state);
+                prepared.state[i].scheduledTick = worldTick;
+                ++prepared.invocations;
+            }
+            result.outcome = SharedWorldScript::Outcome::Committed;
+            result.executed = prepared.invocations != 0;
+            if (result.executed) prepared.image = encode(prepared.state);
+            else prepared.state.clear();
+        }
+        catch (const std::exception& error)
+        {
+            prepared.state.clear(); prepared.image.clear(); prepared.invocations = 0;
             result.outcome = SharedWorldScript::Outcome::Rejected; result.executed = false; result.presentation.clear();
             result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
         }

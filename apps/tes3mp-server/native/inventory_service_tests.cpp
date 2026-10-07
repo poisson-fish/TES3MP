@@ -5591,7 +5591,8 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool personalScript = effectFamily == "personal-state";
+        const bool personalScheduling = effectFamily == "personal-scheduling";
+        const bool personalScript = personalScheduling || effectFamily == "personal-state";
         const bool sharedScript = personalScript || effectFamily == "shared-script";
         const bool playerPhysics = sharedScript || effectFamily == "player-physics";
         const bool characterCreation = playerPhysics || effectFamily == "chargen-installer";
@@ -9173,7 +9174,7 @@ namespace TES3MP::Native::Testing
         auto registry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(PlayerIdentityRegistry::create(*crypto, storage, records));
         const auto descriptor = scratch / "native.txt";
         {
-            std::ofstream out(descriptor); out << (personalScript ? "native-inventory-81\nmanifest " : sharedScript ? "native-inventory-80\nmanifest " : playerPhysics ? "native-inventory-79\nmanifest " : characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
+            std::ofstream out(descriptor); out << (personalScheduling ? "native-inventory-82\nmanifest " : personalScript ? "native-inventory-81\nmanifest " : sharedScript ? "native-inventory-80\nmanifest " : playerPhysics ? "native-inventory-79\nmanifest " : characterCreation ? "native-inventory-78\nmanifest " : cellActors ? "native-inventory-77\nmanifest " : genericTargets ? "native-inventory-76\nmanifest " : passiveSelf ? "native-inventory-75\nmanifest " : (spellCompleteness || harmfulPassives) ? "native-inventory-74\nmanifest " : committedBodies ? "native-inventory-73\nmanifest " : playerLives ? "native-inventory-72\nmanifest " : summons ? "native-inventory-71\nmanifest " : boundEquipment ? "native-inventory-70\nmanifest " : objectTravel || objectSpells || objectSoul ? "native-inventory-69\nmanifest " : effectFamily == "player-travel" ? "native-inventory-68\nmanifest " : effectFamily == "door-magic" ? "native-inventory-56c\nmanifest " : manyNeighbors ? "native-inventory-66\nmanifest " : effectFamily == "movement-effects" && deepMovement && !wetMovement ? "native-inventory-65\nmanifest " : effectFamily == "neighbor-expanded" ? "native-inventory-63\nmanifest " : neighborCombat ? "native-inventory-62\nmanifest " : placementActors ? "native-inventory-61\nmanifest " : neighborAi ? "native-inventory-60\nmanifest " : socialLifecycle ? "native-inventory-59\nmanifest " : aiDisposition ? "native-inventory-58\nmanifest " : effectFamily == "ai-creature" ? "native-inventory-57\nmanifest " : movementEffects ? "native-inventory-56\nmanifest " : specialConditions ? "native-inventory-55\nmanifest " : effectFamily == "persistent-conditions" ? "native-inventory-54\nmanifest " : (playerCastLifecycle || effectFamily == "visibility") ? "native-inventory-53\nmanifest " : expandedEffects ? "native-inventory-51\nmanifest " : knockoutAnimation ? "native-inventory-50\nmanifest " : weaponExecution ? "native-inventory-44\nmanifest " : participantHits ? "native-inventory-43\nmanifest " : generalConstants ? "native-inventory-37\nmanifest " : constantEffects ? "native-inventory-36\nmanifest "
                 : effectLifecycle ? "native-inventory-35\nmanifest "
                 : defense ? "native-inventory-34\nmanifest "
                 : knockout ? "native-inventory-33\nmanifest "
@@ -9397,6 +9398,119 @@ namespace TES3MP::Native::Testing
                     }
                     return result;
                 };
+                if (personalScheduling)
+                {
+                    require(policy->scheduled() && counts(service) == std::vector<uint64_t>{3, 2, 3, 2},
+                        "Fresh/completed characters scheduled before eligibility or shared story state");
+                    const auto before = image(service);
+                    service.synchronizeCells(authority);
+                    (void)service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5));
+                    require(image(service) == before, "Installation/projection scheduled personal scripts");
+                    auto candidate = native.prepareNativePlayerTick(authority, id<ServerTick>(5), 1.f/30, {}, &world, {}, {});
+                    auto stale = native.prepareNativePlayerTick(authority, id<ServerTick>(5), 1.f/30, {}, &world, {}, {});
+                    const auto shared = native.projectSharedScript(candidate.get());
+                    require(shared && shared->presentation == std::vector<std::string>{"The bell rings."},
+                        "Personal output leaked into shared delivery");
+                    std::vector<std::byte> proposed, durable;
+                    require(candidate->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Rejected; }) == CanonicalDurabilityResult::Rejected
+                        && image(service) == before && counts(service) == std::vector<uint64_t>{3, 2, 3, 2},
+                        "Rejected scheduling advanced gameplay or personal cursors");
+                    require(candidate->commit([&](auto bytes) { durable.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                        && durable == proposed && image(service) == durable
+                        && counts(service) == std::vector<uint64_t>{4, 3, 4, 3}, "Scheduled retry changed its candidate");
+                    require(stale->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Rejected,
+                        "Stale scheduler tick overwrote cursors");
+                    bool repeated = false;
+                    try { native.prepareNativePlayerTick(authority, id<ServerTick>(5), 1.f/30, {}, &world, {}, {}); }
+                    catch (const std::exception&) { repeated = true; }
+                    require(repeated && image(service) == durable, "Committed tick replayed personal scripts");
+                    service.synchronizeCells(offline);
+                    auto background = native.prepareNativePlayerTick(offline, id<ServerTick>(6), 1.f/30, {}, &world, {}, {});
+                    require(background && background->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                        == CanonicalDurabilityResult::Committed && counts(service) == std::vector<uint64_t>{4, 3, 4, 3},
+                        "Offline characters executed personal scripts");
+                    const auto bob = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(),
+                        std::vector{*authority.findActiveSession(id<SessionId>(2))}));
+                    service.synchronizeCells(bob);
+                    auto solo = native.prepareNativePlayerTick(bob, id<ServerTick>(7), 1.f/30, {}, &world, {}, {});
+                    require(solo && solo->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                        == CanonicalDurabilityResult::Committed && counts(service) == std::vector<uint64_t>{4, 4, 4, 4},
+                        "One online player advanced an offline story");
+                    const auto saved = image(service);
+                    const auto cursors = state(service);
+                    require(cursors[0].scheduledTick == 5 && cursors[1].scheduledTick == 7,
+                        "Offline schedule marker changed or active marker was not durable");
+                    auto establishedRecords = records;
+                    for (size_t i = 0; i < 2; ++i)
+                    { establishedRecords[i].characterProfile = completed[i]; establishedRecords[i].savedPlayer = authority.players()[i]; }
+                    auto established = std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+                        PlayerIdentityRegistry::create(*crypto, storage, establishedRecords));
+                    InventoryHost recovered(descriptor, manifest, *established, *crypto, saved);
+                    auto& resumed = dynamic_cast<InventoryService&>(recovered.service());
+                    require(image(resumed) == saved && counts(resumed) == std::vector<uint64_t>{4, 4, 4, 4},
+                        "Scheduled recovery replayed scripts");
+                    // A well-formed script image still cannot claim a future host tick.
+                    auto futureState = policy->restore(readActorCampaign(
+                        {reinterpret_cast<const char*>(saved.data()), saved.size()}).personalScripts);
+                    futureState[0].scheduledTick = 8;
+                    const auto inner = readPersonalScriptCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()}).second;
+                    const auto corrupt = sealPersonalScriptCampaign(inner, policy->encode(futureState));
+                    bool future = false;
+                    try { resumed.recover(std::as_bytes(std::span(corrupt)), {}); } catch (const std::exception&) { future = true; }
+                    require(future && image(resumed) == saved, "Future personal marker installed partial recovery");
+                    resumed.synchronizeCells(bob);
+                    auto gap = resumed.prepareNativePlayerTick(bob, id<ServerTick>(20), 1.f/30, {}, &world, {}, {});
+                    require(gap && gap->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                        == CanonicalDurabilityResult::Committed && counts(resumed) == std::vector<uint64_t>{4, 5, 4, 5},
+                        "Skipped/restarted ticks caught up personal scripts");
+                    resumed.synchronizeCells(authority);
+                    auto uncertain = resumed.prepareNativePlayerTick(authority, id<ServerTick>(21), 1.f/30, {}, &world, {}, {});
+                    require(uncertain && uncertain->commit([&](auto bytes) { durable.assign(bytes.begin(), bytes.end());
+                        return CanonicalDurabilityResult::Failed; }) == CanonicalDurabilityResult::Failed
+                        && resumed.inventoryImage().empty(), "Uncertain scheduled write did not close gameplay");
+                    InventoryHost repaired(descriptor, manifest, *established, *crypto, durable);
+                    require(image(repaired.service()) == durable && counts(repaired.service()) == std::vector<uint64_t>{5, 6, 5, 6},
+                        "Uncertain recovery lost complete personal scheduling state");
+                    std::ifstream input(descriptor);
+                    const std::string text((std::istreambuf_iterator<char>(input)), {});
+                    auto trustedText = text;
+                    trustedText.replace(0, std::string("native-inventory-82").size(), "native-inventory-81");
+                    const auto trustedDescriptor = scratch / "v81-trusted.txt";
+                    { std::ofstream out(trustedDescriptor); out << trustedText; }
+                    InventoryHost trusted(trustedDescriptor, manifest, *registry, *crypto, {});
+                    for (bool downgrade : {false, true})
+                    {
+                        bool rejected = false;
+                        try { InventoryHost invalid(downgrade ? trustedDescriptor : descriptor, manifest, *established, *crypto,
+                            downgrade ? saved : image(trusted.service())); } catch (const std::exception&) { rejected = true; }
+                        require(rejected, "Personal scheduling silently upgraded or downgraded");
+                    }
+                    auto stalledText = text;
+                    const auto lastScript = stalledText.rfind("ambient_pulse_83");
+                    stalledText.replace(lastScript, std::string("ambient_pulse_83").size(), "ambient_stall_83");
+                    const auto stalledDescriptor = scratch / "scheduled-stalled.txt";
+                    { std::ofstream out(stalledDescriptor); out << stalledText; }
+                    InventoryHost stalled(stalledDescriptor, manifest, *registry, *crypto, {});
+                    auto& stalledNative = dynamic_cast<InventoryService&>(stalled.service());
+                    for (size_t i = 0; i < 2; ++i)
+                    {
+                        auto completion = stalledNative.prepareCharacterCompletion(authority, id<PlayerId>(i + 1), completed[i], id<ServerTick>(1));
+                        require(completion && completion->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                            == CanonicalDurabilityResult::Committed, "Scheduled failure fixture completion failed");
+                    }
+                    stalledNative.synchronizeCells(authority);
+                    const auto stalledBefore = image(stalledNative);
+                    bool failed = false;
+                    try { stalledNative.prepareNativePlayerTick(authority, id<ServerTick>(1), 1.f/30, {}, &world, {}, {}); }
+                    catch (const std::exception&) { failed = true; }
+                    require(failed && image(stalledNative) == stalledBefore,
+                        "Late personal scheduler failure leaked earlier scripts/gameplay");
+                    std::cout << "personal scheduling host: eligible characters/stories, atomic retry/stale/late failure, "
+                        "offline/skipped ticks, silent installation/output, exact/uncertain physics recovery, V81 preserved\n";
+                    return;
+                }
                 const auto execution = [&](size_t index, uint64_t occurrence, uint64_t event) {
                     auto value = policy->initial().at(index).last; value.invocation = occurrence; value.causalEvent = event;
                     return value;

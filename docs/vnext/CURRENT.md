@@ -1,6 +1,6 @@
 # Current state and next action
 
-**Active: M5 [PLAN.md](PLAN.md), durable personal host transactions. M4 closed, 2026-10-06.**
+**Active: M5 [PLAN.md](PLAN.md), personal scheduling. M4 closed, 2026-10-06.**
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
@@ -138,13 +138,18 @@ campaign/story/physical/character/source/life/invocation/event identities. Unsta
 reject; waits differ from absence. Personal text uses staged stats.
 Synthetic `build/logs/m5-context-{lookup,rollback,stock}.log`: isolation, stale/bounds
 rejection, stock callers, rollback/retry and named-locals recovery.
-**V81 personal state:** 1–8 stories/two characters own stock globals/named locals,
-invocations and ordered causal cursors. Source-free core calls use scoped context;
-≤16 trusted invocations join actor/inventory/player-physics commits. Replays are silent;
-invalid calls reject the whole candidate. Content/ownership-bound recovery rejects
-upgrades/downgrades. Synthetic `build/logs/m5-personal-{state,host,shared}.log`:
-isolation, rollback/retry/stale/bounds, exact/uncertain recovery; V80 preserved.
+**V81 personal state:** 1–8 stories/two characters own stock globals/locals/invocations/causal cursors.
+≤16 scoped source-free calls join gameplay commits; replay is silent, rejection atomic.
+Synthetic `build/logs/m5-personal-{state,host,shared}.log`: isolation, rollback/retry/stale/bounds,
+content/ownership-bound exact/uncertain recovery, upgrade/downgrade rejection; V80 preserved.
 
-**Next:** personal scheduling, then cross-script calls/dialogue under the
+**V82 personal scheduling:** established online characters/stories execute once/host tick;
+offline/skipped ticks never catch up. Durable markers; silent installation/output. V81 retains trusted calls.
+Synthetic
+`build/logs/m5-personal-scheduling-{state,host,legacy-state,legacy-host}.log`:
+isolation, late-failure rollback/retry/stale, exact/uncertain physics recovery,
+future-marker and V81 upgrade/downgrade rejection.
+
+**Next:** cross-script state/calls, then dialogue under the
 [M5 contract](DECISIONS.md#m5-implementation-contract). Personal output delivery,
 physical-reference operations and NPC restoration remain closed.

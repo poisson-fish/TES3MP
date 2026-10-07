@@ -8,7 +8,8 @@
 namespace TES3MP::Native
 {
     // One explicitly admitted core script per character/story. Cross-script
-    // state, reference effects and automatic personal scheduling remain closed.
+    // state and reference effects remain closed. Scheduled policies suspend
+    // offline characters and execute once per admitted host tick without catch-up.
     class PersonalScripts
     {
     public:
@@ -25,6 +26,7 @@ namespace TES3MP::Native
             MWScript::ExecutionContext last;
             uint64_t eventCursor = 0;
             SharedWorldScript::State runtime;
+            uint64_t scheduledTick = 0;
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -32,19 +34,24 @@ namespace TES3MP::Native
             State state;
             std::vector<char> image;
             SharedWorldScript::Result result;
+            size_t invocations = 0;
         };
-        PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&);
+        PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false);
         uint64_t campaign() const { return mCampaign; }
+        bool scheduled() const { return mScheduled; }
         State initial() const;
         std::vector<char> encode(const State&) const;
         State restore(std::span<const char>) const;
         Prepared prepare(const State&, const MWScript::ExecutionContext&, const MWWorld::ESMStore&,
             const MWScript::ReferenceResolver&) const;
+        Prepared prepareScheduled(const State&, uint64_t worldTick, std::span<const uint64_t> activeCharacters,
+            const MWWorld::ESMStore&, const MWScript::ReferenceResolver&) const;
 
     private:
         uint64_t mCampaign;
         std::vector<Definition> mDefinitions;
         CredentialDigest mIdentity;
+        bool mScheduled;
         void validate(const Instance&, size_t) const;
     };
 }

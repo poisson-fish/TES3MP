@@ -57,6 +57,15 @@
 
 namespace TES3MP::Native
 {
+    namespace
+    {
+        // Core personal scripts never borrow a live NPC/player writer.
+        struct PersonalReferenceResolver final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::invalid_argument("Personal physical reference services not admitted"); }
+        };
+    }
     static_assert(MaximumNativeMagicSourceEffects == TES3MP::MaximumMagicSourceEffects);
     void bindDynamicActorSet(InventoryServiceBinding& binding, const DynamicActorSet& actors)
     {
@@ -3122,6 +3131,9 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Personal script admission differs from campaign");
             auto personalState = mBinding.mPersonalScripts
                 ? std::optional{mBinding.mPersonalScripts->restore(decoded.personalScripts)} : std::nullopt;
+            if (personalState && std::ranges::any_of(*personalState,
+                    [&](const auto& entry) { return entry.scheduledTick > decoded.tick; }))
+                throw std::invalid_argument("Personal schedule exceeds durable world tick");
             EquipmentBytes personalImage(decoded.personalScripts.begin(), decoded.personalScripts.end());
             if (bool(mBinding.mSharedScript) != !decoded.sharedScript.empty())
                 throw std::invalid_argument("Shared script admission differs from campaign");
@@ -5504,13 +5516,7 @@ namespace TES3MP::Native
             bool finished = false;
             ~RejectUnfinished() { if (!finished) invalid = true; }
         } guard{transaction->personalInvalid};
-        // This slice admits only source-free core bytecode. Named/implicit
-        // physical references never borrow a live NPC/player writer.
-        struct Resolver final : MWScript::ReferenceResolver
-        {
-            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
-            { throw std::invalid_argument("Personal physical reference services not admitted"); }
-        } resolver;
+        PersonalReferenceResolver resolver;
         const auto& before = transaction->personalScripts ? transaction->personalScripts->state : *mPersonalScriptState;
         if (transaction->personalInvocations >= PersonalScripts::MaximumInvocationsPerTransaction
             && std::ranges::none_of(before, [&](const auto& entry) { return entry.last == execution; })) return rejected;
@@ -11945,6 +11951,32 @@ namespace TES3MP::Native
                     static_cast<unsigned long long>(result.invocationTick), result.trace.instruction,
                     result.trace.executed, result.diagnostic.c_str());
                 throw std::invalid_argument(transaction->sharedScript->result.diagnostic);
+            }
+        }
+        if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->scheduled())
+        {
+            std::array<uint64_t, 2> active{};
+            size_t count = 0;
+            for (const auto player : mBinding.mPlayers)
+                if (std::ranges::any_of(players.activeSessions(),
+                        [&](const auto& session) { return session.playerId() == player; }))
+                    active[count++] = player.value();
+            PersonalReferenceResolver resolver;
+            auto scripts = mBinding.mPersonalScripts->prepareScheduled(*mPersonalScriptState, tick.value(),
+                std::span(active).first(count), mRuntime.mStore, resolver);
+            if (scripts.result.outcome != SharedWorldScript::Outcome::Committed)
+            {
+                const auto& result = scripts.result;
+                std::fprintf(stderr, "personal schedule rejected: script=%.128s world-tick=%llu occurrence=%llu instruction=%d executed=%zu reason=%.256s\n",
+                    result.script.toDebugString().c_str(), static_cast<unsigned long long>(tick.value()),
+                    static_cast<unsigned long long>(result.invocationTick), result.trace.instruction,
+                    result.trace.executed, result.diagnostic.c_str());
+                throw std::invalid_argument(result.diagnostic);
+            }
+            if (scripts.result.executed)
+            {
+                transaction->personalInvocations = scripts.invocations;
+                transaction->personalScripts = std::move(scripts);
             }
         }
         return transaction;

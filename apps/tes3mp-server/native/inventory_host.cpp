@@ -71,6 +71,7 @@ namespace TES3MP::Native
             std::vector<ESM::RefId> sharedGlobals;
             struct PersonalRecord { uint64_t story; ESM::RefId script; std::vector<ESM::RefId> globals; };
             std::vector<PersonalRecord> personalScripts;
+            bool personalScheduling = false;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -90,7 +91,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 81; ++candidate)
+            for (unsigned candidate = 3; candidate <= 82; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -319,7 +320,7 @@ namespace TES3MP::Native
                         sharedGlobals.push_back(global);
                     }
                 }
-                else if (field == "personal_scripts" && descriptorVersion == 81 && personalScripts.empty())
+                else if (field == "personal_scripts" && descriptorVersion >= 81 && personalScripts.empty())
                 {
                     size_t count = 0; in >> count;
                     if (!in || !count || count > PersonalScripts::MaximumInstances / 2)
@@ -348,7 +349,7 @@ namespace TES3MP::Native
             }
             if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
                 || (descriptorVersion >= 80 && sharedScript.empty())
-                || (descriptorVersion == 81 && personalScripts.empty())
+                || (descriptorVersion >= 81 && personalScripts.empty())
                 || lootLevel < 1 || lootLevel > 1000 || lootSeed > UINT32_MAX
                 || (!wholeInterior && plugin.empty()) || plugin.size() > 256 || index > UINT32_MAX
                 || !cells || cells->size() != 1 || !manifest.contains(cells->front())
@@ -459,7 +460,7 @@ namespace TES3MP::Native
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,
-                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems), sharedScript, std::move(sharedGlobals), std::move(personalScripts)};
+                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems), sharedScript, std::move(sharedGlobals), std::move(personalScripts), descriptorVersion == 82};
         }
     }
     struct InventoryHost::Impl
@@ -1122,7 +1123,8 @@ namespace TES3MP::Native
                     auto script = admitSharedWorldScript(loadout, entry.script, entry.globals, crypto);
                     for (auto player : start.binding.mPlayers) definitions.push_back({player.value(), entry.story, script});
                 }
-                start.binding.mPersonalScripts = std::make_shared<const PersonalScripts>(campaign, std::move(definitions), crypto);
+                start.binding.mPersonalScripts = std::make_shared<const PersonalScripts>(campaign,
+                    std::move(definitions), crypto, start.personalScheduling);
             }
             if (start.binding.mSummons)
             {
