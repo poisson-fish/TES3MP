@@ -88,7 +88,7 @@ Automated doors passed; recorder exhaustion closed clients. Fixed:
 proves doors/travel/quit after exhaustion.
 Stale/resampled inventory preserves state; contradictions reject atomically
 (`build/logs/door-stale-baseline-fixed.log`). Relay reclaims idle endpoints
-(`build/logs/door-relay-expiry.log`). Client shutdown abort remains unresolved.
+(`build/logs/door-relay-expiry.log`).
 
 **V79 player cutover:** capability 38; latest-wins controls/acknowledgements, fixed
 stock physics/shared player/NPC/door hulls, durable frames/resources and bounded replay.
@@ -106,5 +106,5 @@ Fresh campaigns require `player-physics`; V78 retains migration; movement skills
 `build/m4-user-acceptance-player-v79-20261006-live-01/operator-acceptance.json`.
 128-input saturation now waits/retries; backpressure/adapter checks passed.
 Both fixed clients quit normally (0); combat/death/loot/respawn acceptance retained.
-Earlier native abort unreplicated.
+Native abort resolved for now; reopen on recurrence.
 **Next:** remaining M4 PLAN exit gaps; M5 unstarted.
