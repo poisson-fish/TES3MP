@@ -26,8 +26,8 @@ Networking remains engine-independent. [CURRENT.md](CURRENT.md) names the next
 action and separates synthetic/live evidence; migrate with one writer.
 
 M4 closed with owner sign-off, 2026-10-06; [CURRENT](CURRENT.md) retains evidence.
-[M5](PLAN.md#m5---complete-scripted-quests-independently-and-together) is active,
-implementation unstarted. Begin with one authoritative shared world script.
+[M5](PLAN.md#m5---complete-scripted-quests-independently-and-together) is active.
+The initial shared-script seam is implemented; host scheduling and desktop proof remain pending.
 
 ## Product boundaries
 

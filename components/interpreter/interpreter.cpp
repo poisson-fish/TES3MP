@@ -115,19 +115,23 @@ namespace Interpreter
         }
     }
 
-    void Interpreter::run(const Program& program, Context& context, std::size_t instructionLimit)
+    void Interpreter::run(const Program& program, Context& context, std::size_t instructionLimit, ExecutionTrace* trace)
     {
         begin();
 
         try
         {
             mRuntime.configure(program, context);
+            if (trace) *trace = {};
 
             std::size_t executed = 0;
             while (mRuntime.getPC() >= 0 && static_cast<std::size_t>(mRuntime.getPC()) < program.mInstructions.size())
             {
-                if (instructionLimit && executed++ >= instructionLimit)
+                if (trace) trace->instruction = mRuntime.getPC();
+                if (instructionLimit && executed >= instructionLimit)
                     throw std::runtime_error("script instruction limit exceeded");
+                ++executed;
+                if (trace) trace->executed = executed;
                 const Type_Code instruction = program.mInstructions[mRuntime.getPC()];
                 mRuntime.setPC(mRuntime.getPC() + 1);
                 execute(instruction);

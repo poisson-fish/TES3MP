@@ -3,6 +3,25 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M5-001",
+      "slice": "context-free shared world script transaction seam",
+      "owner": "OpenMW MWScript compiler/interpreter and app-local script transaction",
+      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. The live host scheduler and desktop presentation cutover remain pending; no existing campaign layout changes.",
+      "paths": [
+        "apps/openmw/mwscript/worldscript.cpp",
+        "apps/openmw/mwscript/worldscript.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_world_script_tests shared",
+        "tes3mp_native_world_script_tests rollback",
+        "tes3mp_native_world_script_tests recovery",
+        "tes3mp_native_world_script_tests admission",
+        "tes3mp_native_world_script_tests content CONFIG_DIRECTORY"
+      ],
+      "disposition": "bounded native execution/admission seam; host scheduling, ambient delivery and two-desktop proof pending",
+      "removal_condition": "OpenMW supplies equivalent transactional context-free script execution with explicit ownership and bounded presentation"
+    },
+    {
       "id": "M4-015",
       "slice": "native character base construction",
       "owner": "OpenMW player construction and app-local character transaction",

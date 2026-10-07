@@ -66,8 +66,8 @@ retire replaced independent writers only after replacement evidence.
 ## M5 - Complete scripted quests independently and together
 
 **Outcome:** unchanged engine scripts support shared exploration, independent
-progression and optional parties with individual rewards. **Active, implementation
-unstarted:** M4 is closed. The [M5 contract](DECISIONS.md#m5-implementation-contract)
+progression and optional parties with individual rewards. **Active:** initial
+shared-script seam implemented; host cutover pending. M4 is closed. The [M5 contract](DECISIONS.md#m5-implementation-contract)
 owns behavior, party defaults, admission rules and acceptance; sequence bounded slices:
 
 1. **Shared world first:** one context-free engine script executes once across two

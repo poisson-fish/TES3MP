@@ -15,6 +15,12 @@ namespace Interpreter
 {
     struct Program;
 
+    struct ExecutionTrace
+    {
+        int instruction = -1;
+        std::size_t executed = 0;
+    };
+
     class Interpreter
     {
         std::stack<Runtime> mCallstack;
@@ -71,7 +77,8 @@ namespace Interpreter
             installSegment<T>(mSegment5, "5", code, std::forward<TArgs>(args)...);
         }
 
-        void run(const Program& program, Context& context, std::size_t instructionLimit = 0);
+        void run(const Program& program, Context& context, std::size_t instructionLimit = 0,
+            ExecutionTrace* trace = nullptr);
     };
 }
 

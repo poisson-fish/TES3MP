@@ -88,7 +88,8 @@ units with one fixed-step tolerance; exclude discontinuities.
 ## M5 implementation contract
 
 **Status:** base policy agreed; party defaults below are drafted as a later M5
-addition. Implementation unstarted. Others may temporarily interrupt opportunities,
+addition. Initial shared-script seam implemented; host cutover pending.
+Others may temporarily interrupt opportunities,
 never permanently consume them; personal choices retain consequences. Unchanged
 scripts use proven OpenMW APIs, without mandatory quest edits or bespoke handlers.
 [PLAN](PLAN.md#m5---complete-scripted-quests-independently-and-together) owns sequencing.

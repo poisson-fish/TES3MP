@@ -44,6 +44,20 @@ tes3mp_verify_target_includes(tes3mp_native_actor_runtime
     FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
 
 # Concrete application adapter; engine/network types meet only in this leaf.
+add_library(tes3mp_native_world_script STATIC world_script.cpp world_script.hpp)
+target_compile_features(tes3mp_native_world_script PUBLIC cxx_std_20)
+target_link_libraries(tes3mp_native_world_script PRIVATE openmw-lib tes3mp_server_core)
+tes3mp_verify_target_dependencies(tes3mp_native_world_script ALLOWED openmw-lib tes3mp_server_core)
+tes3mp_verify_target_includes(tes3mp_native_world_script
+    FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
+
+add_executable(tes3mp_native_world_script_tests world_script_tests.cpp)
+target_compile_features(tes3mp_native_world_script_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_native_world_script_tests PRIVATE tes3mp_native_world_script tes3mp_server_core tes3mp_native_loadout openmw-lib)
+tes3mp_verify_target_dependencies(tes3mp_native_world_script_tests
+    ALLOWED tes3mp_native_world_script tes3mp_server_core tes3mp_native_loadout openmw-lib)
+set_target_properties(tes3mp_native_world_script tes3mp_native_world_script_tests PROPERTIES FOLDER "TES3MP/NativeProbe")
+
 add_library(tes3mp_native_inventory_service STATIC inventory_service.cpp inventory_service.hpp area_doors.cpp
     faction_scripts.cpp faction_scripts.hpp)
 target_compile_features(tes3mp_native_inventory_service PUBLIC cxx_std_20)
