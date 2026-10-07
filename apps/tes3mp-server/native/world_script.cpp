@@ -169,49 +169,70 @@ namespace TES3MP::Native
         return state;
     }
 
-    SharedWorldScript::Result SharedWorldScript::transact(State& committed, uint64_t tick,
-        const DurableSink& persist) const
+    SharedWorldScript::Prepared SharedWorldScript::prepare(const State& committed, uint64_t tick) const
     {
-        Result result;
+        Prepared prepared;
+        auto& result = prepared.result;
         result.script = mRuntime.id();
         result.invocationTick = tick;
         try
         {
             mRuntime.validate(committed.runtime);
             if (tick && tick == committed.tick)
-            { result.outcome = Outcome::Committed; return result; }
+            { result.outcome = Outcome::Committed; return prepared; }
             require(tick && committed.tick != std::numeric_limits<uint64_t>::max() && tick == committed.tick + 1);
             auto invocation = mRuntime.execute(committed.runtime, &result.trace);
-            State candidate{tick, std::move(invocation.state)};
-            const auto bytes = encode(candidate);
-            // Complete allocations/validation before durability; installation and
-            // moving presentation output after this point cannot allocate.
-            try
-            {
-                if (!persist(bytes))
-                {
-                    result.outcome = Outcome::Deferred;
-                    result.diagnostic = "Durable shared world commit unavailable";
-                    return result;
-                }
-            }
-            catch (const std::exception&)
-            {
-                result.outcome = Outcome::Deferred;
-                result.diagnostic = "Durable shared world commit failed";
-                return result;
-            }
-            using std::swap;
-            static_assert(std::is_nothrow_swappable_v<State>);
-            swap(committed, candidate);
+            prepared.state = {tick, std::move(invocation.state)};
+            prepared.image = encode(prepared.state);
             result.presentation = std::move(invocation.presentation);
             result.executed = true;
+            // Prepared output belongs to the containing transaction until durable.
             result.outcome = Outcome::Committed;
         }
         catch (const std::exception& error)
         {
             result.diagnostic = std::string_view(error.what()).substr(0, MaximumDiagnosticBytes);
         }
-        return result;
+        return prepared;
+    }
+
+    SharedWorldScript::Result SharedWorldScript::transact(State& committed, uint64_t tick,
+        const DurableSink& persist) const
+    {
+        auto prepared = prepare(committed, tick);
+        auto& result = prepared.result;
+        if (result.outcome != Outcome::Committed || !result.executed) return std::move(result);
+        try
+        {
+            // Complete allocations/validation before durability; installation and
+            // moving presentation output after this point cannot allocate.
+            try
+            {
+                if (!persist(prepared.image))
+                {
+                    result.outcome = Outcome::Deferred;
+                    result.executed = false; result.presentation.clear();
+                    result.diagnostic = "Durable shared world commit unavailable";
+                    return std::move(result);
+                }
+            }
+            catch (const std::exception&)
+            {
+                result.outcome = Outcome::Deferred;
+                result.executed = false; result.presentation.clear();
+                result.diagnostic = "Durable shared world commit failed";
+                return std::move(result);
+            }
+            using std::swap;
+            static_assert(std::is_nothrow_swappable_v<State>);
+            swap(committed, prepared.state);
+        }
+        catch (const std::exception& error)
+        {
+            result.outcome = Outcome::Rejected;
+            result.executed = false; result.presentation.clear();
+            result.diagnostic = std::string_view(error.what()).substr(0, MaximumDiagnosticBytes);
+        }
+        return std::move(result);
     }
 }

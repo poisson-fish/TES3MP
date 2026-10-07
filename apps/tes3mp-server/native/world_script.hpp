@@ -10,8 +10,8 @@
 
 namespace TES3MP::Native
 {
-    // Admission/transaction seam only. The host must compose this image with its
-    // existing gameplay commit, never persist scripts in a parallel file.
+    // Prepared engine state/output joins the host's existing gameplay commit;
+    // scripts never persist in a parallel file.
     class SharedWorldScript
     {
     public:
@@ -19,7 +19,7 @@ namespace TES3MP::Native
         static constexpr std::size_t MaximumDiagnosticBytes = 256;
         struct State
         {
-            uint64_t tick = 0;
+            uint64_t tick = 0; // Consecutive invocation ordinal; world ticks may skip.
             MWScript::WorldScript::State runtime;
         };
         enum class Outcome { Committed, Deferred, Rejected };
@@ -34,12 +34,19 @@ namespace TES3MP::Native
             std::string diagnostic;
         };
         using DurableSink = std::function<bool(std::span<const char>)>;
+        struct Prepared
+        {
+            State state;
+            std::vector<char> image;
+            Result result;
+        };
 
         SharedWorldScript(const ESM::Script& script, std::vector<ESM::Global> globals,
             std::string_view campaignContent, CredentialCrypto& crypto);
         State initial() const;
         std::vector<char> encode(const State& state) const;
         State restore(std::span<const char> image) const;
+        Prepared prepare(const State& committed, uint64_t tick) const;
         Result transact(State& committed, uint64_t tick, const DurableSink& persist) const;
 
     private:

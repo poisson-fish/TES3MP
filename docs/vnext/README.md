@@ -1,8 +1,7 @@
 # Multiplayer modded OpenMW
 
 Build cooperative multiplayer OpenMW for compatible modpacks, including Tamriel
-Rebuilt. Players explore/fight together and complete campaigns independently;
-others cannot permanently block opportunities. Clients retain OpenMW graphics/visual mods.
+Rebuilt. Clients retain OpenMW graphics/visual mods.
 
 ## Chosen route
 
@@ -27,7 +26,7 @@ action and separates synthetic/live evidence; migrate with one writer.
 
 M4 closed with owner sign-off, 2026-10-06; [CURRENT](CURRENT.md) retains evidence.
 [M5](PLAN.md#m5---complete-scripted-quests-independently-and-together) is active.
-The initial shared-script seam is implemented; host scheduling and desktop proof remain pending.
+Shared-script host scheduling is implemented; ambient delivery and desktop proof remain pending.
 
 ## Product boundaries
 

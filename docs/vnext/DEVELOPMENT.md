@@ -9,9 +9,8 @@
 3. Advance bounded behavior with one writer; preserve migration. No additional plan.
    Finish effect families through shared handlers/parameterized checks; follow dependencies.
 4. Run the smallest affected check individually; stop, fix and rerun on failure.
-5. Review the diff.
-   Replace CURRENT's handoff for changed behavior, limitations or evidence;
-   record durable decisions. Commit only when authorized; report only run checks.
+5. Review the diff; update CURRENT's behavior/limitations/evidence and durable
+   decisions. Commit only when authorized; report only run checks.
 
 Use ignored `build/` for measurements/logs. Never track game/mod assets, credentials,
 tokens, user saves or machine-local content paths. Git is the development archive.
@@ -38,11 +37,11 @@ compare baseline patches only when a specific check requires it.
 
 ## Narrow verification
 
-No complete suites, expensive gates or baseline tests by default; broad runs need
-requested scope. Log to `build/logs`; inspect exit codes and short failure tails.
+Broad suites/gates/baselines require requested scope. Log to `build/logs`; inspect
+exit codes and short failure tails.
 Source-contract failures report compact mismatches, never source files.
 
-For documentation, run these methods separately, stopping at the first failure:
+Run documentation checks separately; stop on first failure:
 
 ```powershell
 New-Item -ItemType Directory -Force -Path build/logs | Out-Null
@@ -69,6 +68,9 @@ Winning choices and creation/completion use the configured safe point.
 Optional trailing `starting_items COUNT`: quoted-record/quantity/slot triples
 (`-1` unequipped, at most 64). Grants commit once at completion; omission stays empty.
 Policy changes require fresh campaigns; scripted rewards remain M5.
+Fresh V80 uses V79 fields plus `shared_script "RECORD" globals COUNT "GLOBAL"...`
+(0–16); resolve winning content and reject calendar ownership. Bootstrap still emits
+V79. Change the descriptor version only for fresh campaigns.
 V77 requires established characters; V78 requires capabilities 6/36.
 Native desktop captures emit rendered race/head/hair/sex as `player_appearance_sample`.
 Compare distinct profiles through join/reentry/reconnect/restart; creation has no body.

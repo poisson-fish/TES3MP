@@ -66,6 +66,8 @@ namespace TES3MP::Native
             std::vector<std::pair<ESM::RefId, CellId>> additionalCells;
             std::optional<Navigation> navigation;
             std::vector<StartingRecord> startingItems;
+            ESM::RefId sharedScript;
+            std::vector<ESM::RefId> sharedGlobals;
         };
         Startup startup(const std::filesystem::path& path, const ContentManifest& manifest,
             const PlayerIdentityRegistry& players)
@@ -85,7 +87,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 79; ++candidate)
+            for (unsigned candidate = 3; candidate <= 80; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -269,6 +271,8 @@ namespace TES3MP::Native
             bool levitationEnabled = true;
             bool haveLevitation = false, haveStartingItems = false;
             std::vector<Startup::StartingRecord> startingItems;
+            ESM::RefId sharedScript;
+            std::vector<ESM::RefId> sharedGlobals;
             while (in >> std::ws, in && !in.eof())
             {
                 std::string field; in >> field;
@@ -297,9 +301,24 @@ namespace TES3MP::Native
                         startingItems.push_back({name, uint32_t(quantity), slot < 0 ? std::nullopt : std::optional{uint8_t(slot)}});
                     }
                 }
+                else if (field == "shared_script" && descriptorVersion == 80 && sharedScript.empty())
+                {
+                    sharedScript = record(); key("globals"); size_t count = 0; in >> count;
+                    if (!in || count > MWScript::WorldScript::MaximumGlobals)
+                        throw std::invalid_argument("Shared script global ownership exceeds bound");
+                    std::set<ESM::RefId> owned;
+                    for (size_t i = 0; i < count; ++i)
+                    {
+                        auto global = record();
+                        if (!owned.insert(global).second)
+                            throw std::invalid_argument("Shared script global ownership repeated");
+                        sharedGlobals.push_back(global);
+                    }
+                }
                 else throw std::invalid_argument("Native optional descriptor field invalid or repeated");
             }
             if (!in || !(in >> std::ws).eof() || (!baseInventory && !itemId)
+                || (descriptorVersion == 80 && sharedScript.empty())
                 || lootLevel < 1 || lootLevel > 1000 || lootSeed > UINT32_MAX
                 || (!wholeInterior && plugin.empty()) || plugin.size() > 256 || index > UINT32_MAX
                 || !cells || cells->size() != 1 || !manifest.contains(cells->front())
@@ -397,10 +416,15 @@ namespace TES3MP::Native
             for (const auto& item : startingItems)
                 semantic << "starting:" << item.record << ':' << item.count << ':'
                     << (item.slot ? int(*item.slot) : -1) << '\n';
+            if (!sharedScript.empty())
+            {
+                semantic << "shared-script:" << sharedScript << '\n';
+                for (const auto& global : sharedGlobals) semantic << "shared-global:" << global << '\n';
+            }
             return {semantic.str(), std::move(options), std::move(binding), cell, plugin, uint32_t(index), cells->front(),
                 version == "native-inventory-6" || version == "native-inventory-7" || version == "native-inventory-8" || door,
                 version == "native-inventory-7" || version == "native-inventory-8" || door,
-                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems)};
+                version == "native-inventory-8" || door, std::move(doorPlugin), uint32_t(doorIndex), std::move(secondCell), secondWireCell, std::move(additionalCells), std::move(navigation), std::move(startingItems), sharedScript, std::move(sharedGlobals)};
         }
     }
     struct InventoryHost::Impl
@@ -412,6 +436,25 @@ namespace TES3MP::Native
         static InventoryServiceBinding bind(Startup& start, Loadout& loadout, CredentialCrypto& crypto,
             std::vector<std::unique_ptr<PlacementScene>>& scenes, std::span<const std::byte> restored)
         {
+            if (!start.sharedScript.empty())
+            {
+                const auto* script = loadout.store().get<ESM::Script>().search(start.sharedScript);
+                if (!script) throw std::invalid_argument("Shared script absent from winning content");
+                std::vector<ESM::Global> globals;
+                for (const auto& id : start.sharedGlobals)
+                {
+                    const auto calendar = std::array{MWWorld::Globals::sGameHour, MWWorld::Globals::sDay,
+                        MWWorld::Globals::sMonth, MWWorld::Globals::sYear, MWWorld::Globals::sDaysPassed,
+                        MWWorld::Globals::sTimeScale};
+                    if (std::ranges::any_of(calendar, [&](auto name) { return id == name.getValue(); }))
+                        throw std::invalid_argument("Shared script cannot own calendar globals");
+                    const auto* global = loadout.store().get<ESM::Global>().search(id);
+                    if (!global) throw std::invalid_argument("Shared global absent from winning content");
+                    globals.push_back(*global);
+                }
+                start.binding.mSharedScript = std::make_shared<const SharedWorldScript>(
+                    *script, std::move(globals), loadout.contentFingerprint(), crypto);
+            }
             if (!start.startingItems.empty())
             {
                 MWClass::registerClasses();

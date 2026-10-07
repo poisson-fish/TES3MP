@@ -9,6 +9,7 @@
 #include "actor_scene.hpp"
 #include "actor_campaign.hpp"
 #include "dynamic_actor_set.hpp"
+#include "world_script.hpp"
 #include "../inventory_command_binding.hpp"
 #include "../inventory_interest_projection.hpp"
 #include "../native_inventory_service.hpp"
@@ -191,6 +192,7 @@ namespace TES3MP::Native
             const ActorSceneWorld&, std::span<const ActorSceneDoor>)> mGeometryActivity;
         bool mCharacterCreation = false;
         bool mPlayerPhysics = false;
+        std::shared_ptr<const SharedWorldScript> mSharedScript;
         std::vector<StartingItem> mStartingInventory; // Explicit campaign policy, granted once at completion.
         std::array<std::optional<CharacterProfile>, 2> mCharacters;
         std::array<std::string, 2> mCharacterResources;
@@ -227,6 +229,8 @@ namespace TES3MP::Native
         std::string magicVisualRecord(uint64_t sourceKind, uint64_t effectSource) const;
         EquipmentBytes mImage;
         EquipmentBytes mActorImage;
+        std::optional<SharedWorldScript::State> mSharedScriptState;
+        EquipmentBytes mSharedScriptImage;
         std::array<PlayerPhysicsState, 2> mPlayerFrames;
         std::array<std::pair<uint64_t, uint64_t>, 2> mPlayerControlBindings{};
         void bindPhysicsPlayers(InteriorActorScene&, const std::array<PlayerPhysicsState, 2>&,
@@ -307,7 +311,8 @@ namespace TES3MP::Native
             std::span<const ActorCampaignTimedEffect> timedEffects,
             const std::optional<ActorCampaignCast>& casting = {},
             const DynamicActorSet* dynamicActors = nullptr,
-            const InventoryServiceBinding* characterBinding = nullptr) const;
+            const InventoryServiceBinding* characterBinding = nullptr,
+            std::span<const char> sharedScript = {}) const;
         void installActorPosition() noexcept;
         CellId actorCell(const ActorSceneSnapshot& state) const;
         bool sharesGameplayArea(CellId first, CellId second) const noexcept;
@@ -426,6 +431,8 @@ namespace TES3MP::Native
         InventoryService(MWWorld::ESMStore& content, ESM::ReadersCache& readers,
             InventoryServiceBinding binding, bool recovering = false);
         bool characterCreationEnabled() const { return mBinding.mCharacterCreation; }
+        // Candidate output for later committed delivery; projection never executes.
+        std::optional<SharedWorldScript::Result> projectSharedScript(const PreparedNativeInventory*) const;
         const InventoryServiceBinding& characterBinding() const { return mBinding; }
         InventoryService(const InventoryService&) = delete;
         InventoryService& operator=(const InventoryService&) = delete;

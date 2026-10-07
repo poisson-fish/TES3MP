@@ -67,7 +67,7 @@ retire replaced independent writers only after replacement evidence.
 
 **Outcome:** unchanged engine scripts support shared exploration, independent
 progression and optional parties with individual rewards. **Active:** initial
-shared-script seam implemented; host cutover pending. M4 is closed. The [M5 contract](DECISIONS.md#m5-implementation-contract)
+shared-script host scheduling implemented; ambient delivery/desktop proof pending. M4 is closed. The [M5 contract](DECISIONS.md#m5-implementation-contract)
 owns behavior, party defaults, admission rules and acceptance; sequence bounded slices:
 
 1. **Shared world first:** one context-free engine script executes once across two

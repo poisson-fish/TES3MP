@@ -1507,6 +1507,14 @@ namespace TES3MP::Native
               worldCells(mBinding), mBinding.worldDomains().size(),
               mBinding.mStreamExteriors ? PlainEquipmentValues::MaxWorldItems : 64, mBinding.mConstantEffects)
     {
+        if (mBinding.mSharedScript)
+        {
+            static_assert(SharedWorldScript::MaximumImageBytes == MaximumWorldScriptImageBytes);
+            if (!mBinding.mPlayerPhysics || !mBinding.mNavigatingActor)
+                throw std::invalid_argument("Shared scripts require player physics authority");
+            mSharedScriptState = mBinding.mSharedScript->initial();
+            mSharedScriptImage = mBinding.mSharedScript->encode(*mSharedScriptState);
+        }
         if (mBinding.mPersistentConditions && !mBinding.mPlayerCastLifecycle)
             throw std::invalid_argument("Persistent conditions require the current actor lifecycle");
         if (mBinding.mPlayerCastLifecycle)
@@ -3100,6 +3108,13 @@ namespace TES3MP::Native
         if (mBinding.mNavigatingActor)
         {
             auto decoded = readActorCampaign({reinterpret_cast<const char*>(image.data()), image.size()});
+            if (bool(mBinding.mSharedScript) != !decoded.sharedScript.empty())
+                throw std::invalid_argument("Shared script admission differs from campaign");
+            auto scriptState = mBinding.mSharedScript
+                ? std::optional{mBinding.mSharedScript->restore(decoded.sharedScript)} : std::nullopt;
+            if (scriptState && scriptState->tick > decoded.tick)
+                throw std::invalid_argument("Shared script occurrence exceeds world clock");
+            EquipmentBytes scriptImage(decoded.sharedScript.begin(), decoded.sharedScript.end());
             struct RestorePlayerFrames
             {
                 std::array<PlayerPhysicsState, 2>& frames;
@@ -4203,6 +4218,7 @@ namespace TES3MP::Native
             mRespawnInventory.swap(baseline);
             mNeighborRespawnInventory.swap(neighborBaselines);
             mActorTick = decoded.tick; mActorVelocity = decoded.velocity; mActorImage.swap(retained);
+            mSharedScriptState.swap(scriptState); mSharedScriptImage.swap(scriptImage);
             restoreFrames.accepted = true;
             installActorPosition();
             return;
@@ -4224,7 +4240,7 @@ namespace TES3MP::Native
         std::span<const ActorCampaignProjectile> projectiles,
         std::span<const ActorCampaignTimedEffect> timedEffects,
         const std::optional<ActorCampaignCast>& casting, const DynamicActorSet* dynamicActors,
-        const InventoryServiceBinding* characterBinding) const
+        const InventoryServiceBinding* characterBinding, std::span<const char> sharedScript) const
     {
         const auto& resources = characterBinding ? *characterBinding : mBinding;
         const size_t meleeSize = melee ? 8 + (mBinding.mWeaponMelee ? melee->identity() : mBinding.mBoundMelee->mResourceIdentity).size()
@@ -4831,6 +4847,8 @@ namespace TES3MP::Native
             wrapped.insert(wrapped.end(), result.begin(), result.end()); result.swap(wrapped);
         }
         if (mBinding.mPlayerPhysics) result = sealPlayerPhysics(result, mPlayerFrames);
+        if (mBinding.mSharedScript)
+            result = sealWorldScriptCampaign(result, sharedScript.empty() ? std::span(mSharedScriptImage) : sharedScript);
         (void)readActorCampaign(result);
         return result;
     }
@@ -5187,6 +5205,7 @@ namespace TES3MP::Native
         std::vector<ItemCharge> charges;
         std::vector<std::pair<PlayerId, Transform>> relocations;
         EquipmentBytes wornCore, wornInventory, respawnCore;
+        std::optional<SharedWorldScript::Prepared> sharedScript;
         uint64_t target;
         bool contact;
         EquipmentBytes before;
@@ -5275,7 +5294,8 @@ namespace TES3MP::Native
                         ? actor->image() : memberScene ? std::span<const char>(memberImage) : retained;
                     sealed = service.sealActor(selected,
                         frameImage, tick, velocity, melee, target, contact, combat, life, neighborLives, projectiles,
-                        timedEffects, casting, membership ? &membership->mDynamicActors : nullptr, membership.get());
+                        timedEffects, casting, membership ? &membership->mDynamicActors : nullptr, membership.get(),
+                        sharedScript ? std::span(sharedScript->image) : std::span<const char>{});
                     return persist(std::as_bytes(std::span(sealed)));
                 };
                 const auto result = command ? command->commit(compose) : compose(std::as_bytes(std::span(service.mImage)));
@@ -5337,6 +5357,12 @@ namespace TES3MP::Native
                     service.mTimedEffects = std::move(timedEffects);
                     service.mNpcCast = casting;
                     service.mActorTick = tick; service.mActorVelocity = velocity;
+                    if (sharedScript)
+                    {
+                        using std::swap;
+                        swap(*service.mSharedScriptState, sharedScript->state);
+                        service.mSharedScriptImage.swap(sharedScript->image);
+                    }
                     service.mActorImage.swap(sealed);
                     service.installActorPosition();
                     if (service.mBinding.mRetainTraveler)
@@ -5394,8 +5420,11 @@ namespace TES3MP::Native
                 EquipmentBytes sealed;
                 const auto result = native->commit([&](std::span<const std::byte> image) {
                     const auto bytes = std::span(reinterpret_cast<const char*>(image.data()), image.size());
-                    const auto [prior, inner] = readPlayerPhysics(bytes);
+                    const auto [script, physics] = service.mBinding.mSharedScript
+                        ? readWorldScriptCampaign(bytes) : std::pair{std::span<const char>{}, bytes};
+                    const auto [prior, inner] = readPlayerPhysics(physics);
                     sealed = sealPlayerPhysics(inner, states);
+                    if (!script.empty()) sealed = sealWorldScriptCampaign(sealed, script);
                     const auto outcome = persist(std::as_bytes(std::span(sealed)));
                     if (outcome == CanonicalDurabilityResult::Committed)
                         for (size_t i = 0; i < 2; ++i) if (steps[i])
@@ -5418,6 +5447,15 @@ namespace TES3MP::Native
     {
         const auto* physics = dynamic_cast<const PlayerPhysicsTransaction*>(candidate);
         return physics ? physics->native.get() : candidate;
+    }
+
+    std::optional<SharedWorldScript::Result> InventoryService::projectSharedScript(
+        const PreparedNativeInventory* candidate) const
+    {
+        const auto* transaction = dynamic_cast<const ActorTransaction*>(unwrapPlayerPhysics(candidate));
+        if (!transaction || &transaction->service != this || transaction->consumed
+            || transaction->before != mActorImage || !transaction->sharedScript) return {};
+        return transaction->sharedScript->result;
     }
 
     std::optional<PlayerPhysicsBaseline> InventoryService::projectPlayerPhysics(
@@ -11802,6 +11840,19 @@ namespace TES3MP::Native
         transaction->memberScene = std::move(memberScene);
         transaction->memberBaselines = std::move(memberBaselines);
         transaction->skippedTime = waitRest.has_value();
+        if (mBinding.mSharedScript)
+        {
+            transaction->sharedScript = mBinding.mSharedScript->prepare(*mSharedScriptState, mSharedScriptState->tick + 1);
+            if (transaction->sharedScript->result.outcome != SharedWorldScript::Outcome::Committed)
+            {
+                const auto& result = transaction->sharedScript->result;
+                std::fprintf(stderr, "shared script rejected: script=%.128s world-tick=%llu occurrence=%llu instruction=%d executed=%zu reason=%.256s\n",
+                    result.script.toDebugString().c_str(), static_cast<unsigned long long>(tick.value()),
+                    static_cast<unsigned long long>(result.invocationTick), result.trace.instruction,
+                    result.trace.executed, result.diagnostic.c_str());
+                throw std::invalid_argument(transaction->sharedScript->result.diagnostic);
+            }
+        }
         return transaction;
     }
     catch (const std::exception& error)

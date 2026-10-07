@@ -22,6 +22,10 @@ namespace TES3MP::Native
     // V71 composes owned summon bodies, collision, inventories and actor/life targets.
     // Equipment, effect lifecycle, derived constants and generated IDs share the
     // existing actor/inventory commit; prior descriptors retain their layouts.
+    // V80 opts a fresh V79 campaign into one context-free shared script:
+    // `shared_script "record" globals COUNT "global"...` (0..16 owned globals).
+    // Winning content and policy bind admission; one invocation per world tick
+    // joins actor/inventory durability. Presentation delivery remains pending.
     // Fresh campaign; desktop acceptance remains separate from headless checks.
     // V69 uses stock intervention selection with explicit player context and bound
     // destinations, stock object reach, Target/mixed Lock/Open and death-owned

@@ -59,11 +59,11 @@ tes3mp_verify_target_dependencies(tes3mp_native_world_script_tests
 set_target_properties(tes3mp_native_world_script tes3mp_native_world_script_tests PROPERTIES FOLDER "TES3MP/NativeProbe")
 
 add_library(tes3mp_native_inventory_service STATIC inventory_service.cpp inventory_service.hpp area_doors.cpp
-    faction_scripts.cpp faction_scripts.hpp)
+    faction_scripts.cpp faction_scripts.hpp world_script_campaign.hpp)
 target_compile_features(tes3mp_native_inventory_service PUBLIC cxx_std_20)
-target_link_libraries(tes3mp_native_inventory_service PUBLIC tes3mp_server_app PRIVATE tes3mp_native_equipment_runtime tes3mp_native_actor_runtime tes3mp_native_character_construction openmw-lib)
+target_link_libraries(tes3mp_native_inventory_service PUBLIC tes3mp_server_app PRIVATE tes3mp_native_equipment_runtime tes3mp_native_actor_runtime tes3mp_native_character_construction tes3mp_native_world_script openmw-lib)
 tes3mp_verify_target_dependencies(tes3mp_native_inventory_service
-    ALLOWED tes3mp_native_equipment_runtime tes3mp_native_actor_runtime tes3mp_native_character_construction tes3mp_server_app openmw-lib)
+    ALLOWED tes3mp_native_equipment_runtime tes3mp_native_actor_runtime tes3mp_native_character_construction tes3mp_native_world_script tes3mp_server_app openmw-lib)
 tes3mp_verify_target_includes(tes3mp_native_inventory_service
     FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender" "transfer_rehearsal.hpp" "equipment_tests.hpp")
 
@@ -89,9 +89,9 @@ set_target_properties(tes3mp_native_character_construction tes3mp_native_charact
 add_library(tes3mp_native_inventory_host STATIC inventory_host.cpp inventory_host.hpp environment.cpp environment.hpp)
 target_compile_features(tes3mp_native_inventory_host PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_inventory_host PUBLIC tes3mp_native_inventory_service
-    PRIVATE tes3mp_native_loadout tes3mp_native_placement_scene tes3mp_native_character_construction openmw-lib)
+    PRIVATE tes3mp_native_loadout tes3mp_native_placement_scene tes3mp_native_character_construction tes3mp_native_world_script openmw-lib)
 tes3mp_verify_target_dependencies(tes3mp_native_inventory_host
-    ALLOWED tes3mp_native_inventory_service tes3mp_native_loadout tes3mp_native_placement_scene tes3mp_native_character_construction openmw-lib)
+    ALLOWED tes3mp_native_inventory_service tes3mp_native_loadout tes3mp_native_placement_scene tes3mp_native_character_construction tes3mp_native_world_script openmw-lib)
 tes3mp_verify_target_includes(tes3mp_native_inventory_host
     FORBIDDEN "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender" "transfer_rehearsal.hpp" "equipment_tests.hpp")
 

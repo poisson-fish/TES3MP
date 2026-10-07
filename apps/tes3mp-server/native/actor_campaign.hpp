@@ -7,6 +7,7 @@
 #include "melee_animation.hpp"
 #include "cast_animation.hpp"
 #include "player_physics.hpp"
+#include "world_script_campaign.hpp"
 #include <tes3mp/spatial_types.hpp>
 #include <apps/openmw/mwmechanics/meleestate.hpp>
 #include <components/esm/attr.hpp>
@@ -385,12 +386,26 @@ namespace TES3MP::Native
         std::array<std::span<const char>, 2> characterProfiles, characterResources;
         bool playerPhysics = false;
         std::array<PlayerPhysicsState, 2> playerFrames;
+        std::span<const char> sharedScript;
     };
     inline ActorCampaign readActorCampaign(std::span<const char> bytes, bool dynamicDomain = false,
         const std::array<ActorCampaignCombat::PlayerLife, 2>* playerLives = nullptr, bool genericTargets = false)
     {
         size_t offset = 0;
         const auto magic = getAreaWord(bytes, offset);
+        if (magic == WorldScriptCampaignMagic)
+        {
+            if (genericTargets || dynamicDomain || playerLives)
+                throw std::invalid_argument("Nested shared script envelope");
+            const auto [script, inner] = readWorldScriptCampaign(bytes);
+            size_t at = 0;
+            if (getAreaWord(inner, at) != PlayerPhysicsCampaignMagic)
+                throw std::invalid_argument("Shared scripts require player physics campaign");
+            auto result = readActorCampaign(inner);
+            if (!result.sharedScript.empty()) throw std::invalid_argument("Duplicate shared script envelope");
+            result.sharedScript = script;
+            return result;
+        }
         if (magic == PlayerPhysicsCampaignMagic)
         {
             if (genericTargets || dynamicDomain || playerLives)

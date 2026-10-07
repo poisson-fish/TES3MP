@@ -1,6 +1,6 @@
 # Current state and next action
 
-**Active: M5 [PLAN.md](PLAN.md), shared-script seam implemented. M4 closed, 2026-10-06.**
+**Active: M5 [PLAN.md](PLAN.md), shared-script scheduling implemented. M4 closed, 2026-10-06.**
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
@@ -110,22 +110,29 @@ Fresh campaigns require `player-physics`; V78 retains migration; movement skills
 Both fixed clients quit normally (0); combat/death/loot/respawn acceptance retained.
 Native abort resolved for now; reopen on recurrence.
 
-**M4 closure, 2026-10-06:** owner signed off combined encounters:
-overlapping two-client/NPC melee/ranged/magic, varied vanilla/TR equipment,
-impaired networking, interruption/death/loot/respawn and combat recovery/convergence.
-Sign-off accompanies retained focused evidence; no new capture claimed.
-Older full-M4-open artifacts predate closure. Accepted bounds and M5/M7 work remain.
+**M4 closed, 2026-10-06:** owner accepted overlapping two-client/NPC
+melee/ranged/magic, vanilla/TR gear, impairment, interruption/death/loot/respawn
+and recovery/convergence. Sign-off retains focused evidence; older open artifacts
+predate closure. Accepted bounds and M5/M7 work remain.
 
-**M5 execution seam:** [runtime](../../apps/tes3mp-server/native/world_script.hpp)
-uses stock compiler/core opcodes, explicitly owned globals, staged locals/messages,
+**M5 shared execution:** [runtime](../../apps/tes3mp-server/native/world_script.hpp)
+uses stock compiler/core opcodes, explicit globals, staged locals/messages,
 committed/deferred/rejected outcomes and bound GSCR/GLOB recovery.
-Synthetic `build/logs/m5-world-script-{shared,rollback,recovery,admission}.log`:
-one invocation/two observer views, duplicate suppression, retry, failures/bounds,
-source/content mismatch. Strict compiler warnings prevent skipped unsupported APIs.
-`build/logs/m5-world-script-content.log`: Fargoth declaration locals pass;
-Vodunius/chargen scripts reject. NPC restoration/context/dialogue remain closed.
+Synthetic `build/logs/m5-world-script-{shared,rollback,recovery,admission,content}.log`:
+retry/failure/bounds/source/content checks; Fargoth declaration locals pass,
+Vodunius/chargen reject. Strict warnings reject skipped APIs.
 
-**Next:** compose this seam into the host world commit/scheduler under the
-[M5 contract](DECISIONS.md#m5-implementation-contract); bind fresh opt-in admission,
-deliver ambient presentation and prove two-desktop reentry/restart.
-Keep one writer, old campaign images and M4 regressions. Live scheduling remains pending.
+**V80 host scheduling:** fresh opt-in binds one script/0–16 globals;
+calendar ownership rejects. World-tick invocations join gameplay durability;
+ordinals survive skipped ticks. Installation/projection/reentry never execute
+scripts. Background ticks continue.
+Synthetic `build/logs/m5-world-script-host.log`: two views, rollback/retry/stale,
+offline/reentry, exact/uncertain restart, malformed images, ownership/source rejection,
+V79 exact recovery and upgrade/downgrade rejection.
+`build/logs/m5-world-script-host-{shared,rollback}.log`: seam regressions pass.
+`build/logs/m5-player-physics-regression.log`: V79 movement/recovery passed.
+Ambient delivery pending; NPC restoration/personal context/dialogue remain closed.
+
+**Next:** deliver bounded committed ambient output to both clients; add
+bootstrap admission and prove two-desktop reentry/restart under the
+[M5 contract](DECISIONS.md#m5-implementation-contract). Preserve old images and M4 behavior.

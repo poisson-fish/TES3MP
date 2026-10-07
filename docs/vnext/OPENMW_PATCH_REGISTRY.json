@@ -6,7 +6,7 @@
       "id": "M5-001",
       "slice": "context-free shared world script transaction seam",
       "owner": "OpenMW MWScript compiler/interpreter and app-local script transaction",
-      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. The live host scheduler and desktop presentation cutover remain pending; no existing campaign layout changes.",
+      "purpose": "Execute unchanged context-free MWScript using stock compiler/core opcodes and named Locals state. Explicitly bind world-global ownership, bound source/instructions/locals/presentation, stage state/output and reject unavailable personal/reference APIs. Stock GSCR/GLOB serialization and a content/source/policy-bound invocation cursor support atomic retry/recovery. Optional interpreter execution traces report the failing instruction without changing stock default execution. V80 explicitly opts fresh campaigns into one winning shared script and 0-16 globals. Preparation composes with actor/inventory/player physics durability; invocation ordinals survive skipped world ticks and observers never execute. Exact and uncertain recovery bind script state with gameplay; V79 images retain their layout. Calendar ownership rejects. Ambient delivery, bootstrap opt-in tooling and two-desktop proof remain pending.",
       "paths": [
         "apps/openmw/mwscript/worldscript.cpp",
         "apps/openmw/mwscript/worldscript.hpp"
@@ -16,9 +16,10 @@
         "tes3mp_native_world_script_tests rollback",
         "tes3mp_native_world_script_tests recovery",
         "tes3mp_native_world_script_tests admission",
-        "tes3mp_native_world_script_tests content CONFIG_DIRECTORY"
+        "tes3mp_native_world_script_tests content CONFIG_DIRECTORY",
+        "tes3mp_native_loadout_tests shared-script NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
       ],
-      "disposition": "bounded native execution/admission seam; host scheduling, ambient delivery and two-desktop proof pending",
+      "disposition": "bounded shared execution composed with the V80 host scheduler; ambient delivery, bootstrap tooling and two-desktop proof pending",
       "removal_condition": "OpenMW supplies equivalent transactional context-free script execution with explicit ownership and bounded presentation"
     },
     {
