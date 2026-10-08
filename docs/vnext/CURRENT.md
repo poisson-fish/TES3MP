@@ -85,16 +85,15 @@ health/magicka/fatigue and health percentage read authenticated character snapsh
 Result stat writes/unstaged filters closed. Isolation/waits/rollback/retry/truncation/recovery: `build/logs/m5-dialogue-player-stats.log`;
 early-baseline installation: `build/logs/m5-dialogue-installation.log`.
 
-**Bounded slice accepted, Codex/owner, 2026-10-07:** [fixture](../../scripts/prepare_native_dialogue_fixture.py):
-Strength <40/≥40, Destruction <20/≥20. Synthetic progression/recovery:
-`build/m5-dialogue-stats-{desktop-02,restart-01}/result.json` (no screenshots).
-`build/m5-dialogue-ui-01/agent-signoff.json`: private stat branches/choices,
-reopened choices, north 20/30. Owner confirmed silent completed restart:
-north 20/30, south 20/20; no choices/replayed notices.
+**Stats slice accepted, Codex/owner, 2026-10-07:** [fixture](../../scripts/prepare_native_dialogue_fixture.py)
+Strength <40/≥40, Destruction <20/≥20;
+`build/m5-dialogue-ui-01/agent-signoff.json` screenshots inspected.
+Scripted setup/custom mouse bindings.
+Owner confirmed silent completed restart: north 20/30, south 20/20;
 `build/logs/m5-dialogue-operator-restart-01.log`.
-Pending-choice restart remains synthetic; finished topics show no other-story summary.
-Screenshots inspected; scripted setup/custom mouse bindings.
-Stats regression: `build/logs/m5-dialogue-player-stats-ui-signoff.log`.
+Pending-choice restart remains synthetic:
+`build/m5-dialogue-stats-{desktop-02,restart-01}/result.json` (no screenshots).
+Regression: `build/logs/m5-dialogue-player-stats-ui-signoff.log`.
 
 **Dialogue substitutions:** bounded stock %/^ responses read authenticated character/speaker,
 profile custom class, staged ranks/bounty/owned globals and stock cell names before results.
@@ -110,7 +109,14 @@ V85 rejects older policies; action bindings closed.
 Private branches/waits/rollback/retry/silent recovery:
 `build/logs/m5-dialogue-disposition{,-host}.log`. Paired impaired stock branches/pending-choice
 restart: `build/m5-dialogue-disposition-{desktop-02,restart-01}/result.json`
-(synthetic; no screenshots). Relationship writes remain closed.
+(synthetic; no screenshots).
+
+**Story-owned NPC relationships:** V85 source-only stock ModDisposition commits
+≤64 placement/record/life-bound bases/character/story with banks/progression/
+receipts/gameplay. Filters restore private bases; public combat/lives/inventory unchanged.
+Synthetic isolation/late/overflow rollback/bounds/silent recovery:
+`build/logs/m5-npc-state.log`; paired atomic durability/exact/uncertain restart:
+`build/logs/m5-npc-state-host.log`. Scene edits/broader NPC restoration stay closed.
 
 **Journal text/timestamps:** V85 commits bounded stock expansion from authenticated
 character/speaker, result-time globals and authoritative calendar with private
@@ -118,8 +124,8 @@ progression. Stock journal views isolate stories; notifications follow durabilit
 recovery neither expands nor restamps/replays. Prior policies/frames reject.
 Synthetic isolation/waits/rollback/bounds/recovery/client:
 `build/logs/m5-journal{,-stock,-intents,-substitutions,-client,-legacy,-host,-adapter,-installation}.log`.
-Desktop visual acceptance remains open.
+Desktop visual acceptance remains open; requires fresh V85 campaigns.
 
-**Next:** scoped physical dialogue results/NPC restoration
+**Next:** coherent scene-changing dialogue scopes/NPC restoration
 ([M5 contract](DECISIONS.md#m5-implementation-contract)); scoped recovery and
 unchanged Seyda Neen/TR proofs remain. M5 stays open.

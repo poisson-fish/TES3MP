@@ -6,9 +6,8 @@
 scripting, including TR; no independent formulas, catalogs or quest language.
 Keep baseline 0.51.0; mod support requires evidence.
 
-**Independent networking; native runtime.** Keep components/tes3mp portable.
-An app-local runtime may share gameplay with stock OpenMW. Preserve dependency
-checks.
+**Independent networking; native runtime.** Portable components/tes3mp;
+app-local OpenMW runtime. Preserve dependency checks.
 
 **One gameplay loadout.** OpenMW resolves content. Bind plugins/scripts/settings/
 resources to campaign identity. Python packages/hashes, never reinterprets ESM.
@@ -255,7 +254,11 @@ Clients retain early personal baselines through body installation and reopen oth
 choices silently. Bounded stock response substitutions use authenticated character/speaker, staged ranks/bounty,
 owned globals and shared stock cell naming before results; errors/waits discard output.
 Thresholds 0–100 share stock disposition with authenticated character/speaker snapshots;
-relationship writes remain closed. Journal text captures authenticated substitutions and
+Source-only stock ModDisposition persists ≤64 character/story placement bases.
+Recovery validates records/lives before filtering; NPC/bank/progression/receipt/gameplay
+failures discard everything. Public combat/lives/loot stay unchanged;
+scene edits/broader NPC restoration stay closed.
+Journal text captures authenticated substitutions and
 result-time globals with authoritative calendar dates; private story views install stock entries
 silently. Journal notices share durability. Payload v2/policy changes reject old frames/images;
 clients never expand, restamp or replay saved entries.

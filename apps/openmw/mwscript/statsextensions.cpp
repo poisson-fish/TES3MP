@@ -8,6 +8,7 @@
 #include "../mwworld/esmstore.hpp"
 
 #include <components/compiler/opcodes.hpp>
+#include <components/compiler/extensions.hpp>
 #include <components/debug/debuglog.hpp>
 #include <components/esm3/loadfact.hpp>
 #include <components/interpreter/interpreter.hpp>
@@ -758,11 +759,7 @@ namespace MWScript
                 Interpreter::Type_Integer value = runtime[0].mInteger;
                 runtime.pop();
 
-                if (ptr.getClass().isNpc())
-                    ptr.getClass().getNpcStats(ptr).setBaseDisposition(
-                        ptr.getClass().getNpcStats(ptr).getBaseDisposition() + value);
-
-                // else: must not throw exception (used by an Almalexia dialogue script)
+                static_cast<InterpreterContext&>(runtime.getContext()).modDisposition(ptr, value);
             }
         };
 
@@ -1424,6 +1421,18 @@ namespace MWScript
             ESM::RefId mNegativeEffect;
         };
 
+        void registerDispositionResultOpcode(Compiler::Extensions& extensions)
+        {
+            extensions.registerInstruction("moddisposition", "l", Compiler::Stats::opcodeModDisposition,
+                Compiler::Stats::opcodeModDispositionExplicit);
+        }
+
+        void installDispositionResultOpcode(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpModDisposition<ImplicitRef>>(Compiler::Stats::opcodeModDisposition);
+            interpreter.installSegment5<OpModDisposition<ExplicitRef>>(Compiler::Stats::opcodeModDispositionExplicit);
+        }
+
         void installOpcodes(Interpreter::Interpreter& interpreter)
         {
             for (int i = 0; i < Compiler::Stats::numberOfAttributes; ++i)
@@ -1508,8 +1517,7 @@ namespace MWScript
             interpreter.installSegment3<OpGetPCRank<ImplicitRef>>(Compiler::Stats::opcodeGetPCRank);
             interpreter.installSegment3<OpGetPCRank<ExplicitRef>>(Compiler::Stats::opcodeGetPCRankExplicit);
 
-            interpreter.installSegment5<OpModDisposition<ImplicitRef>>(Compiler::Stats::opcodeModDisposition);
-            interpreter.installSegment5<OpModDisposition<ExplicitRef>>(Compiler::Stats::opcodeModDispositionExplicit);
+            installDispositionResultOpcode(interpreter);
             interpreter.installSegment5<OpSetDisposition<ImplicitRef>>(Compiler::Stats::opcodeSetDisposition);
             interpreter.installSegment5<OpSetDisposition<ExplicitRef>>(Compiler::Stats::opcodeSetDispositionExplicit);
             interpreter.installSegment5<OpGetDisposition<ImplicitRef>>(Compiler::Stats::opcodeGetDisposition);

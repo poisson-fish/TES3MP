@@ -3183,6 +3183,23 @@ namespace TES3MP::Native
                 if (!decoded.combat || decoded.combat->npcPlacements != placements)
                     throw std::invalid_argument("Native combat placements differ from bound actors");
             }
+            if (personalState) for (const auto& story : *personalState) for (const auto& npc : story.npcs)
+            {
+                if (!decoded.combat || !decoded.life)
+                    throw std::invalid_argument("Story NPC lacks durable physical source");
+                const auto placement = std::ranges::find(decoded.combat->npcPlacements, npc.reference);
+                const auto owner = std::ranges::find(mBinding.mContainers, npc.reference,
+                    [](const auto& value) { return value.mId.value(); });
+                if (placement == decoded.combat->npcPlacements.end() || owner == mBinding.mContainers.end())
+                    throw std::invalid_argument("Story NPC placement absent on recovery");
+                const size_t index = size_t(placement - decoded.combat->npcPlacements.begin());
+                const auto& sourceLife = index ? decoded.neighborLives.at(index - 1) : *decoded.life;
+                const auto ptr = mRuntime.mContainers.at(size_t(owner - mBinding.mContainers.begin()))->mReference->getPtr();
+                if (!ptr.hasLiveReference() || ptr.getType() != ESM::NPC::sRecordId
+                    || ptr.getCellRef().getRefId() != npc.record || !ptr.getClass().getScript(ptr).empty()
+                    || npc.life > sourceLife.generation)
+                    throw std::invalid_argument("Story NPC record/life differs from physical source");
+            }
             if (decoded.combat && decoded.combat->fleeTarget
                 && std::ranges::none_of(mBinding.mPlayers, [&](PlayerId player) {
                     return player.value() == decoded.combat->fleeTarget;
@@ -5362,8 +5379,8 @@ namespace TES3MP::Native
         if (const auto* custom = std::get_if<CustomClassDefinition>(&*mBinding.mCharacters[self]->characterClass()))
             customClassName = custom->name;
         auto speakerStats = loadCombatStats(mRuntime.mStore, mCombat->actors[npc], mTimedEffects, npc);
-        // Disposition result writes and NPC crime reactions are not admitted yet;
-        // the authored base and committed source-specific Charm are canonical.
+        // PersonalScripts restores the story-owned base into this detached
+        // snapshot. Public combat/Charm and NPC crime reactions keep their writer.
         speakerStats.setBaseDisposition(ptr.get<ESM::NPC>()->mBase->mNpdt.mDisposition);
         speakerStats.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Charm),
             MWMechanics::EffectParam(committedDisposition(mRuntime.mStore,

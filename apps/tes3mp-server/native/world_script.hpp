@@ -49,8 +49,8 @@ namespace TES3MP::Native
         MWScript::WorldScript::Invocation executeResult(const State& state, const MWScript::ExecutionContext& execution,
             const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver, MWScript::ScriptState& bank,
             MWScript::GlobalScriptDesc& caller, MWScript::DialogueState& dialogue, const Interpreter::Program& program,
-            Interpreter::ExecutionTrace& trace) const
-        { return mRuntime.execute(state.runtime, execution, content, resolver, &trace, &bank, &caller, &dialogue, &program); }
+            Interpreter::ExecutionTrace& trace, MWMechanics::NpcStats* sourceNpcStats = nullptr) const
+        { return mRuntime.execute(state.runtime, execution, content, resolver, &trace, &bank, &caller, &dialogue, &program, sourceNpcStats); }
         State initial() const;
         std::vector<char> encode(const State& state) const;
         State restore(std::span<const char> image) const;

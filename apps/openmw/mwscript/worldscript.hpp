@@ -10,6 +10,7 @@
 namespace ESM { class Script; }
 namespace Interpreter { struct ExecutionTrace; }
 namespace MWWorld { class ESMStore; }
+namespace MWMechanics { class NpcStats; }
 
 namespace MWScript
 {
@@ -57,12 +58,12 @@ namespace MWScript
             const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
             Interpreter::ExecutionTrace* trace = nullptr, ScriptState* bank = nullptr,
             GlobalScriptDesc* caller = nullptr, DialogueState* dialogue = nullptr,
-            const Interpreter::Program* result = nullptr) const;
+            const Interpreter::Program* result = nullptr, MWMechanics::NpcStats* sourceNpcStats = nullptr) const;
 
     private:
         Invocation executeImpl(const State&, Interpreter::ExecutionTrace*, const ExecutionContext*,
             const MWWorld::ESMStore*, const ReferenceResolver*, ScriptState*, GlobalScriptDesc*,
-            DialogueState*, const Interpreter::Program*) const;
+            DialogueState*, const Interpreter::Program*, MWMechanics::NpcStats*) const;
         ESM::RefId mId;
         Compiler::Locals mDeclarations;
         Interpreter::Program mProgram;

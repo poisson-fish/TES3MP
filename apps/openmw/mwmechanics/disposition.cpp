@@ -1,4 +1,5 @@
 #include "disposition.hpp"
+#include <cstdint>
 
 #include "airating.hpp"
 #include "npcstats.hpp"
@@ -12,7 +13,7 @@ namespace MWMechanics
         const ESM::NPC& player, const NpcStats& playerStats, const MWWorld::Store<ESM::GameSetting>& gmst,
         const std::function<int(const ESM::RefId&, const ESM::RefId&)>& factionReaction, bool clamp)
     {
-        float x = static_cast<float>(speakerStats.getBaseDisposition() + speakerStats.getCrimeDispositionModifier());
+        float x = static_cast<float>(int64_t(speakerStats.getBaseDisposition()) + speakerStats.getCrimeDispositionModifier());
 
         const float fDispRaceMod = gmst.find("fDispRaceMod")->mValue.getFloat();
         if (speaker.mRace == player.mRace)

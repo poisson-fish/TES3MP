@@ -35,6 +35,7 @@ namespace MWScript
         mutable MWWorld::Ptr mReference;
         MWWorld::Ptr mPlayer;
         MWMechanics::NpcStats* mPlayerStats = nullptr;
+        MWMechanics::NpcStats* mSourceNpcStats = nullptr;
         const MWWorld::ESMStore* mContent = nullptr;
         bool mExplicitPlayer = false;
         std::optional<ExecutionContext> mExecution;
@@ -80,7 +81,7 @@ namespace MWScript
         InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
             const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
             MWMechanics::NpcStats* detachedPlayerStats = nullptr, ScriptState* scriptState = nullptr,
-            DialogueState* dialogueState = nullptr);
+            DialogueState* dialogueState = nullptr, MWMechanics::NpcStats* sourceNpcStats = nullptr);
         ///< Scoped callers supply staged locals/stats. Unprovided services reject;
         ///< no fallback to the stock protagonist, world globals or script manager.
 
@@ -91,6 +92,9 @@ namespace MWScript
 
         MWWorld::Ptr getPlayer() const;
         MWMechanics::NpcStats& getPlayerStats() const;
+        // Only the validated invocation source may change detached NPC state.
+        // Stock callers retain the ordinary NPC writer.
+        void modDisposition(const MWWorld::Ptr& actor, int value) const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
         DialogueState* getDialogueState() const;

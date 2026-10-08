@@ -5,6 +5,7 @@
 #include "miscextensions.hpp"
 #include "scriptstate.hpp"
 #include "dialogueextensions.hpp"
+#include "statsextensions.hpp"
 
 #include <components/compiler/context.hpp>
 #include <components/compiler/errorhandler.hpp>
@@ -81,8 +82,8 @@ namespace MWScript
                 : InterpreterContext(&locals, {}), mGlobals(globals), mPresentation(presentation) {}
             Context(Locals& locals, std::vector<ESM::Global>& globals, std::vector<std::string>& presentation,
                 const ExecutionContext& execution, const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-                ScriptState* bank, DialogueState* dialogue)
-                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank, dialogue), mGlobals(globals), mPresentation(presentation) {}
+                ScriptState* bank, DialogueState* dialogue, MWMechanics::NpcStats* sourceNpcStats)
+                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank, dialogue, sourceNpcStats), mGlobals(globals), mPresentation(presentation) {}
 
             int getGlobalShort(std::string_view id) const override { return global(id).getInteger(); }
             int getGlobalLong(std::string_view id) const override { return global(id).getInteger(); }
@@ -275,16 +276,18 @@ namespace MWScript
     }
 
     WorldScript::Invocation WorldScript::execute(const State& before, Interpreter::ExecutionTrace* trace) const
-    { return executeImpl(before, trace, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr); }
+    { return executeImpl(before, trace, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr); }
 
     WorldScript::Invocation WorldScript::execute(const State& before, const ExecutionContext& execution,
         const MWWorld::ESMStore& content, const ReferenceResolver& resolver, Interpreter::ExecutionTrace* trace,
-        ScriptState* bank, GlobalScriptDesc* caller, DialogueState* dialogue, const Interpreter::Program* result) const
-    { return executeImpl(before, trace, &execution, &content, &resolver, bank, caller, dialogue, result); }
+        ScriptState* bank, GlobalScriptDesc* caller, DialogueState* dialogue, const Interpreter::Program* result,
+        MWMechanics::NpcStats* sourceNpcStats) const
+    { return executeImpl(before, trace, &execution, &content, &resolver, bank, caller, dialogue, result, sourceNpcStats); }
 
     WorldScript::Invocation WorldScript::executeImpl(const State& before, Interpreter::ExecutionTrace* trace,
         const ExecutionContext* execution, const MWWorld::ESMStore* content, const ReferenceResolver* resolver,
-        ScriptState* bank, GlobalScriptDesc* caller, DialogueState* dialogue, const Interpreter::Program* program) const
+        ScriptState* bank, GlobalScriptDesc* caller, DialogueState* dialogue, const Interpreter::Program* program,
+        MWMechanics::NpcStats* sourceNpcStats) const
     {
         validate(before);
         Invocation result{before, {}};
@@ -300,12 +303,13 @@ namespace MWScript
         auto restored = Locals::restore(before.script.mLocals, mId, mDeclarations);
         auto& locals = caller ? caller->mLocals : restored;
         auto context = execution
-            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank, dialogue)
+            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank, dialogue, sourceNpcStats)
             : std::make_unique<Context>(locals, result.state.globals, result.presentation);
         Interpreter::Interpreter interpreter;
         Interpreter::installOpcodes(interpreter);
         if (mBank) Misc::installScriptOpcodes(interpreter);
         if (dialogue) Dialogue::installJournalOpcodes(interpreter);
+        if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
         interpreter.run(program ? *program : mProgram, *context, MaximumExecutedInstructions, trace);
@@ -324,6 +328,7 @@ namespace MWScript
         Compiler::Extensions extensions;
         Misc::registerScriptOpcodes(extensions);
         Compiler::Dialogue::registerExtensions(extensions);
+        Stats::registerDispositionResultOpcode(extensions);
         context.setExtensions(&extensions);
         std::string source = "begin " + std::string(mId.getRefIdString()) + "\n";
         for (const auto kind : {'s', 'l', 'f'})

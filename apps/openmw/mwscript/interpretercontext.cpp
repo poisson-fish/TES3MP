@@ -205,9 +205,11 @@ namespace MWScript
 
     InterpreterContext::InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
         const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-        MWMechanics::NpcStats* detachedPlayerStats, ScriptState* scriptState, DialogueState* dialogueState)
+        MWMechanics::NpcStats* detachedPlayerStats, ScriptState* scriptState, DialogueState* dialogueState,
+        MWMechanics::NpcStats* sourceNpcStats)
         : mLocals(locals)
         , mPlayerStats(detachedPlayerStats)
+        , mSourceNpcStats(sourceNpcStats)
         , mContent(&content)
         , mExplicitPlayer(execution.ownership == ExecutionContext::Ownership::Character)
         , mExecution(execution)
@@ -219,6 +221,29 @@ namespace MWScript
         if (dialogueState) dialogueState->validateExecution(execution);
         if (detachedPlayerStats && execution.ownership != ExecutionContext::Ownership::Character)
             throw std::invalid_argument("Shared script cannot own character stats");
+        if (sourceNpcStats && (execution.ownership != ExecutionContext::Ownership::Character
+            || !execution.sourceReference || !dialogueState))
+            throw std::invalid_argument("NPC result lacks character/story dialogue ownership");
+    }
+
+    void InterpreterContext::modDisposition(const MWWorld::Ptr& actor, int value) const
+    {
+        MWMechanics::NpcStats* stats = nullptr;
+        if (mExecution)
+        {
+            if (!mSourceNpcStats || !actor.hasLiveReference() || actor.getType() != ESM::NPC::sRecordId
+                || actor != resolveReference({}))
+                throw std::invalid_argument("NPC result lacks staged source ownership");
+            stats = mSourceNpcStats;
+        }
+        else if (actor.getClass().isNpc())
+            stats = &actor.getClass().getNpcStats(actor);
+        // Stock ModDisposition is a no-op for creatures.
+        if (!stats) return;
+        const int64_t disposition = int64_t(stats->getBaseDisposition()) + value;
+        if (disposition < INT32_MIN || disposition > INT32_MAX)
+            throw std::invalid_argument("NPC disposition exceeds stock integer range");
+        stats->setBaseDisposition(int(disposition));
     }
 
     void InterpreterContext::requireUnscopedService() const

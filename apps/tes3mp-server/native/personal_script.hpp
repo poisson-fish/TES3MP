@@ -12,7 +12,8 @@ namespace MWMechanics { class NpcStats; }
 namespace TES3MP::Native
 {
     // Explicitly admitted source-free banks and scoped dialogue results share
-    // character/story state. Physical effects remain closed. Scheduled policies suspend
+    // character/story state. Authenticated dialogue also owns bounded source-NPC
+    // disposition; scene-changing effects remain closed. Scheduled policies suspend
     // offline characters and execute once per admitted host tick without catch-up.
     class PersonalScripts
     {
@@ -21,6 +22,7 @@ namespace TES3MP::Native
         static constexpr size_t MaximumScriptsPerBank = 4;
         static constexpr size_t MaximumInvocationsPerTransaction = 16;
         static constexpr size_t MaximumImageBytes = 1048576;
+        static constexpr size_t MaximumNpcsPerStory = 64;
         struct Definition
         {
             struct Member { std::shared_ptr<const SharedWorldScript> script; bool running = false; };
@@ -32,6 +34,13 @@ namespace TES3MP::Native
         };
         struct Instance
         {
+            struct Npc
+            {
+                uint64_t reference = 0, life = 0;
+                ESM::RefId record;
+                int disposition = 0; // Stock raw base; derived disposition clamps later.
+                bool operator==(const Npc&) const = default;
+            };
             MWScript::ExecutionContext last;
             uint64_t eventCursor = 0;
             SharedWorldScript::State runtime;
@@ -47,6 +56,9 @@ namespace TES3MP::Native
             std::vector<MWScript::DialogueState::Choice> choices;
             // Speakers personally met, bounded independently of shared NPC state.
             std::vector<uint64_t> talkedSpeakers;
+            // Relationships belong to a character/story and placement, surviving
+            // legitimate new lives. No public stats, inventories or loot are copied.
+            std::vector<Npc> npcs;
         };
         using State = std::vector<Instance>;
         struct Prepared

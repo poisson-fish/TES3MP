@@ -5593,7 +5593,8 @@ namespace TES3MP::Native::Testing
     {
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
-        const bool personalIntents = dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
+        const bool dialogueNpc = effectFamily == "dialogue-npc-state";
+        const bool personalIntents = dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
         const bool personalDialogue = personalIntents || effectFamily == "dialogue";
         const bool personalBanks = personalDialogue || effectFamily == "script-banks";
         const bool personalScheduling = personalBanks || effectFamily == "personal-scheduling";
@@ -6315,6 +6316,7 @@ namespace TES3MP::Native::Testing
                             info.mResultScript = "set calls to calls + 1\nset token to token + 1\n"
                                 "set ambient_counter_83 to ambient_counter_83 + 1\n"
                                 "set relay_q19.calls to relay_q19.calls + 3\nJournal journey_t37 10\nAddTopic followup_p82\n";
+                            if (dialogueNpc) info.mResultScript += "ModDisposition 17\n";
                             if (std::string_view(name) == "refusal_x5"
                                 || (personalIntents && std::string_view(name) == "followup_p82"))
                                 info.mResultScript += "Goodbye\n";
@@ -6374,6 +6376,7 @@ namespace TES3MP::Native::Testing
                             info.mSelects.front().mValue = 7;
                             info.mResponse = "Passage complete for ^PCName.";
                             info.mResultScript = "set calls to calls + 1\nJournal journey_t37 20\n";
+                            if (dialogueNpc) info.mResultScript += "ModDisposition -9\n";
                             out.startRecord("INFO");
                             info.save(out);
                             out.endRecord("INFO");
@@ -9626,6 +9629,27 @@ namespace TES3MP::Native::Testing
                             authority, id<ServerTick>(tick), 1.f / 30, std::move(input), &world, {}, {});
                     };
                     const auto before = image(service);
+                    const auto npcRecord = ESM::RefId::stringRefId("npc_door_actor");
+                    const auto baseDisposition = source.store().get<ESM::NPC>().find(npcRecord)->mNpdt.mDisposition;
+                    const auto checkNpcs = [&](const auto& owner, int aliceDelta, int bobDelta) {
+                        if (!dialogueNpc) return;
+                        const auto values = state(owner);
+                        require(values.size() == 4 && std::ranges::all_of(values,
+                            [](const auto& value) { return value.last.story == 91 || value.npcs.empty(); }),
+                            "NPC result crossed another story");
+                        for (const auto [character, delta] : {std::pair{1u, aliceDelta}, {2u, bobDelta}})
+                        {
+                            const auto story = std::ranges::find_if(values, [&](const auto& value) {
+                                return value.last.character == character && value.last.story == 91; });
+                            require(story != values.end(), "NPC character/story missing from host image");
+                            const auto& npcs = story->npcs;
+                            require(delta ? npcs.size() == 1 && npcs.front().reference == request.speaker
+                                && npcs.front().life == request.life && npcs.front().record == npcRecord
+                                && npcs.front().disposition == baseDisposition + delta : npcs.empty(),
+                                "NPC state crossed character or lost source/disposition");
+                        }
+                    };
+                    checkNpcs(service, 0, 0);
                     const auto expectedResponse = [&](size_t index) {
                         std::string className = "Scholar";
                         if (!index)
@@ -9661,6 +9685,12 @@ namespace TES3MP::Native::Testing
                         authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), idle.get());
                     require(idle && idleViews.size() == 2 && idleViews[0].revision == 0,
                         "Ordinary live tick lost initial personal dialogue baselines");
+                    std::vector<std::byte> idleImage;
+                    if (dialogueNpc)
+                        require(idle->commit([&](auto bytes) {
+                            idleImage.assign(bytes.begin(), bytes.end());
+                            return CanonicalDurabilityResult::Rejected;
+                        }) == CanonicalDurabilityResult::Rejected, "NPC control tick did not roll back");
                     auto candidate = prepare(native, 5, 1, 101, request);
                     auto alice = service.projectPersonalDialogue(
                         authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), candidate.get());
@@ -9683,6 +9713,7 @@ namespace TES3MP::Native::Testing
                     require(rejectedView[0].response.empty() && rejectedView[0].choices.empty(),
                         "Rejected durability installed expanded response or choices");
                     require(rejectedView[0].entries.empty(), "Rejected durability installed journal text/date");
+                    checkNpcs(service, 0, 0);
                     candidate = prepare(native, 5, 1, 101, request);
                     // A second client joins the same detached gameplay transaction.
                     auto& detached = dynamic_cast<InventoryService&>(service);
@@ -9707,6 +9738,17 @@ namespace TES3MP::Native::Testing
                         return CanonicalDurabilityResult::Committed;
                     }) == CanonicalDurabilityResult::Committed,
                         "Paired dialogue durability failed");
+                    checkNpcs(service, 17, 17);
+                    if (dialogueNpc)
+                    {
+                        const auto committed = image(service);
+                        const auto original = readActorCampaign({reinterpret_cast<const char*>(idleImage.data()), idleImage.size()});
+                        const auto after = readActorCampaign({reinterpret_cast<const char*>(committed.data()), committed.size()});
+                        require(std::ranges::equal(original.inventory, after.inventory)
+                            && original.life->generation == after.life->generation
+                            && original.combat->actors[2] == after.combat->actors[2],
+                            "NPC relationship result changed public inventory/life/combat resources");
+                    }
                     require(candidate->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                             == CanonicalDurabilityResult::Rejected,
                         "Stale dialogue replaced paired commit");
@@ -9740,6 +9782,7 @@ namespace TES3MP::Native::Testing
                     require(duplicate->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                             == CanonicalDurabilityResult::Committed,
                         "Silent duplicate could not commit tick");
+                    checkNpcs(service, 17, 17);
                     std::unique_ptr<PreparedNativeInventory> invalid;
                     auto forged = request;
                     forged.life++;
@@ -9756,6 +9799,7 @@ namespace TES3MP::Native::Testing
                     require(!native.appendDialogueIntent(authority, proposal(1, 102, forged), invalid, &world) && !invalid
                             && image(service) == intact,
                         "Late result rejection leaked locals/journal/presentation");
+                    checkNpcs(service, 17, 17);
                     request.revision = 1;
                     request.choice = 7;
                     if (dialogueJournal)
@@ -9779,6 +9823,7 @@ namespace TES3MP::Native::Testing
                     require(choice->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
                             == CanonicalDurabilityResult::Rejected,
                         "Choice rollback failed");
+                    checkNpcs(service, 17, 17);
                     saved = image(service);
                     auto established = records;
                     for (size_t i = 0; i < 2; ++i)
@@ -9791,6 +9836,32 @@ namespace TES3MP::Native::Testing
                     InventoryHost restart(descriptor, manifest, *restoredRegistry, *crypto, saved);
                     auto& restored = dynamic_cast<InventoryService&>(restart.service());
                     require(image(restart.service()) == saved, "Exact restart changed personal/gameplay state");
+                    checkNpcs(restart.service(), 17, 17);
+                    if (dialogueNpc)
+                    {
+                        const auto [scriptImage, inner] = readPersonalScriptCampaign(
+                            {reinterpret_cast<const char*>(saved.data()), saved.size()});
+                        for (int fault = 0; fault < 3; ++fault)
+                        {
+                            auto invalidState = policy->restore(scriptImage);
+                            auto& npc = invalidState[0].npcs.front();
+                            if (fault == 0) ++npc.life;
+                            if (fault == 1)
+                            {
+                                npc.reference = UINT64_MAX;
+                                invalidState[0].talkedSpeakers.push_back(npc.reference);
+                            }
+                            if (fault == 2) npc.record = ESM::RefId::stringRefId("player");
+                            const auto corrupt = sealPersonalScriptCampaign(inner, policy->encode(invalidState));
+                            bool rejected = false;
+                            try { InventoryHost invalidHost(descriptor, manifest, *restoredRegistry, *crypto,
+                                std::as_bytes(std::span(corrupt))); }
+                            catch (const std::exception& error)
+                            { rejected = std::string_view(error.what()).find("Story NPC") != std::string_view::npos; }
+                            require(rejected && image(restart.service()) == saved,
+                                "Invalid NPC recovery installed state or missed source record/life/placement validation");
+                        }
+                    }
                     const auto restoredView = restart.service().projectPersonalDialogue(
                         authority, id<SessionId>(1), id<ServerTick>(7), id<CanonicalRevision>(7));
                     require(restoredView[0].response.empty() && restoredView[0].messages.empty() && restoredView[0].choices.size() == 1,
@@ -9813,6 +9884,7 @@ namespace TES3MP::Native::Testing
                             && quiet[0].response.empty() && quiet[0].quests[0].finished,
                         "Uncertain restart repeated choice output/progression");
                     require(quiet[0].entries == output[0].entries, "Uncertain recovery changed durable journal text/date");
+                    checkNpcs(newRestart.service(), 8, 17);
                     auto independent = newRestart.service().projectPersonalDialogue(
                         authority, id<SessionId>(2), id<ServerTick>(8), id<CanonicalRevision>(8));
                     require(independent[0].revision == 1 && !independent[0].quests[0].finished
@@ -9821,6 +9893,8 @@ namespace TES3MP::Native::Testing
                     std::cout << "dialogue intent host: authenticated character/story and speaker-life/reach; paired "
                                  "private character/class/cell/global/bounty substitutions and disposition branches; rejected/stale durability; late result rollback; retry; duplicate "
                                  "suppression; silent reconnect and exact/uncertain restart\n";
+                    if (dialogueNpc) std::cout << "story NPC host: paired ModDisposition joins gameplay/banks/progression; "
+                        "durability and late result rollback, unchanged foreign stories, exact/uncertain NPC restoration\n";
                     return;
                 }
                 if (personalDialogue)

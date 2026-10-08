@@ -2,6 +2,9 @@
 #define OPENMW_MECHANICS_AIRATING_H
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
 
 namespace MWMechanics
 {
@@ -52,8 +55,13 @@ namespace MWMechanics
 
     inline int dispositionWithCharm(float derivedWithoutCharm, float charm, bool clamp = true)
     {
-        const int value = static_cast<int>(derivedWithoutCharm + charm);
-        return clamp ? std::clamp(value, 0, 100) : value;
+        const float value = derivedWithoutCharm + charm;
+        if (!std::isfinite(value))
+            throw std::invalid_argument("Nonfinite derived NPC disposition");
+        if (clamp) return static_cast<int>(std::clamp(value, 0.f, 100.f));
+        if (double(value) < std::numeric_limits<int>::min() || double(value) > std::numeric_limits<int>::max())
+            throw std::invalid_argument("Unclamped NPC disposition exceeds integer range");
+        return static_cast<int>(value);
     }
 }
 

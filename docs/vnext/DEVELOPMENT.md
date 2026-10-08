@@ -2,14 +2,11 @@
 
 ## Working loop
 
-1. Follow [AGENTS.md](../../AGENTS.md)'s read order.
-2. Use code/tests/`git status`; inspect history only for unanswered questions.
-3. Preserve one writer/migration; share handlers/checks/dependencies.
-4. Run the smallest affected check; fix/rerun failures.
-5. Review diffs; update CURRENT evidence/limitations and consequential DECISIONS.
-6. Commit when authorized; report executed checks only.
+Follow [AGENTS.md](../../AGENTS.md): code/tests/`git status`, one writer,
+focused checks/fixes, reviewed diffs/current evidence. Commit when authorized;
+report executed checks only.
 
-Use ignored `build/` for evidence. Never track assets, credentials, saves or local content paths.
+Evidence: ignored `build/`. Never track assets/credentials/saves/local content paths.
 
 ## Dependency and migration rules
 
@@ -22,15 +19,15 @@ and explicit CMake dependencies. Broad probes cannot prove production headless b
 Separate engine context/presentation; share single-player logic. Null UI/listeners
 must preserve gameplay. Plain items cannot prove scripts/constants.
 
-Migration paths cannot share mutation. After replacement/failure proof, remove obsolete
-code/build entries/schemas/configuration/hooks/assertions; redirect useful tests. Do not polish retired gameplay.
+After replacement/failure proof, remove obsolete code/build entries/schemas/configuration/hooks/assertions;
+redirect tests. Never share migration writers or polish retired gameplay.
 
-Update touched proof/JSON inputs. Repair whole-baseline provenance/compare patches only for specific checks.
+Update touched proof/JSON inputs; repair baseline provenance/compare patches only for specific checks.
 
 ## Narrow verification
 
-Broad gates require requested scope. Log to `build/logs`; inspect exits/short tails.
-Source-contract failures report mismatches, never source files.
+Broad gates require authorization. Inspect `build/logs` exits/short tails;
+source-contract failures report mismatches only.
 
 Documentation checks, separately; stop on failure:
 
@@ -41,8 +38,8 @@ python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTest
 python -m unittest scripts.tests.test_vnext_documentation.VnextDocumentationTests.test_active_local_links_resolve *> build/logs/docs-links.log
 ```
 
-Build owning C++ targets/dependencies in an existing tree. Run one filter;
-never aggregate `_tests_run`. Update CURRENT evidence.
+Build owning targets/dependencies in an existing tree; one filter,
+never `_tests_run`.
 
 NPC playtests, optional stock navigation:
 
@@ -77,7 +74,9 @@ and health percentage. Thresholds 0–100 share stock disposition with authentic
 character/speaker snapshots and winning settings. Journal commands freeze stock expanded text and server calendar dates at invocation;
 64 entries/story, 4,096 bytes/entry, 16,384 total text bytes, 32,768-byte private frames.
 Journal update notices follow durability; stock journal installation is silent.
-Result stat writes, physical results and NPC restoration remain closed. Prior images never silently migrate;
+Source-only stock ModDisposition persists ≤64 placement relationships/character/story;
+record/life validation restores the private base before filtering. Player stat writes,
+scene changes and broader NPC restoration remain closed. Prior images never silently migrate;
 V81–84 personal output stays closed. Bootstrap emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.

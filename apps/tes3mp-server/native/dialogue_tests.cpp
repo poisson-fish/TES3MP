@@ -9,12 +9,14 @@
 #include <apps/openmw/mwscript/dialogueextensions.hpp>
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/locals.hpp>
+#include <apps/openmw/mwscript/statsextensions.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/cell.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/tes3mp/engine_coordinator.hpp>
 #include <components/compiler/extensions.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <components/esm3/loadclas.hpp>
 #include <components/esm3/loadfact.hpp>
@@ -134,11 +136,12 @@ namespace
     {
         MWScript::ExecutionContext expected;
         MWWorld::Ptr actor, player;
+        uint64_t sourceLife = 3;
         bool wait = false, waitPlayer = false;
         MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& reference, bool) const override
         {
             require(execution == expected, "Dialogue lookup lost invocation identity");
-            require(execution.sourceReference == 41 && execution.sourceLife == 3, "Stale source/life accepted");
+            require(execution.sourceReference == 41 && execution.sourceLife == sourceLife, "Stale source/life accepted");
             if (reference == "player")
             {
                 if (waitPlayer) throw MWScript::ScriptContextUnavailable();
@@ -510,7 +513,7 @@ namespace
                      "character/story isolation, missing-player defer, read-only result boundary and silent recovery\n";
     }
 
-    void disposition(CredentialCrypto& crypto)
+    void disposition(CredentialCrypto& crypto, bool npcResults = false)
     {
         Fixture fixture(crypto, {}, true);
         ESM::Attribute attribute; attribute.mId = ESM::Attribute::Personality;
@@ -594,20 +597,33 @@ namespace
             auto low = high; low.mId = id("low_disposition"); low.mData.mDisposition = 0;
             low.mResponse = "Low disposition."; topic.mInfo.insert(std::next(topic.mInfo.begin()), low);
             topic.mInfo.back().mActor = {};
+            if (npcResults)
+            {
+                for (auto& info : topic.mInfo) info.mResultScript += "\nModDisposition 17";
+                topic.mInfo.back().mData.mDisposition = 61;
+                topic.mInfo.back().mResultScript += "\nModDisposition -26";
+                ESM::DialInfo returned; returned.blank(); returned.mId = id("returned_s52");
+                returned.mData.mDisposition = 61; returned.mResponse = "Returned.";
+                returned.mSelects = {condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 20)};
+                returned.mResultScript = "ModDisposition 1";
+                topic.mInfo.push_back(returned);
+            }
         }
         PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true);
         auto state = runtime.initial(); const auto before = runtime.encode(state);
         Resolver resolver; resolver.actor = sa.getPtr();
         const auto run = [&](const PersonalScripts& policy, const PersonalScripts::State& input,
             uint64_t character, uint64_t story, const MWMechanics::NpcStats* playerStats,
-            const MWMechanics::NpcStats* speakerStats, uint64_t command = 101, int choice = -1, uint64_t revision = 0) {
+            const MWMechanics::NpcStats* speakerStats, uint64_t command = 101, int choice = -1, uint64_t revision = 0,
+            uint64_t life = 3) {
             const auto found = std::ranges::find_if(input, [&](const auto& value) {
                 return value.last.character == character && value.last.story == story; });
             resolver.player = character == 11 ? a.getPtr() : b.getPtr();
             resolver.expected = found->last; ++resolver.expected.invocation;
             resolver.expected.causalEvent = found->eventCursor + 1;
-            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
-            return policy.prepareIntent(input, character, command, {story, 41, 3, revision, "passage_k61", choice},
+            resolver.sourceLife = life;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = life;
+            return policy.prepareIntent(input, character, command, {story, 41, life, revision, "passage_k61", choice},
                 "", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction,
                 playerStats, {}, speakerStats, JournalDate);
         };
@@ -617,6 +633,13 @@ namespace
             && high.response == "High disposition." && low.state[1].dialogueRevision == 0
             && low.state[2].dialogueRevision == 0 && high.state[0].dialogueRevision == 0
             && runtime.encode(state) == before, "Private disposition branches crossed character/story or mutated before commit");
+        if (npcResults)
+        {
+            const PersonalScripts::Instance::Npc expected{41, 3, id("speaker_a"), 67};
+            require(low.state[0].npcs == std::vector{expected} && low.state[1].npcs.empty() && low.state[2].npcs.empty()
+                && high.state[1].npcs == std::vector{expected} && high.state[0].npcs.empty()
+                && speaker.getBaseDisposition() == 50, "NPC result crossed stories/characters or changed source snapshot");
+        }
         require(run(runtime, state, 11, 31, &statsA, &charmed).response == "High disposition.",
             "Committed speaker Charm did not change the exact threshold branch");
         require(run(runtime, state, 22, 31, &drawn, &speaker).response == "Low disposition.",
@@ -654,6 +677,31 @@ namespace
                 "Late disposition result failure leaked bank/progression/choice/private output");
         }
         state = runtime.restore(low.image);
+        if (npcResults)
+        {
+            require(state[0].npcs == low.state[0].npcs, "Recovery lost story-owned NPC state");
+            auto invalid = state; invalid[0].npcs.push_back(invalid[0].npcs.front());
+            rejects([&] { runtime.encode(invalid); }, "Duplicate NPC placement admitted");
+            invalid = state; invalid[0].npcs.front().life = 0;
+            rejects([&] { runtime.encode(invalid); }, "Zero NPC life admitted");
+            invalid = state; invalid[0].npcs.front().record = id(std::string(129, 'q'));
+            rejects([&] { runtime.encode(invalid); }, "Unbounded NPC record admitted");
+            invalid = state; invalid[0].npcs.front().life = 4;
+            const auto stale = run(runtime, invalid, 11, 31, &statsA, &speaker, 102, 7, 1);
+            require(stale.result.outcome == SharedWorldScript::Outcome::Rejected && stale.state.empty(),
+                "Older source life replaced story-owned NPC state");
+            resolver.actor = sb.getPtr();
+            const auto rebound = run(runtime, state, 11, 31, &statsA, &speaker, 102, 7, 1);
+            require(rebound.result.outcome == SharedWorldScript::Outcome::Rejected && rebound.state.empty(),
+                "Another NPC record inherited a placement relationship");
+            resolver.actor = sa.getPtr();
+            for (size_t size = 0; size < low.image.size(); ++size)
+                rejects([&] { runtime.restore(std::span(low.image).first(size)); }, "Truncated NPC image accepted");
+            auto previousPolicy = low.image; previousPolicy[7] = char(0x36);
+            rejects([&] { runtime.restore(previousPolicy); }, "Prior dialogue image silently restored NPC state");
+            auto oversized = low.image; oversized[oversized.size() - 8] = 65;
+            rejects([&] { runtime.restore(oversized); }, "Unbounded NPC count admitted before allocation");
+        }
         const auto duplicate = run(runtime, state, 11, 31, &statsA, &speaker);
         require(duplicate.result.outcome == SharedWorldScript::Outcome::Committed && !duplicate.result.executed
             && duplicate.response.empty() && duplicate.result.presentation.empty() && state[0].choices.size() == 2,
@@ -662,10 +710,54 @@ namespace
         const auto completed = run(runtime, state, 11, 31, &statsA, &speaker, 102, 7, 1);
         require(completed.result.executed && completed.state[0].dialogue.quests.front().mFinished,
             "Recovered disposition choice could not continue");
+        if (npcResults)
+            require(completed.state[0].npcs.front().disposition == 58 && completed.state[1].npcs.empty()
+                && speaker.getBaseDisposition() == 50, "Recovered NPC base did not feed filters and stock additive result");
         state = runtime.restore(completed.image);
         const auto finished = run(runtime, state, 11, 31, &statsA, &speaker, 102, 7, 1);
         require(!finished.result.executed && finished.response.empty() && state[0].choices.empty(),
             "Finished disposition recovery replayed output/choices");
+        if (npcResults)
+        {
+            auto maximum = speaker; maximum.setBaseDisposition(INT32_MAX);
+            require(calculation(statsA, maximum) == 100, "Maximum NPC base overflowed stock filtering");
+            rejects([&] { calculation(statsA, maximum, false); }, "Unclamped NPC overflow accepted");
+            auto large = fixture.definitions;
+            for (auto& definition : large)
+                for (auto& info : definition.dialogues[1].mInfo)
+                    if (info.mId == id("choice_b")) info.mResultScript = "Journal journey_t37 20\nModDisposition -9";
+                    else info.mResultScript += "\nModDisposition 2147483580";
+            PersonalScripts largeBase(7, large, crypto, true, true, true);
+            const auto raised = run(largeBase, largeBase.initial(), 11, 31, &statsA, &speaker);
+            require(raised.result.executed && raised.state[0].npcs.front().disposition == INT32_MAX,
+                "Valid maximum stock NPC base was rejected or clamped on write");
+            const auto lowered = run(largeBase, largeBase.restore(raised.image), 11, 31, &statsA, &speaker, 102, 7, 1);
+            require(lowered.result.executed && lowered.state[0].npcs.front().disposition == INT32_MAX - 9,
+                "Recovered large NPC base overflowed filters or stock additive results");
+            const auto revived = run(runtime, state, 11, 31, &statsA, &speaker, 103, -1, 2, 4);
+            require(revived.result.executed && revived.response == "Returned."
+                && revived.state[0].npcs.front().disposition == 59 && revived.state[0].npcs.front().life == 4,
+                "Legitimate new source life reset its placement relationship");
+            const auto oldLife = run(runtime, revived.state, 11, 31, &statsA, &speaker, 104, -1, 3);
+            require(oldLife.result.outcome == SharedWorldScript::Outcome::Rejected && oldLife.state.empty(),
+                "Old source life changed the restored NPC relationship");
+            auto foreign = fixture.definitions;
+            for (auto& definition : foreign)
+                for (auto& info : definition.dialogues[1].mInfo) info.mResultScript += "\nrelay_n48->ModDisposition 99";
+            PersonalScripts unowned(7, foreign, crypto, true, true, true);
+            const auto escaped = run(unowned, unowned.initial(), 11, 31, &statsA, &speaker);
+            require(escaped.result.outcome == SharedWorldScript::Outcome::Rejected && escaped.state.empty()
+                && escaped.response.empty() && escaped.result.presentation.empty() && speaker.getBaseDisposition() == 50,
+                "Explicit foreign NPC result escaped source ownership or leaked prior writes");
+            auto overflow = fixture.definitions;
+            for (auto& definition : overflow)
+                for (auto& info : definition.dialogues[1].mInfo) info.mResultScript += "\nModDisposition 2147483647";
+            PersonalScripts overflowing(7, overflow, crypto, true, true, true);
+            const auto failed = run(overflowing, overflowing.initial(), 11, 31, &statsA, &speaker);
+            require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty()
+                && failed.response.empty() && failed.result.presentation.empty() && speaker.getBaseDisposition() == 50,
+                "Overflowing NPC result leaked state/output or changed source stats");
+        }
         for (int threshold : {-1, 101})
         {
             auto invalid = fixture.definitions; invalid[0].dialogues[1].mInfo.front().mData.mDisposition = threshold;
@@ -676,6 +768,8 @@ namespace
         rejects([&] { incompatible.restore(low.image); }, "Changed threshold policy restored incompatible progress");
         std::cout << "dialogue disposition: shared stock terms/truncation/clamps, authenticated character/speaker; "
                      "private threshold branches, waits, rollback/retry, policy binding and silent pending/finished recovery\n";
+        if (npcResults) std::cout << "story NPC: stock ModDisposition, source/record/life binding, character/story isolation; "
+            "late/overflow rollback, bounded image validation, restored filters and silent duplicate recovery\n";
     }
 
     void substitutions(CredentialCrypto& crypto)
@@ -1172,6 +1266,14 @@ namespace
         MWScript::InterpreterContext scoped(&locals, resolver.expected, fixture.content, resolver);
         rejects([&] { interpreter.run(runtime.compileResult("FillJournal"), scoped, 4096); },
             "Full stock installer let a scoped caller bypass staged dialogue services");
+        MWScript::Stats::installOpcodes(interpreter);
+        rejects([&] { interpreter.run(runtime.compileResult("ModDisposition 17"), scoped, 4096); },
+            "Full stock installer bypassed staged NPC result ownership");
+        ESM::Creature creature; creature.blank(); creature.mId = id("speaker_creature_y72");
+        fixture.content.insertStatic(creature);
+        MWWorld::ManualRef nonNpc(fixture.content, creature.mId);
+        MWScript::InterpreterContext creatureContext(&locals, nonNpc.getPtr());
+        interpreter.run(runtime.compileResult("ModDisposition 17"), creatureContext, 4096);
         require(journal.entries == 1 && journal.index == 5, "Unsupported scoped stock service mutated journal");
         std::cout << "dialogue stock: unchanged opcodes route unscoped callers to the stock journal and source actor\n";
     }
@@ -1180,7 +1282,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|substitutions|journal");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|npc-state|substitutions|journal");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
@@ -1194,6 +1296,7 @@ int main(int argc, char** argv)
             playerStats(*crypto);
         else if (filter == "disposition")
             disposition(*crypto);
+        else if (filter == "npc-state") disposition(*crypto, true);
         else if (filter == "substitutions")
             substitutions(*crypto);
         else if (filter == "journal") journal(*crypto);

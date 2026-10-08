@@ -25,7 +25,7 @@ namespace TES3MP::Native
         constexpr uint64_t ScheduledMagic = 0x3254535054335354;
         constexpr uint64_t BankMagic = 0x3354535054335354;
         constexpr uint64_t DialogueMagic = 0x3454535054335354;
-        constexpr uint64_t IntentMagic = 0x3654535054335354;
+        constexpr uint64_t IntentMagic = 0x3754535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
             if (!value)
@@ -165,6 +165,27 @@ namespace TES3MP::Native
                 require(id);
                 if (state)
                     state->talkedSpeakers.push_back(id);
+            }
+        }
+        void npcs(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        {
+            word(bytes, state.npcs.size());
+            for (const auto& npc : state.npcs)
+            {
+                word(bytes, npc.reference); word(bytes, npc.life); ref(bytes, npc.record);
+                word(bytes, std::bit_cast<uint32_t>(npc.disposition));
+            }
+        }
+        void npcs(Cursor& cursor, PersonalScripts::Instance* state)
+        {
+            const auto count = cursor.word(); require(count <= PersonalScripts::MaximumNpcsPerStory);
+            for (size_t i = 0; i < count; ++i)
+            {
+                PersonalScripts::Instance::Npc npc{cursor.word(), cursor.word(), ref(cursor)};
+                const auto disposition = cursor.word(); require(disposition <= UINT32_MAX);
+                npc.disposition = std::bit_cast<int32_t>(uint32_t(disposition));
+                require(npc.reference && npc.life && !npc.record.empty());
+                if (state) state->npcs.push_back(std::move(npc));
             }
         }
         struct Bank final : MWScript::ScriptState
@@ -358,7 +379,7 @@ namespace TES3MP::Native
             if (mIntents)
             {
                 constexpr std::string_view intentLimits
-                    = "authenticated-dialogue-4;14;2;8;256;4096;32768;64;journal-text-16384;game-calendar;root-first;bounded-substitutions;stock-disposition;unscripted-"
+                    = "authenticated-dialogue-5;14;2;8;256;4096;32768;64;source-npc-disposition-64;moddisposition;journal-text-16384;game-calendar;root-first;bounded-substitutions;stock-disposition;unscripted-"
                       "speaker;primary-bank";
                 binding.insert(binding.end(), intentLimits.begin(), intentLimits.end());
             }
@@ -462,10 +483,21 @@ namespace TES3MP::Native
                     && std::find(
                            state.talkedSpeakers.begin(), state.talkedSpeakers.begin() + i, state.talkedSpeakers[i])
                         == state.talkedSpeakers.begin() + i);
+            require(state.npcs.size() <= MaximumNpcsPerStory);
+            for (size_t i = 0; i < state.npcs.size(); ++i)
+            {
+                const auto& npc = state.npcs[i];
+                require(npc.reference && npc.life && npc.record.is<ESM::StringRefId>() && !npc.record.empty()
+                    && npc.record.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                    && npc.record.getRefIdString().find('\0') == std::string_view::npos
+                    && std::ranges::find(state.talkedSpeakers, npc.reference) != state.talkedSpeakers.end()
+                    && std::ranges::none_of(std::span(state.npcs).first(i),
+                        [&](const auto& previous) { return previous.reference == npc.reference; }));
+            }
         }
         else
             require(!state.dialogueRevision && !state.dialogueCommand && state.dialogueRequest == DialogueIntent{}
-                && state.choices.empty() && state.talkedSpeakers.empty());
+                && state.choices.empty() && state.talkedSpeakers.empty() && state.npcs.empty());
         require(state.members.size() == expected.members.size());
         for (const auto& member : state.members)
             require(member.tick <= last.invocation && member.runtime.globals.empty());
@@ -522,7 +554,10 @@ namespace TES3MP::Native
             }
             if (mDialogues) progression(bytes, state[i], mIntents);
             if (mIntents)
+            {
                 conversation(bytes, state[i]);
+                npcs(bytes, state[i]);
+            }
         }
         require(bytes.size() <= MaximumImageBytes);
         return bytes;
@@ -560,7 +595,10 @@ namespace TES3MP::Native
             }
             if (mDialogues) progression(preflight, nullptr, mIntents);
             if (mIntents)
+            {
                 conversation(preflight, nullptr);
+                npcs(preflight, nullptr);
+            }
         }
         require(preflight.bytes.empty());
         State state;
@@ -582,7 +620,10 @@ namespace TES3MP::Native
             }
             if (mDialogues) progression(input, &entry, mIntents);
             if (mIntents)
+            {
                 conversation(input, &entry);
+                npcs(input, &entry);
+            }
             validate(entry, i); state.push_back(std::move(entry));
         }
         require(encode(state) == std::vector<char>(bytes.begin(), bytes.end()));
@@ -715,8 +756,8 @@ namespace TES3MP::Native
             MWScript::DialogueState dialogue(execution, state.dialogue, found->dialogues, mIntents);
             const auto& record = dialogue.record(topic, ESM::Dialogue::Topic);
             Bank bank(execution, *found, state);
-            // Filtering and response expansion see the detached read snapshot. Result opcodes retain
-            // their existing service boundary, so this cannot admit stat writes.
+            // Player stats remain read-only. The source NPC snapshot has one
+            // admitted result writer and restores this story's durable base.
             std::optional<MWMechanics::NpcStats> stats;
             if (playerStats) stats.emplace(*playerStats);
             FilterContext script(execution, content, resolver, bank, dialogue, state.runtime.runtime.globals,
@@ -727,15 +768,29 @@ namespace TES3MP::Native
             require(actor.hasLiveReference()
                 && (mIntents ? actor.getClass().getScript(actor).empty()
                              : actor.getClass().getScript(actor) == result.script));
+            std::optional<MWMechanics::NpcStats> npcStats;
+            const auto ownedNpc = std::ranges::find(state.npcs, execution.sourceReference, &Instance::Npc::reference);
+            if (mIntents && speakerStats)
+            {
+                require(actor.getType() == ESM::NPC::sRecordId);
+                npcStats.emplace(*speakerStats);
+                if (ownedNpc != state.npcs.end())
+                {
+                    require(ownedNpc->record == actor.getCellRef().getRefId() && ownedNpc->life <= execution.sourceLife);
+                    npcStats->setBaseDisposition(ownedNpc->disposition);
+                }
+            }
+            else require(ownedNpc == state.npcs.end());
+            const int priorDisposition = npcStats ? npcStats->getBaseDisposition() : 0;
             if (mIntents)
             {
                 disposition = 0;
                 if (std::ranges::any_of(record.mInfo, [](const auto& info) { return info.mData.mDisposition != 0; }))
                 {
-                    require(stats && speakerStats && actor.getType() == ESM::NPC::sRecordId);
+                    require(stats && npcStats && actor.getType() == ESM::NPC::sRecordId);
                     const auto player = script.resolveReference(ESM::RefId::stringRefId("player"));
                     require(player.hasLiveReference() && player.getType() == ESM::NPC::sRecordId);
-                    disposition = MWMechanics::derivedDisposition(*actor.get<ESM::NPC>()->mBase, *speakerStats,
+                    disposition = MWMechanics::derivedDisposition(*actor.get<ESM::NPC>()->mBase, *npcStats,
                         *player.get<ESM::NPC>()->mBase, *stats, content.get<ESM::GameSetting>(),
                         [&](const ESM::RefId& from, const ESM::RefId& to) {
                             // Faction-reaction result writes remain closed in this policy.
@@ -757,7 +812,18 @@ namespace TES3MP::Native
             // Keep the private text local until every staged result succeeds.
             const auto text = mIntents ? Interpreter::fixDefinesDialog(response.second->mResponse, script, 4096) : std::string{};
             auto invocation = found->script->executeResult(state.runtime, execution, content, resolver,
-                bank, bank.instances.front(), dialogue, program->program, result.trace);
+                bank, bank.instances.front(), dialogue, program->program, result.trace, npcStats ? &*npcStats : nullptr);
+            if (npcStats && (ownedNpc != state.npcs.end() || npcStats->getBaseDisposition() != priorDisposition))
+            {
+                const Instance::Npc changed{execution.sourceReference, execution.sourceLife,
+                    actor.getCellRef().getRefId(), npcStats->getBaseDisposition()};
+                if (ownedNpc != state.npcs.end()) *ownedNpc = changed;
+                else
+                {
+                    require(state.npcs.size() < MaximumNpcsPerStory);
+                    state.npcs.push_back(changed);
+                }
+            }
             state.runtime.runtime.globals = std::move(invocation.state.globals);
             if (mIntents)
             {
