@@ -415,8 +415,14 @@ namespace TES3MP
         SessionId target, SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
         std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors,
         std::span<const NativeActorMotion> motions, std::span<const PublicPlayerAppearance> appearances,
-        bool characterBodies)
+        bool characterBodies, std::span<const uint64_t> hiddenActors, uint64_t physicalScope)
     {
+        if (!physicalScope || hiddenActors.size() > 1 || (physicalScope == 1) != hiddenActors.empty())
+            return error(Code::InvalidCommandShape);
+        for (auto hidden : hiddenActors)
+            if (!(hidden >> 63) || std::ranges::any_of(actors, [&](const auto& actor) { return actor.actor.value() == hidden; })
+                || std::ranges::any_of(motions, [&](const auto& motion) { return motion.placement == hidden; }))
+                return error(Code::InvalidCommandShape);
         if (members.size() > MaximumEquipmentSnapshotPlayers)
             return error(Code::TooManyEntries, members.size(), MaximumEquipmentSnapshotPlayers);
         for (std::size_t index = 1; index < members.size(); ++index)
@@ -450,7 +456,7 @@ namespace TES3MP
         const size_t payloadBudget = 256 + members.size() * sizeof(EquipmentSchema::EquipmentMember)
             + actors.size() * sizeof(EquipmentSchema::ActorEquipmentMember)
             + motions.size() * sizeof(EquipmentSchema::NativeActorMotion)
-            + appearances.size() * sizeof(EquipmentSchema::PlayerAppearance);
+            + appearances.size() * sizeof(EquipmentSchema::PlayerAppearance) + hiddenActors.size() * sizeof(uint64_t);
         if (payloadBudget > LatestWinsSnapshotMaximumPayloadBytes)
             return error(Code::TooManyEntries, payloadBudget, LatestWinsSnapshotMaximumPayloadBytes);
         if (!characterBodies && !appearances.empty()) return error(Code::InvalidCommandShape);
@@ -464,7 +470,7 @@ namespace TES3MP
         }
         return LatestWinsEquipmentSnapshot{ target, generation, tick, revision,
             { members.begin(), members.end() }, { actors.begin(), actors.end() }, {motions.begin(), motions.end()},
-            {appearances.begin(), appearances.end()}, characterBodies };
+            {appearances.begin(), appearances.end()}, characterBodies, {hiddenActors.begin(), hiddenActors.end()}, physicalScope };
     }
 
     std::vector<std::byte> encodeReliablePlayerInventoryBaseline(const ReliablePlayerInventoryBaseline& input)
@@ -588,7 +594,8 @@ namespace TES3MP
                 body.appearance.hair.value(), static_cast<uint8_t>(body.appearance.sex));
         const auto root = EquipmentSchema::CreateLatestWinsEquipmentSnapshotDirect(
             builder, header, &members, actors.empty() ? nullptr : &actors, motions.empty() ? nullptr : &motions,
-            appearances.empty() ? nullptr : &appearances, input.characterBodies);
+            appearances.empty() ? nullptr : &appearances, input.characterBodies,
+            input.hiddenActors.empty() ? nullptr : &input.hiddenActors, input.physicalScope);
         EquipmentSchema::FinishSizePrefixedLatestWinsEquipmentSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -967,9 +974,15 @@ namespace TES3MP
                 appearances.push_back({*player, {*race, *head, *hair, static_cast<CharacterSex>(body.sex())}});
             }
         }
+        std::vector<uint64_t> hidden;
+        if (const auto* encoded = root->hidden_actors())
+        {
+            if (encoded->size() > 1) return error(Code::TooManyEntries);
+            hidden.assign(encoded->begin(), encoded->end());
+        }
         return LatestWinsEquipmentSnapshot::create(
             *value(session), *value(generation), *value(tick), *value(revision), members, actors, motions,
-            appearances, root->character_bodies());
+            appearances, root->character_bodies(), hidden, root->physical_scope());
     }
 
     InventoryTransactionCommandDecodeResult decodeClientInventoryTransactionCommand(std::span<const std::byte> payload)

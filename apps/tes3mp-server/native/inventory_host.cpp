@@ -99,7 +99,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 85; ++candidate)
+            for (unsigned candidate = 3; candidate <= 86; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -1183,12 +1183,29 @@ namespace TES3MP::Native
                             definition.members.push_back({admitSharedWorldScript(loadout, entry.bank[i].first,
                                 entry.globals, crypto, records), entry.bank[i].second});
                     }
+                    if (start.text.starts_with("native-inventory-86\n"))
+                    {
+                        const auto& binding = start.binding;
+                        if (!binding.mNavigatingActor || binding.worldDomains().size() != 1
+                            || !start.wireCell.asInterior() || binding.mContainers.size() != 1
+                            || !binding.mNavigatingActor->neighborSnapshots().empty()
+                            || !binding.mDoors.empty() || binding.mDoor || !binding.mWorldItems->mPlacements.empty()
+                            || (binding.mTeleportDoors && !binding.mTeleportDoors->empty())
+                            || binding.mWorldItems->mWaterLevel)
+                            throw std::invalid_argument("Story encounter requires one dry interior, one NPC and immutable geometry");
+                        const auto& owner = binding.mContainers.front();
+                        const auto* npc = loadout.store().get<ESM::NPC>().search(owner.mBase);
+                        if (!npc || !npc->mScript.empty() || owner.mId.value() != binding.mNavigatingActor->snapshot().mActor)
+                            throw std::invalid_argument("Story encounter source must be a living unscripted NPC placement");
+                        definition.encounter = PersonalScripts::EncounterBinding{owner.mId.value(), owner.mBase, start.cell};
+                        loadout.validateDisableEncounter(start.cell, owner.mId.value());
+                    }
                     for (auto player : start.binding.mPlayers)
                     { definition.character = player.value(); definitions.push_back(definition); }
                 }
                 start.binding.mPersonalScripts
                     = std::make_shared<const PersonalScripts>(campaign, std::move(definitions), crypto,
-                        start.personalScheduling, start.personalBanks, start.text.starts_with("native-inventory-85\n"));
+                        start.personalScheduling, start.personalBanks, (start.text.starts_with("native-inventory-85\n") || start.text.starts_with("native-inventory-86\n")));
             }
             if (start.binding.mSummons)
             {
@@ -1200,6 +1217,8 @@ namespace TES3MP::Native
                     const auto campaign = readActorCampaign({reinterpret_cast<const char*>(restored.data()), restored.size()});
                     if (campaign.dynamicActors.empty()) throw std::invalid_argument("Summon campaign version differs from descriptor");
                     auto actors = DynamicActorSet::restore(campaign.dynamicActors);
+                    if (start.binding.mPersonalScripts && start.binding.mPersonalScripts->encounters() && !actors.bodies.empty())
+                        throw std::invalid_argument("Terminal encounter recovery cannot expand actor dependencies");
                     std::vector<DynamicActorBody> bodies;
                     for (const auto& body : actors.bodies) bodies.push_back(body.collision);
                     auto fresh = start.binding.mCreateActorSet(bodies);

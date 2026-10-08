@@ -23,6 +23,12 @@ namespace TES3MP::Native
         static constexpr size_t MaximumInvocationsPerTransaction = 16;
         static constexpr size_t MaximumImageBytes = 1048576;
         static constexpr size_t MaximumNpcsPerStory = 64;
+        struct EncounterBinding
+        {
+            uint64_t reference = 0;
+            ESM::RefId record, cell;
+            bool operator==(const EncounterBinding&) const = default;
+        };
         struct Definition
         {
             struct Member { std::shared_ptr<const SharedWorldScript> script; bool running = false; };
@@ -31,6 +37,7 @@ namespace TES3MP::Native
             std::vector<Member> members;
             bool running = true;
             std::vector<ESM::Dialogue> dialogues;
+            std::optional<EncounterBinding> encounter;
         };
         struct Instance
         {
@@ -59,6 +66,9 @@ namespace TES3MP::Native
             // Relationships belong to a character/story and placement, surviving
             // legitimate new lives. No public stats, inventories or loot are copied.
             std::vector<Npc> npcs;
+            // One terminal source-only Disable encounter per character. The
+            // origin life is frozen; no inventory, loot or alive NPC is cloned.
+            uint64_t encounterLife = 0;
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -83,6 +93,8 @@ namespace TES3MP::Native
         bool banks() const { return mBanks; }
         bool dialogues() const { return mDialogues; }
         bool intents() const { return mIntents; }
+        bool encounters() const { return mEncounters; }
+        static uint64_t physicalScope(const State&, uint64_t character);
         State initial() const;
         std::vector<char> encode(const State&) const;
         State restore(std::span<const char>) const;
@@ -97,7 +109,7 @@ namespace TES3MP::Native
             const MWMechanics::NpcStats* playerStats = nullptr,
             std::optional<std::string_view> customClassName = {},
             const MWMechanics::NpcStats* speakerStats = nullptr,
-            std::optional<MWScript::DialogueState::Stamp> journalStamp = {}) const;
+            std::optional<MWScript::DialogueState::Stamp> journalStamp = {}, bool encounterPrepared = false) const;
         Prepared prepareIntent(const State&, uint64_t character, uint64_t command, const DialogueIntent&,
             std::string_view cellName, const MWWorld::ESMStore&, const MWScript::ReferenceResolver&,
             size_t budget = MaximumInvocationsPerTransaction, const MWMechanics::NpcStats* playerStats = nullptr,
@@ -113,6 +125,7 @@ namespace TES3MP::Native
         bool mBanks;
         bool mDialogues = false;
         bool mIntents = false;
+        bool mEncounters = false;
         struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
         std::vector<std::vector<ResultProgram>> mResults;
         void validate(const Instance&, size_t) const;

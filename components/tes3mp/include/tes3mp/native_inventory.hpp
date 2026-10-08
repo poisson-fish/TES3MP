@@ -73,6 +73,9 @@ namespace TES3MP
         virtual bool ownsNativeDoor(InteractiveObjectId) const noexcept { return false; }
         virtual bool requiresDoorTraversal() const noexcept { return false; }
         virtual bool streamsPlayerAreas() const noexcept { return false; }
+        // Owned scope identity; shared exploration is 1. Projection passes the
+        // detached candidate so membership changes publish with gameplay.
+        virtual uint64_t physicalScope(PlayerId, const PreparedNativeInventory* = nullptr) const { return 1; }
         virtual bool hasLeveledActors() const noexcept { return false; }
         virtual bool hasActorMotion() const noexcept { return false; }
         virtual bool ownsPlayerPhysics() const noexcept { return false; }

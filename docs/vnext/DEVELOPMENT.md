@@ -76,8 +76,13 @@ character/speaker snapshots and winning settings. Journal commands freeze stock 
 Journal update notices follow durability; stock journal installation is silent.
 Source-only stock ModDisposition persists ≤64 placement relationships/character/story;
 record/life validation restores the private base before filtering. Player stat writes,
-scene changes and broader NPC restoration remain closed. Prior images never silently migrate;
+V85 scene changes and broader NPC restoration remain closed. Prior images never silently migrate;
 V81–84 personal output stays closed. Bootstrap emits V80.
+V86: fresh descriptor/capability 41; exactly one dry interior, one living unscripted
+NPC and static geometry. <=12 mirrored scripts reserve four discovery/retry calls;
+source-only stock Disable/GetDisabled. Terminal character/story scopes suspend banks
+and close new interactions, ground mutations and summons. Movement/resources continue;
+source origins/receipts recover without public loot/life copies. No Enable/return boundary yet.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.

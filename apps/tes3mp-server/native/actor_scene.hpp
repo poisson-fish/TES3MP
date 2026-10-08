@@ -151,6 +151,9 @@ namespace TES3MP::Native
         void copyPlayersTo(Loadout&, InteriorActorScene&) const;
         void withPlayerHulls(std::span<const std::pair<uint64_t, const Prepared*>> frames,
             const std::function<void()>& operation);
+        // Borrow collision membership for a detached scope query/step. Restore
+        // groups/masks even on rejection; no live image or navigator is changed.
+        void withHiddenActors(std::span<const uint64_t> actors, const std::function<void()>& operation);
         // Both scenes are detached from the host during preparation. Commit can
         // install the complete collision membership without allocating.
         void installActorSet(InteriorActorScene& candidate) noexcept;

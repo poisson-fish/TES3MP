@@ -239,6 +239,12 @@ namespace MWScript
             void execute(Interpreter::Runtime& runtime) override
             {
                 MWWorld::Ptr ptr;
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.disable(R()(runtime));
+                    return;
+                }
                 if (!R::implicit)
                 {
                     ESM::RefId name = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
@@ -258,7 +264,7 @@ namespace MWScript
                 {
                     ptr = R()(runtime);
                 }
-                MWBase::Environment::get().getWorld()->disable(ptr);
+                context.disable(ptr);
             }
         };
 
@@ -269,7 +275,7 @@ namespace MWScript
             void execute(Interpreter::Runtime& runtime) override
             {
                 MWWorld::Ptr ptr = R()(runtime);
-                runtime.push(!ptr.getRefData().isEnabled());
+                runtime.push(static_cast<InterpreterContext&>(runtime.getContext()).disabled(ptr));
             }
         };
 
@@ -1801,6 +1807,20 @@ namespace MWScript
             extensions.registerInstruction("startscript", "c", Compiler::Misc::opcodeStartScript,
                 Compiler::Misc::opcodeStartScriptExplicit);
             extensions.registerInstruction("stopscript", "c", Compiler::Misc::opcodeStopScript);
+        }
+
+        void registerDisableOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerInstruction("disable", "x", Compiler::Misc::opcodeDisable, Compiler::Misc::opcodeDisableExplicit);
+            extensions.registerFunction("getdisabled", 'l', "x", Compiler::Misc::opcodeGetDisabled, Compiler::Misc::opcodeGetDisabledExplicit);
+        }
+
+        void installDisableOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpDisable<ImplicitRef>>(Compiler::Misc::opcodeDisable);
+            interpreter.installSegment5<OpDisable<ExplicitRef>>(Compiler::Misc::opcodeDisableExplicit);
+            interpreter.installSegment5<OpGetDisabled<ImplicitRef>>(Compiler::Misc::opcodeGetDisabled);
+            interpreter.installSegment5<OpGetDisabled<ExplicitRef>>(Compiler::Misc::opcodeGetDisabledExplicit);
         }
 
         void installScriptOpcodes(Interpreter::Interpreter& interpreter)

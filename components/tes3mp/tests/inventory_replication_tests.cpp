@@ -34,6 +34,42 @@ namespace
         return { id<SessionId>(1), SessionGeneration::initial(), id<ServerTick>(2), id<CanonicalRevision>(3), 0, 1 };
     }
 
+    void encounter()
+    {
+        const uint64_t npc = 0x8000000000000029ull;
+        const std::array members{PublicEquipmentMember{id<PlayerId>(1)}};
+        const std::array hidden{npc};
+        const auto scoped = std::get<LatestWinsEquipmentSnapshot>(LatestWinsEquipmentSnapshot::create(
+            id<SessionId>(1), SessionGeneration::initial(), id<ServerTick>(2), id<CanonicalRevision>(3),
+            members, {}, {}, {}, true, hidden, 2));
+        const auto encoded = encodeLatestWinsEquipmentSnapshot(scoped);
+        assert(decodeLatestWinsEquipmentSnapshot(encoded) == EquipmentSnapshotDecodeResult(scoped));
+        for (size_t size = 0; size < encoded.size(); ++size)
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(
+                decodeLatestWinsEquipmentSnapshot(std::span(encoded).first(size))));
+        for (int invalid = 0; invalid < 7; ++invalid)
+        {
+            auto bad = scoped;
+            switch (invalid)
+            {
+                case 0: bad.physicalScope = 0; break;
+                case 1: bad.physicalScope = 1; break;
+                case 2: bad.hiddenActors.clear(); break;
+                case 3: bad.hiddenActors.push_back(npc + 1); break;
+                case 4: bad.hiddenActors[0] = 1; break;
+                case 5: bad.actors.push_back({id<ContainerId>(npc)}); break;
+                case 6: bad.motions.push_back({npc, 2, {}, {}, 0}); break;
+            }
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(
+                decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(bad))));
+        }
+        auto shared = scoped; shared.physicalScope = 1; shared.hiddenActors.clear();
+        assert(decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(shared))
+            == EquipmentSnapshotDecodeResult(shared));
+        assert(storyEncounterCapability().value() == 41);
+        std::cout << "PASS encounter: scoped source suppression, malformed bounds/identities and shared compatibility\n";
+    }
+
     void appearances()
     {
         const std::array members{PublicEquipmentMember{id<PlayerId>(1)}, PublicEquipmentMember{id<PlayerId>(2)}};
@@ -214,6 +250,7 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "encounter") { encounter(); return 0; }
     using namespace TES3MP;
     if (argc == 2 && std::string_view(argv[1]) == "appearances") { appearances(); return 0; }
     if (argc == 2 && std::string_view(argv[1]) == "neighborhoods") { neighborhoods(); return 0; }

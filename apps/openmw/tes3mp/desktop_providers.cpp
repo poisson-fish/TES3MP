@@ -1132,6 +1132,7 @@ namespace TES3MP::OpenMWAdapter
             std::optional<NativeActorMotion> physicalMotion;
         };
         std::map<uint64_t, NativeRemote> nativeRemotes;
+        std::map<uint64_t, MWWorld::Ptr> hiddenNativeActors;
         MWWorld::InventoryRecordMap nativeActorRecords;
         std::map<InteractiveObjectId, ObservedDoorPresentation> observedDoors;
         std::map<uint64_t, NativeDoorSnapshot> nativeDoors;
@@ -1184,6 +1185,9 @@ namespace TES3MP::OpenMWAdapter
             for (auto& [id, remote] : nativeRemotes)
                 try { if (!remote.source.isEmpty()) MWBase::Environment::get().getWorld()->enable(remote.source); } catch (...) {}
             nativeRemotes.clear();
+            for (const auto& [id, ptr] : hiddenNativeActors)
+                try { if (ptr.hasLiveReference()) MWBase::Environment::get().getWorld()->enable(ptr); } catch (...) {}
+            hiddenNativeActors.clear();
             leveledActors.clear();
             nativeActorRecords.clear();
             observedDoors.clear();
@@ -1380,6 +1384,24 @@ namespace TES3MP::OpenMWAdapter
                 nativeSoulRecords = MWWorld::inventorySoulRecords(store);
             }
             auto world = MWBase::Environment::get().getWorld();
+            for (auto it = hiddenNativeActors.begin(); it != hiddenNativeActors.end();)
+                if (std::ranges::find(snapshot.hiddenActors, it->first) == snapshot.hiddenActors.end())
+                {
+                    if (it->second.hasLiveReference()) world->enable(it->second);
+                    it = hiddenNativeActors.erase(it);
+                }
+                else ++it;
+            for (auto id : snapshot.hiddenActors)
+            {
+                const auto ref = MWWorld::localPlacedRef(id, world->getContentFiles());
+                if (!ref) return ProviderResult::ContentMappingFailed;
+                auto ptr = findActiveContainer(ref->mIndex, ref->mContentFile);
+                if (ptr.isEmpty()) continue; // Retry when the authored cell becomes active.
+                if (!ptr.getClass().isNpc()) return ProviderResult::ContentMappingFailed;
+                world->disable(ptr);
+                hiddenNativeActors.insert_or_assign(id, ptr);
+                nativeRemotes.erase(id);
+            }
             std::set<uint64_t> desiredSpawns;
             std::vector<const ReliableGroundItemBaseline*> areas;
             if (presentedGroundBaseline)

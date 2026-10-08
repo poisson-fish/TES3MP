@@ -82,8 +82,8 @@ namespace MWScript
                 : InterpreterContext(&locals, {}), mGlobals(globals), mPresentation(presentation) {}
             Context(Locals& locals, std::vector<ESM::Global>& globals, std::vector<std::string>& presentation,
                 const ExecutionContext& execution, const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-                ScriptState* bank, DialogueState* dialogue, MWMechanics::NpcStats* sourceNpcStats)
-                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank, dialogue, sourceNpcStats), mGlobals(globals), mPresentation(presentation) {}
+                ScriptState* bank, DialogueState* dialogue, MWMechanics::NpcStats* sourceNpcStats, ReferenceState* referenceState)
+                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank, dialogue, sourceNpcStats, referenceState), mGlobals(globals), mPresentation(presentation) {}
 
             int getGlobalShort(std::string_view id) const override { return global(id).getInteger(); }
             int getGlobalLong(std::string_view id) const override { return global(id).getInteger(); }
@@ -121,9 +121,11 @@ namespace MWScript
         {
             const std::vector<ESM::Global>& mGlobals;
             const std::vector<std::pair<ESM::RefId, Compiler::Locals>>& mMembers;
+            ESM::RefId mReference;
         public:
             CompilerContext(const std::vector<ESM::Global>& globals,
-                const std::vector<std::pair<ESM::RefId, Compiler::Locals>>& members) : mGlobals(globals), mMembers(members) {}
+                const std::vector<std::pair<ESM::RefId, Compiler::Locals>>& members, const ESM::RefId& reference = {})
+                : mGlobals(globals), mMembers(members), mReference(reference) {}
             bool canDeclareLocals() const override { return true; }
             char getGlobalType(const std::string& id) const override
             { const auto* found = find(mGlobals, id); return found ? type(found->mValue) : ' '; }
@@ -134,7 +136,8 @@ namespace MWScript
                 return {' ', false};
             }
             bool isId(const ESM::RefId& id) const override
-            { return std::ranges::any_of(mMembers, [&](const auto& entry) { return entry.first == id; }); }
+            { return (!mReference.empty() && (id == mReference || id == "player"))
+                || std::ranges::any_of(mMembers, [&](const auto& entry) { return entry.first == id; }); }
         };
         class Errors final : public Compiler::ErrorHandler
         {
@@ -276,18 +279,18 @@ namespace MWScript
     }
 
     WorldScript::Invocation WorldScript::execute(const State& before, Interpreter::ExecutionTrace* trace) const
-    { return executeImpl(before, trace, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr); }
+    { return executeImpl(before, trace, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr); }
 
     WorldScript::Invocation WorldScript::execute(const State& before, const ExecutionContext& execution,
         const MWWorld::ESMStore& content, const ReferenceResolver& resolver, Interpreter::ExecutionTrace* trace,
         ScriptState* bank, GlobalScriptDesc* caller, DialogueState* dialogue, const Interpreter::Program* result,
-        MWMechanics::NpcStats* sourceNpcStats) const
-    { return executeImpl(before, trace, &execution, &content, &resolver, bank, caller, dialogue, result, sourceNpcStats); }
+        MWMechanics::NpcStats* sourceNpcStats, ReferenceState* referenceState) const
+    { return executeImpl(before, trace, &execution, &content, &resolver, bank, caller, dialogue, result, sourceNpcStats, referenceState); }
 
     WorldScript::Invocation WorldScript::executeImpl(const State& before, Interpreter::ExecutionTrace* trace,
         const ExecutionContext* execution, const MWWorld::ESMStore* content, const ReferenceResolver* resolver,
         ScriptState* bank, GlobalScriptDesc* caller, DialogueState* dialogue, const Interpreter::Program* program,
-        MWMechanics::NpcStats* sourceNpcStats) const
+        MWMechanics::NpcStats* sourceNpcStats, ReferenceState* referenceState) const
     {
         validate(before);
         Invocation result{before, {}};
@@ -303,13 +306,14 @@ namespace MWScript
         auto restored = Locals::restore(before.script.mLocals, mId, mDeclarations);
         auto& locals = caller ? caller->mLocals : restored;
         auto context = execution
-            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank, dialogue, sourceNpcStats)
+            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank, dialogue, sourceNpcStats, referenceState)
             : std::make_unique<Context>(locals, result.state.globals, result.presentation);
         Interpreter::Interpreter interpreter;
         Interpreter::installOpcodes(interpreter);
         if (mBank) Misc::installScriptOpcodes(interpreter);
         if (dialogue) Dialogue::installJournalOpcodes(interpreter);
         if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
+        if (referenceState) Misc::installDisableOpcodes(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
         interpreter.run(program ? *program : mProgram, *context, MaximumExecutedInstructions, trace);
@@ -320,15 +324,16 @@ namespace MWScript
         return result;
     }
 
-    Interpreter::Program WorldScript::compileResult(std::string_view text) const
+    Interpreter::Program WorldScript::compileResult(std::string_view text, bool physical, const ESM::RefId& reference) const
     {
         require(mBank && text.size() <= MaximumSourceBytes && text.find('\0') == std::string_view::npos,
             "Dialogue result source exceeds bounds or lacks bank");
-        CompilerContext context(mGlobals, mMembers);
+        CompilerContext context(mGlobals, mMembers, physical ? reference : ESM::RefId{});
         Compiler::Extensions extensions;
         Misc::registerScriptOpcodes(extensions);
         Compiler::Dialogue::registerExtensions(extensions);
         Stats::registerDispositionResultOpcode(extensions);
+        if (physical) Misc::registerDisableOpcodes(extensions);
         context.setExtensions(&extensions);
         std::string source = "begin " + std::string(mId.getRefIdString()) + "\n";
         for (const auto kind : {'s', 'l', 'f'})

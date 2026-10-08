@@ -74,6 +74,7 @@ namespace TES3MP::Native
         // Actor discovery never initializes custom data, AI, scripts or loot.
         // NPC and creature placements use the same stable reference namespace.
         std::vector<PlacedInventory> placedActors(ESM::RefId cell);
+        void validateDisableEncounter(ESM::RefId cell, uint64_t source);
         std::vector<PlacedInventory> placedActors(std::string_view cell)
         { return placedActors(interiorCell(cell)); }
         std::vector<PlacedInventory> resolveActors(ESM::RefId cell, size_t limit);

@@ -199,12 +199,16 @@ namespace TES3MP
         std::vector<NativeActorMotion> motions;
         std::vector<PublicPlayerAppearance> appearances;
         bool characterBodies = false;
+        // Complete terminal encounter suppression, including authored local copies.
+        std::vector<uint64_t> hiddenActors;
+        uint64_t physicalScope = 1;
 
         static std::variant<LatestWinsEquipmentSnapshot, InventoryReplicationDecodeError> create(SessionId target,
             SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
             std::span<const PublicEquipmentMember> members, std::span<const PublicActorEquipmentMember> actors = {},
             std::span<const NativeActorMotion> motions = {},
-            std::span<const PublicPlayerAppearance> appearances = {}, bool characterBodies = false);
+            std::span<const PublicPlayerAppearance> appearances = {}, bool characterBodies = false,
+            std::span<const uint64_t> hiddenActors = {}, uint64_t physicalScope = 1);
         friend bool operator==(const LatestWinsEquipmentSnapshot&, const LatestWinsEquipmentSnapshot&) noexcept
             = default;
     };

@@ -18,6 +18,8 @@ namespace MWScript
         void installOpcodes(Interpreter::Interpreter& interpreter);
         void registerScriptOpcodes(Compiler::Extensions& extensions);
         void installScriptOpcodes(Interpreter::Interpreter& interpreter);
+        void registerDisableOpcodes(Compiler::Extensions& extensions);
+        void installDisableOpcodes(Interpreter::Interpreter& interpreter);
     }
 }
 

@@ -387,7 +387,7 @@ namespace TES3MP::ServerApp
             if (!targetState || targetState->state() != ServerSessionState::Established || !targetState->sessionId()
                 || !supportsPose(*targetState))
                 continue;
-            if (!sharesInterest(canonical, *targetState->sessionId(), *sourceState->sessionId(), mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas()))
+            if (!sharesInterest(canonical, *targetState->sessionId(), *sourceState->sessionId(), mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas(), mWiring->nativeInventory))
                 continue;
             ServerVrPoseSnapshot snapshot(*targetState->sessionId(), targetState->generation(),
                 sourcePlayer->playerId(), pose->sourceSessionId(), pose->sourceSessionGeneration(),
@@ -1281,7 +1281,8 @@ namespace TES3MP::ServerApp
             {
                 auto projected = projectInterestChanges(
                     before, prepared.candidateState(), batch.scheduledTick().value(), prepared.candidateRevision(),
-                    mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas());
+                    mWiring->nativeInventory && mWiring->nativeInventory->streamsPlayerAreas(),
+                    mWiring->nativeInventory, prepared.candidateNativeInventory());
                 if (!projected)
                 {
                     mFailure = "observation projection failed";

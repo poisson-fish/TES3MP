@@ -5,6 +5,8 @@
 #include <apps/openmw/mwmechanics/disposition.hpp>
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/scriptstate.hpp>
+#include <apps/openmw/mwscript/referencestate.hpp>
+#include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <bit>
@@ -21,10 +23,12 @@ namespace TES3MP::Native
 {
     namespace
     {
+        struct EncounterPreparationRequired {};
         constexpr uint64_t Magic = 0x3154535054335354;
         constexpr uint64_t ScheduledMagic = 0x3254535054335354;
         constexpr uint64_t BankMagic = 0x3354535054335354;
         constexpr uint64_t DialogueMagic = 0x3454535054335354;
+        constexpr uint64_t EncounterMagic = 0x3854535054335354;
         constexpr uint64_t IntentMagic = 0x3754535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
@@ -309,11 +313,18 @@ namespace TES3MP::Native
         mDialogues = std::ranges::any_of(mDefinitions, [](const auto& entry) { return !entry.dialogues.empty(); });
         require(!mDialogues || mBanks);
         require(!mIntents || mDialogues);
+        mEncounters = std::ranges::any_of(mDefinitions, [](const auto& entry) { return bool(entry.encounter); });
+        require(!mEncounters || mIntents);
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
             const auto& entry = mDefinitions[i];
             require(entry.character && entry.story && entry.script);
+            require(!mEncounters || (entry.encounter == mDefinitions.front().encounter && entry.encounter && entry.encounter->reference
+                && entry.encounter->record.is<ESM::StringRefId>() && !entry.encounter->record.empty()
+                && entry.encounter->cell.is<ESM::StringRefId>() && !entry.encounter->cell.empty()
+                && entry.encounter->record.getRefIdString().size() <= 128
+                && entry.encounter->cell.getRefIdString().size() <= 128));
             require(entry.members.size() < MaximumScriptsPerBank
                 && (mBanks || (entry.members.empty() && entry.running))
                 && entry.script->bankCapable() == mBanks);
@@ -363,15 +374,25 @@ namespace TES3MP::Native
                     }
                     identities.push_back(info.mId);
                     if (dialogue.mType == ESM::Dialogue::Topic)
-                        mResults[i].push_back({dialogue.mId, info.mId, entry.script->compileResult(info.mResultScript)});
+                        mResults[i].push_back({dialogue.mId, info.mId, entry.script->compileResult(info.mResultScript, mEncounters,
+                            mEncounters ? entry.encounter->record : ESM::RefId{})});
                 }
             }
         }
-        require(
-            !mIntents || scripts <= MaximumInstances - 2); // Reserve two authenticated dialogue calls per host tick.
+        // Reserve two authenticated dialogue calls, including encounter discovery/retry.
+        require(!mIntents || scripts <= MaximumInstances - (mEncounters ? 4 : 2));
         // Includes every script's content/source/defaults/limits digest and the
         // complete ordered ownership policy. No session identities or pointers.
         auto binding = encode(initial());
+        if (mEncounters) for (const auto& entry : mDefinitions)
+        {
+            word(binding, entry.encounter->reference); ref(binding, entry.encounter->record); ref(binding, entry.encounter->cell);
+        }
+        if (mEncounters)
+        {
+            constexpr std::string_view limits = "terminal-source-disable-1;one-npc;one-cell;static-geometry;12-banks;4-calls;no-summons";
+            binding.insert(binding.end(), limits.begin(), limits.end());
+        }
         if (mDialogues)
         {
             constexpr std::string_view limits = "scoped-dialogue-results-1;16;64;16;8192;4096;64;128;1048576";
@@ -442,8 +463,15 @@ namespace TES3MP::Native
     {
         const auto& expected = mDefinitions.at(index);
         const auto& last = state.last;
+        require(!state.encounterLife || (mEncounters && last.sourceReference == expected.encounter->reference
+            && last.sourceLife == state.encounterLife && state.choices.empty()));
+        if (state.encounterLife)
+            require(std::ranges::any_of(state.npcs, [&](const auto& npc) {
+                return npc.reference == expected.encounter->reference && npc.life == state.encounterLife
+                    && npc.record == expected.encounter->record;
+            }));
         require(last.ownership == MWScript::ExecutionContext::Ownership::Character && last.campaign == mCampaign
-            && last.character == expected.character && last.story == expected.story && last.physicalScope == 1
+            && last.character == expected.character && last.story == expected.story && last.physicalScope == (state.encounterLife ? index + 2 : 1)
             && (mDialogues || (!last.sourceReference && !last.sourceLife))
             && (mBanks ? last.invocation >= state.runtime.tick : last.invocation == state.runtime.tick)
             && last.causalEvent <= state.eventCursor
@@ -526,9 +554,14 @@ namespace TES3MP::Native
     std::vector<char> PersonalScripts::encode(const State& state) const
     {
         require(state.size() == mDefinitions.size());
+        for (size_t i = 0; i < state.size(); ++i) if (state[i].encounterLife)
+            require(std::ranges::none_of(std::span(state).first(i), [&](const auto& previous) {
+                return previous.encounterLife && previous.last.character == state[i].last.character;
+            }));
         std::vector<char> bytes;
         word(bytes,
-            mIntents         ? IntentMagic
+            mEncounters      ? EncounterMagic
+                : mIntents   ? IntentMagic
                 : mDialogues ? DialogueMagic
                 : mBanks     ? BankMagic
                 : mScheduled ? ScheduledMagic
@@ -557,6 +590,7 @@ namespace TES3MP::Native
             {
                 conversation(bytes, state[i]);
                 npcs(bytes, state[i]);
+                if (mEncounters) word(bytes, state[i].encounterLife);
             }
         }
         require(bytes.size() <= MaximumImageBytes);
@@ -568,7 +602,8 @@ namespace TES3MP::Native
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
         require(input.word()
-            == (mIntents         ? IntentMagic
+            == (mEncounters      ? EncounterMagic
+                : mIntents   ? IntentMagic
                     : mDialogues ? DialogueMagic
                     : mBanks     ? BankMagic
                     : mScheduled ? ScheduledMagic
@@ -598,6 +633,7 @@ namespace TES3MP::Native
             {
                 conversation(preflight, nullptr);
                 npcs(preflight, nullptr);
+                if (mEncounters) preflight.take(8);
             }
         }
         require(preflight.bytes.empty());
@@ -623,6 +659,7 @@ namespace TES3MP::Native
             {
                 conversation(input, &entry);
                 npcs(input, &entry);
+                if (mEncounters) entry.encounterLife = input.word();
             }
             validate(entry, i); state.push_back(std::move(entry));
         }
@@ -724,18 +761,26 @@ namespace TES3MP::Native
         return prepared;
     }
 
+    uint64_t PersonalScripts::physicalScope(const State& state, uint64_t character)
+    {
+        for (const auto& instance : state)
+            if (instance.last.character == character && instance.encounterLife) return instance.last.physicalScope;
+        return 1;
+    }
+
     PersonalScripts::Prepared PersonalScripts::prepareDialogue(const State& before,
         const MWScript::ExecutionContext& execution, const ESM::RefId& topic, int choice, int disposition,
         bool talkedToPlayer, std::string_view cellName, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats,
         std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats,
-        std::optional<MWScript::DialogueState::Stamp> journalStamp) const
+        std::optional<MWScript::DialogueState::Stamp> journalStamp, bool encounterPrepared) const
     {
         Prepared prepared; auto& result = prepared.result; result.invocationTick = execution.invocation;
         try
         {
             execution.validate(); (void)encode(before);
             require(mDialogues && execution.campaign == mCampaign && execution.physicalScope == 1
+                && physicalScope(before, execution.character) == 1
                 && execution.ownership == MWScript::ExecutionContext::Ownership::Character
                 && execution.sourceReference && execution.sourceLife && execution.causalEvent
                 && choice >= -1 && disposition >= 0 && disposition <= 100 && cellName.size() <= 256);
@@ -753,14 +798,67 @@ namespace TES3MP::Native
                 && current.last.invocation != UINT64_MAX && execution.invocation == current.last.invocation + 1
                 && execution.causalEvent > current.eventCursor && current.runtime.tick != UINT64_MAX);
             prepared.state = before; auto& state = prepared.state[index];
-            MWScript::DialogueState dialogue(execution, state.dialogue, found->dialogues, mIntents);
+            auto runningExecution = execution;
+            if (encounterPrepared) runningExecution.physicalScope = index + 2;
+            const auto origin = mEncounters ? resolver.resolve(execution, {}, false) : MWWorld::Ptr{};
+            if (mEncounters) require(origin.hasLiveReference() && origin.getType() == ESM::NPC::sRecordId);
+            struct Scene final : MWScript::ReferenceState
+            {
+                MWScript::ExecutionContext expected;
+                MWWorld::Ptr source;
+                bool prepared = false, removed = false;
+                void validate(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const
+                {
+                    require(execution == expected && ptr.hasLiveReference() && ptr == source
+                        && ptr.getType() == ESM::NPC::sRecordId);
+                }
+                void disable(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
+                {
+                    validate(execution, ptr);
+                    if (!prepared) throw EncounterPreparationRequired{};
+                    removed = true;
+                    source.getRefData().disable();
+                }
+                bool disabled(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
+                { validate(execution, ptr); return removed; }
+            } scene;
+            std::optional<MWWorld::ManualRef> privateSource;
+            struct Resolver final : MWScript::ReferenceResolver
+            {
+                const MWScript::ReferenceResolver& upstream;
+                Scene& scene;
+                MWWorld::Ptr origin;
+                MWScript::ExecutionContext originExecution;
+                Resolver(const MWScript::ReferenceResolver& resolver, Scene& state, MWWorld::Ptr ptr,
+                    MWScript::ExecutionContext execution)
+                    : upstream(resolver), scene(state), origin(ptr), originExecution(execution) {}
+                MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool activeOnly) const override
+                {
+                    require(execution == scene.expected);
+                    auto ptr = upstream.resolve(originExecution, id, activeOnly);
+                    if (ptr == origin)
+                        return activeOnly && scene.removed ? MWWorld::Ptr{} : scene.source;
+                    return ptr;
+                }
+            } scopedResolver(resolver, scene, origin, execution);
+            if (mEncounters)
+            {
+                require(execution.sourceReference == found->encounter->reference
+                    && origin.getCellRef().getRefId() == found->encounter->record && origin.getRefData().isEnabled());
+                privateSource.emplace(content, found->encounter->record);
+                privateSource->getPtr().getCellRef() = origin.getCellRef();
+                scene.expected = runningExecution; scene.source = privateSource->getPtr(); scene.prepared = encounterPrepared;
+            }
+
+            const MWScript::ReferenceResolver& runningResolver = mEncounters ? scopedResolver : resolver;
+            MWScript::DialogueState dialogue(runningExecution, state.dialogue, found->dialogues, mIntents);
             const auto& record = dialogue.record(topic, ESM::Dialogue::Topic);
-            Bank bank(execution, *found, state);
+            Bank bank(runningExecution, *found, state);
             // Player stats remain read-only. The source NPC snapshot has one
             // admitted result writer and restores this story's durable base.
             std::optional<MWMechanics::NpcStats> stats;
             if (playerStats) stats.emplace(*playerStats);
-            FilterContext script(execution, content, resolver, bank, dialogue, state.runtime.runtime.globals,
+            FilterContext script(runningExecution, content, runningResolver, bank, dialogue, state.runtime.runtime.globals,
                 stats ? &*stats : nullptr, cellName, customClassName);
             JournalText journalText(script, journalStamp.value_or(MWScript::DialogueState::Stamp{}));
             if (mIntents) dialogue.setJournalText(journalText);
@@ -811,12 +909,18 @@ namespace TES3MP::Native
             // Stock dialogue expands the response before executing its result block.
             // Keep the private text local until every staged result succeeds.
             const auto text = mIntents ? Interpreter::fixDefinesDialog(response.second->mResponse, script, 4096) : std::string{};
-            auto invocation = found->script->executeResult(state.runtime, execution, content, resolver,
-                bank, bank.instances.front(), dialogue, program->program, result.trace, npcStats ? &*npcStats : nullptr);
-            if (npcStats && (ownedNpc != state.npcs.end() || npcStats->getBaseDisposition() != priorDisposition))
+            auto invocation = found->script->executeResult(state.runtime, runningExecution, content, runningResolver,
+                bank, bank.instances.front(), dialogue, program->program, result.trace, npcStats ? &*npcStats : nullptr,
+                mEncounters ? &scene : nullptr);
+            if (scene.removed)
+            {
+                require(dialogue.choices.empty()); // A removed speaker cannot own a pending choice.
+                state.encounterLife = execution.sourceLife;
+            }
+            if (scene.removed || (npcStats && (ownedNpc != state.npcs.end() || npcStats->getBaseDisposition() != priorDisposition)))
             {
                 const Instance::Npc changed{execution.sourceReference, execution.sourceLife,
-                    actor.getCellRef().getRefId(), npcStats->getBaseDisposition()};
+                    actor.getCellRef().getRefId(), npcStats ? npcStats->getBaseDisposition() : actor.get<ESM::NPC>()->mBase->mNpdt.mDisposition};
                 if (ownedNpc != state.npcs.end()) *ownedNpc = changed;
                 else
                 {
@@ -833,12 +937,31 @@ namespace TES3MP::Native
             }
             ++state.runtime.tick;
             bank.write(state);
-            state.last = execution; state.eventCursor = execution.causalEvent;
+            state.last = runningExecution; state.eventCursor = execution.causalEvent;
+            if (state.encounterLife) state.last.physicalScope = index + 2;
             state.lastTopic = topic; state.lastInfo = response.second->mId; state.lastChoice = choice;
             if (!mIntents)
                 prepared.image = encode(prepared.state);
             prepared.invocations = 1;
             result.outcome = SharedWorldScript::Outcome::Committed; result.executed = true;
+        }
+        catch (const EncounterPreparationRequired&)
+        {
+            // Neither locals, globals, progression nor output from discovery survives.
+            // Admission already bound the sole cell/source; prepare a terminal private
+            // reference and retry the identical causal occurrence from committed state.
+            if (budget < 2)
+            {
+                prepared.state.clear(); prepared.image.clear(); prepared.response.clear(); result.presentation.clear();
+                result.outcome = SharedWorldScript::Outcome::Rejected; result.executed = false;
+                result.diagnostic = "Encounter discovery/retry exceeds invocation budget";
+                return prepared;
+            }
+            auto retry = prepareDialogue(before, execution, topic, choice, disposition, talkedToPlayer, cellName,
+                content, resolver, budget - 1, playerStats, customClassName, speakerStats, journalStamp, true);
+            retry.result.trace.executed += result.trace.executed;
+            if (retry.result.executed) ++retry.invocations;
+            return retry;
         }
         catch (const MWScript::ScriptContextUnavailable& error)
         {
@@ -952,7 +1075,7 @@ namespace TES3MP::Native
             for (size_t i = 0; i < before.size(); ++i)
             {
                 const auto& current = before[i];
-                if (current.scheduledTick == worldTick || std::ranges::find(activeCharacters, current.last.character)
+                if (physicalScope(before, current.last.character) != 1 || current.scheduledTick == worldTick || std::ranges::find(activeCharacters, current.last.character)
                     == activeCharacters.end()) continue;
                 require(prepared.invocations < MaximumInvocationsPerTransaction
                     && current.last.invocation != std::numeric_limits<uint64_t>::max());

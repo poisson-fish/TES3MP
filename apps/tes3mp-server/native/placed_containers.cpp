@@ -13,6 +13,7 @@
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadlevlist.hpp>
+#include <components/esm3/loadstat.hpp>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -21,6 +22,26 @@
 
 namespace TES3MP::Native
 {
+    void Loadout::validateDisableEncounter(ESM::RefId cell, uint64_t source)
+    {
+        validateCell(cell);
+        MWWorld::WorldModel world(mStore, mReaders, 1);
+        auto& loaded = world.getCell(cell);
+        size_t count = 0, npcs = 0;
+        loaded.forEach([&](const MWWorld::Ptr& ptr) {
+            if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;
+            if (++count > 8192 || (ptr.getType() != ESM::Static::sRecordId && ptr.getType() != ESM::NPC::sRecordId)
+                || !ptr.getClass().getScript(ptr).empty())
+                throw std::invalid_argument("Disable encounter has an unbounded or mutable scene dependency");
+            if (ptr.getType() == ESM::NPC::sRecordId)
+            {
+                if (++npcs > 1 || MWWorld::placedRefId(ptr.getCellRef().getRefNum(), mOptions.mContent) != source)
+                    throw std::invalid_argument("Disable encounter must contain exactly its source NPC");
+            }
+            return true;
+        });
+        if (npcs != 1) throw std::invalid_argument("Disable encounter source absent");
+    }
     std::vector<Loadout::PlacedInventory> Loadout::placedItems(ESM::RefId cell, size_t limit)
     {
         validateCell(cell);

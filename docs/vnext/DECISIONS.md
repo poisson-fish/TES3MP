@@ -263,6 +263,16 @@ result-time globals with authoritative calendar dates; private story views insta
 silently. Journal notices share durability. Payload v2/policy changes reject old frames/images;
 clients never expand, restamp or replay saved entries.
 
+**Terminal encounter (V86).** One dry interior/unscripted NPC with static geometry
+bounds all interacting dependencies. Source-only stock Disable discovers scope,
+discards discovery effects and retries with a detached reference and identical causal
+occurrence; each attempt is instruction-bounded and charged. Persist character/story
+scope and placement/record/life origins with gameplay; never clone loot/lives.
+Lookup, peer/NPC presentation, Bullet hulls and combat share scope. Collision masks
+restore without allocation on failure. Terminal scopes suspend banks/new interactions;
+Enable, departure and return await separate admission. Capability 41/fresh images gate
+compatibility; exact receipts acknowledge silently without resolving removed speakers.
+
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound
 state atomically. No checkpoint-only acknowledgments or parallel files.

@@ -234,6 +234,8 @@ namespace TES3MP::Native
         std::optional<SharedWorldScript::State> mSharedScriptState;
         EquipmentBytes mSharedScriptImage;
         std::optional<PersonalScripts::State> mPersonalScriptState;
+        const PersonalScripts::State* mPreparingPersonalState = nullptr;
+        bool mPreparingSharedCollision = false;
         EquipmentBytes mPersonalScriptImage;
         std::array<PlayerPhysicsState, 2> mPlayerFrames;
         std::array<std::pair<uint64_t, uint64_t>, 2> mPlayerControlBindings{};
@@ -242,6 +244,7 @@ namespace TES3MP::Native
         class PlayerPhysicsTransaction;
         class DialogueTransaction;
         const PreparedNativeInventory* unwrapPlayerPhysics(const PreparedNativeInventory*) const;
+        const PersonalScripts::State* personalState(const PreparedNativeInventory* = nullptr) const;
         class Transaction;
         class EquipmentTransaction;
         class WorldTransaction;
@@ -503,6 +506,8 @@ namespace TES3MP::Native
         bool hasLeveledActors() const noexcept override { return mBinding.mActorSelections.has_value(); }
         bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
         bool ownsPlayerPhysics() const noexcept override { return mBinding.mPlayerPhysics; }
+        uint64_t physicalScope(PlayerId, const PreparedNativeInventory* = nullptr) const override;
+        bool hasStoryEncounters() const override { return mBinding.mPersonalScripts && mBinding.mPersonalScripts->encounters(); }
         std::optional<PlayerPhysicsBaseline> projectPlayerPhysics(const CanonicalServerState&, PlayerId,
             const PreparedNativeInventory* = nullptr) const override;
         bool hasNativeCombat() const noexcept override { return mBinding.mCombatResolution; }

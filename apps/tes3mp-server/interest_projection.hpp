@@ -25,7 +25,8 @@ namespace TES3MP::ServerApp
         LatestWinsSnapshot view;
     };
 
-    bool sharesInterest(const CanonicalServerState& state, SessionId target, SessionId source, bool neighborhoods = false) noexcept;
+    bool sharesInterest(const CanonicalServerState& state, SessionId target, SessionId source, bool neighborhoods = false,
+        const NativeInventoryAuthority* native = nullptr) noexcept;
     std::optional<InterestBaselineDelivery> projectInterestBaseline(const CanonicalServerState& state,
         SessionId target, ServerTick tick, CanonicalRevision revision, CanonicalStateVersion stateVersion, bool neighborhoods = false,
         const NativeInventoryAuthority* native = nullptr);
@@ -34,7 +35,8 @@ namespace TES3MP::ServerApp
 
     std::optional<std::vector<InterestDelivery>> projectInterestChanges(
         const CanonicalServerState& before, const CanonicalServerState& after, ServerTick tick,
-        CanonicalRevision revision, bool neighborhoods = false);
+        CanonicalRevision revision, bool neighborhoods = false, const NativeInventoryAuthority* native = nullptr,
+        const PreparedNativeInventory* candidate = nullptr);
 
     bool admitInterestChange(OutboundQueueSet& queues, TransportConnectionId connection,
         const InterestDelivery& delivery);

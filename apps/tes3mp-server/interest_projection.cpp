@@ -15,26 +15,28 @@ namespace TES3MP::ServerApp
         }
 
         std::vector<const CanonicalPlayerEntityState*> visibleTo(
-            const CanonicalServerState& state, const CanonicalSessionProgress& target, bool neighborhoods)
+            const CanonicalServerState& state, const CanonicalSessionProgress& target, bool neighborhoods,
+            const NativeInventoryAuthority* native = nullptr, const PreparedNativeInventory* candidate = nullptr)
         {
             std::vector<const CanonicalPlayerEntityState*> result;
             const auto* targetPlayer = playerFor(state, target);
             if (!targetPlayer) return result;
             for (const auto& player : state.players())
-                if (player.transform().cell() == targetPlayer->transform().cell()
-                    || (neighborhoods && sharesCellNeighborhood(player.transform().cell(), targetPlayer->transform().cell())))
+                if ((!native || native->physicalScope(player.playerId(), candidate) == native->physicalScope(target.playerId(), candidate))
+                    && (player.transform().cell() == targetPlayer->transform().cell()
+                    || (neighborhoods && sharesCellNeighborhood(player.transform().cell(), targetPlayer->transform().cell()))))
                     result.push_back(&player);
             return result;
         }
     }
 
-    bool sharesInterest(const CanonicalServerState& state, SessionId target, SessionId source, bool neighborhoods) noexcept
+    bool sharesInterest(const CanonicalServerState& state, SessionId target, SessionId source, bool neighborhoods, const NativeInventoryAuthority* native) noexcept
     {
         const auto* targetSession = state.findActiveSession(target);
         const auto* sourceSession = state.findActiveSession(source);
         const auto* targetPlayer = targetSession ? playerFor(state, *targetSession) : nullptr;
         const auto* sourcePlayer = sourceSession ? playerFor(state, *sourceSession) : nullptr;
-        return targetPlayer && sourcePlayer && (targetPlayer->transform().cell() == sourcePlayer->transform().cell()
+        return targetPlayer && sourcePlayer && (!native || native->physicalScope(targetPlayer->playerId()) == native->physicalScope(sourcePlayer->playerId())) && (targetPlayer->transform().cell() == sourcePlayer->transform().cell()
             || (neighborhoods && sharesCellNeighborhood(targetPlayer->transform().cell(), sourcePlayer->transform().cell())));
     }
 
@@ -46,7 +48,7 @@ namespace TES3MP::ServerApp
         {
             const auto* target = state.findActiveSession(targetId);
             if (!target) return std::nullopt;
-            const auto visible = visibleTo(state, *target, neighborhoods);
+            const auto visible = visibleTo(state, *target, neighborhoods, native);
             std::vector<InterestMember> members;
             std::vector<SpatialEntitySnapshot> entries;
             members.reserve(visible.size());
@@ -91,7 +93,8 @@ namespace TES3MP::ServerApp
 
     std::optional<std::vector<InterestDelivery>> projectInterestChanges(
         const CanonicalServerState& before, const CanonicalServerState& after, ServerTick tick,
-        CanonicalRevision revision, bool neighborhoods)
+        CanonicalRevision revision, bool neighborhoods, const NativeInventoryAuthority* native,
+        const PreparedNativeInventory* candidate)
     {
         std::vector<InterestDelivery> deliveries;
         deliveries.reserve(after.activeSessions().size());
@@ -99,8 +102,8 @@ namespace TES3MP::ServerApp
         {
             const auto* oldTarget = before.findActiveSession(target.sessionId());
             if (!oldTarget || oldTarget->sessionGeneration() != target.sessionGeneration()) continue;
-            const auto oldVisible = visibleTo(before, *oldTarget, neighborhoods);
-            const auto newVisible = visibleTo(after, target, neighborhoods);
+            const auto oldVisible = visibleTo(before, *oldTarget, neighborhoods, native);
+            const auto newVisible = visibleTo(after, target, neighborhoods, native, candidate);
             std::vector<ObservationChange> changes;
             for (const auto* player : oldVisible)
                 if (std::ranges::none_of(newVisible, [&](const auto* value) { return value->playerId() == player->playerId(); }))
@@ -187,7 +190,7 @@ namespace TES3MP::ServerApp
             result.reserve(state.activeSessions().size());
             for (const auto& target : state.activeSessions())
             {
-                const auto visible = visibleTo(state, target, neighborhoods);
+                const auto visible = visibleTo(state, target, neighborhoods, native, candidate);
                 std::vector<SpatialEntitySnapshot> entries;
                 entries.reserve(visible.size());
                 for (const auto* player : visible)

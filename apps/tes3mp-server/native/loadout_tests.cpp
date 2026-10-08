@@ -6944,6 +6944,7 @@ int main(int argc, char** argv)
                             || std::string_view(argv[1]) == "dialogue-intents"
                             || std::string_view(argv[1]) == "dialogue-disposition"
                             || std::string_view(argv[1]) == "dialogue-npc-state"
+                            || std::string_view(argv[1]) == "story-encounter"
                             || std::string_view(argv[1]) == "dialogue-journal")))
                 || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives"
                     || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))

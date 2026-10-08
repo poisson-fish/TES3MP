@@ -9,6 +9,7 @@
 #include <apps/openmw/mwscript/dialogueextensions.hpp>
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/locals.hpp>
+#include <apps/openmw/mwscript/miscextensions.hpp>
 #include <apps/openmw/mwscript/statsextensions.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/cell.hpp>
@@ -149,7 +150,8 @@ namespace
             }
             if ((reference.empty() || reference == id("ledger_v63")) && wait)
                 throw MWScript::ScriptContextUnavailable();
-            if (reference.empty() || reference == id("ledger_v63")) return actor;
+            if (reference.empty() || reference == id("ledger_v63")
+                || (actor.hasLiveReference() && reference == actor.getCellRef().getRefId())) return actor;
             throw std::invalid_argument("Unowned reference");
         }
     };
@@ -1235,6 +1237,107 @@ namespace
             "isolation, waits/bounds/late rollback, duplicate semantics, durable recovery and silent stock journal installation\n";
     }
 
+    void encounter(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        for (auto& definition : fixture.definitions)
+        {
+            definition.encounter = PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("room_e87")};
+            definition.dialogues[1].mInfo.front().mResultScript =
+                "set calls to calls + 1\nJournal journey_t37 10\nDisable\n"
+                "set personal_counter to GetDisabled\nMessageBox \"Removed for this story\"";
+        }
+        PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true);
+        auto state = runtime.initial(); const auto before = runtime.encode(state);
+        Resolver resolver; resolver.actor = fixture.actor.getPtr();
+        const auto run = [&](const PersonalScripts& policy, const PersonalScripts::State& input,
+            uint64_t character, uint64_t command = 101, size_t budget = 16) {
+            const auto& instance = *std::ranges::find_if(input, [&](const auto& value) {
+                return value.last.character == character && value.last.story == 31;
+            });
+            resolver.expected = instance.last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = instance.eventCursor + 1;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
+            return policy.prepareIntent(input, character, command, {31, 41, 3, instance.dialogueRevision, "passage_k61", -1},
+                "Room", fixture.content, resolver, budget, nullptr, {}, nullptr, JournalDate);
+        };
+        auto alice = run(runtime, state, 11);
+        if (!alice.result.executed) throw std::runtime_error("Encounter invocation: " + alice.result.diagnostic);
+        require(alice.state[0].encounterLife == 3 && alice.state[0].last.physicalScope == 2,
+            "Disable did not establish a terminal source-life-bound scope");
+        require(calls(alice.state[0].runtime) == 1, "Disable discovery/retry doubled local mutations");
+        require(alice.state[0].runtime.runtime.globals.front().mValue.getInteger() == 1,
+            "GetDisabled did not read the staged source state");
+        require(std::ranges::count(alice.result.presentation, "Removed for this story") == 1
+            && alice.state[0].dialogue.entries.size() == 1,
+            "Disable discovery/retry duplicated private output");
+        require(fixture.actor.getPtr().getRefData().isEnabled() && runtime.encode(state) == before,
+            "Private Disable mutated its public source or committed bank");
+        require(alice.invocations == 2 && run(runtime, state, 11, 101, 1).result.outcome
+            == SharedWorldScript::Outcome::Rejected, "Discovery/retry escaped the invocation budget");
+        auto namedDefinitions = fixture.definitions;
+        for (auto& definition : namedDefinitions)
+            definition.dialogues[1].mInfo.front().mResultScript
+                = "speaker_r29->Disable\nset personal_counter to speaker_r29->GetDisabled";
+        PersonalScripts named(7, namedDefinitions, crypto, true, true, true);
+        const auto namedRemoval = run(named, named.initial(), 11);
+        require(namedRemoval.result.executed && namedRemoval.state[0].encounterLife == 3
+            && namedRemoval.state[0].runtime.runtime.globals.front().mValue.getInteger() == 1,
+            "Explicit source lookup disagreed with implicit Disable/GetDisabled");
+        MWWorld::ManualRef foreignPlayer(fixture.content, id("speaker_r29"));
+        resolver.player = foreignPlayer.getPtr();
+        for (auto& definition : namedDefinitions)
+            definition.dialogues[1].mInfo.front().mResultScript = "player->Disable";
+        PersonalScripts foreign(7, namedDefinitions, crypto, true, true, true);
+        const auto foreignRemoval = run(foreign, foreign.initial(), 11);
+        require(foreignRemoval.result.outcome == SharedWorldScript::Outcome::Rejected
+            && foreignRemoval.state.empty() && foreignPlayer.getPtr().getRefData().isEnabled(),
+            "Encounter writer disabled a foreign player reference");
+        require(PersonalScripts::physicalScope(alice.state, 11) == 2
+            && PersonalScripts::physicalScope(alice.state, 22) == 1
+            && alice.state[1].encounterLife == 0 && calls(alice.state[1].runtime) == 0
+            && alice.state[2].encounterLife == 0, "Removal consumed another character/story opportunity");
+        auto bob = run(runtime, alice.state, 22);
+        require(bob.result.executed && bob.state[1].encounterLife == 3 && bob.state[1].last.physicalScope == 3,
+            "B could not complete the same stock result independently after A's removal");
+        require(runtime.encode(runtime.restore(bob.image)) == bob.image, "Scoped origins/receipts failed exact restart");
+        auto replay = runtime.prepareIntent(bob.state, 11, 101, {31, 41, 3, 0, "passage_k61", -1}, "Room",
+            fixture.content, resolver, 16, nullptr, {}, nullptr, JournalDate);
+        require(replay.result.outcome == SharedWorldScript::Outcome::Committed && !replay.result.executed
+            && replay.result.presentation.empty(), "Terminal receipt replayed a result or required its removed speaker");
+        require(run(runtime, alice.state, 11, 102).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Removed source remained available to fresh dialogue");
+        resolver.wait = true;
+        auto waiting = run(runtime, state, 11);
+        require(waiting.result.outcome == SharedWorldScript::Outcome::Deferred && waiting.state.empty()
+            && runtime.encode(state) == before, "Unavailability masqueraded as a committed removal");
+        resolver.wait = false;
+        auto definitions = fixture.definitions;
+        for (auto& definition : definitions) definition.dialogues[1].mInfo.front().mResultScript += "\nGoodbye";
+        PersonalScripts late(7, definitions, crypto, true, true, true);
+        auto failed = run(late, late.initial(), 11);
+        require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty()
+            && failed.image.empty() && failed.response.empty() && failed.result.presentation.empty()
+            && fixture.actor.getPtr().getRefData().isEnabled(), "Late result failure leaked private/public scene state");
+        auto invalid = bob.state;
+        invalid[1].last.physicalScope = 2;
+        rejects([&] { runtime.encode(invalid); }, "Recovery accepted another story's physical scope");
+        invalid = bob.state; invalid[2].encounterLife = 3; invalid[2].last = invalid[0].last;
+        invalid[2].last.story = 32; invalid[2].last.physicalScope = 4;
+        rejects([&] { runtime.encode(invalid); }, "Character inhabited two scopes");
+        for (size_t size = 0; size < alice.image.size(); ++size)
+            rejects([&] { runtime.restore(std::span(alice.image).first(size)); }, "Truncated encounter image restored");
+        auto priorDefinitions = fixture.definitions;
+        for (auto& definition : priorDefinitions)
+        {
+            definition.encounter.reset(); definition.dialogues[1].mInfo.front().mResultScript = "Journal journey_t37 10";
+        }
+        PersonalScripts prior(7, priorDefinitions, crypto, true, true, true);
+        rejects([&] { runtime.restore(prior.encode(prior.initial())); }, "Encounter silently migrated prior policy");
+        std::cout << "story encounter: stock Disable/GetDisabled; one source/cell, discovery rollback/retry; "
+            "A removes privately, B completes independently; late failure/waits, bound receipts and silent exact restart\n";
+    }
+
     void stock(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto);
@@ -1269,6 +1372,15 @@ namespace
         MWScript::Stats::installOpcodes(interpreter);
         rejects([&] { interpreter.run(runtime.compileResult("ModDisposition 17"), scoped, 4096); },
             "Full stock installer bypassed staged NPC result ownership");
+        MWScript::Misc::installOpcodes(interpreter);
+        rejects([&] { interpreter.run(runtime.compileResult("Disable", true, id("speaker_r29")), scoped, 4096); },
+            "Full stock installer bypassed staged physical ownership");
+        rejects([&] { interpreter.run(runtime.compileResult("set calls to GetDisabled", true), scoped, 4096); },
+            "Full stock installer read unscoped physical state for a scoped caller");
+        fixture.actor.getPtr().getRefData().disable();
+        interpreter.run(runtime.compileResult("set calls to GetDisabled", true), context, 4096);
+        require(locals.mLongs.front() == 1, "Stock GetDisabled stopped reading source RefData");
+        fixture.actor.getPtr().getRefData().enable();
         ESM::Creature creature; creature.blank(); creature.mId = id("speaker_creature_y72");
         fixture.content.insertStatic(creature);
         MWWorld::ManualRef nonNpc(fixture.content, creature.mId);
@@ -1282,7 +1394,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|npc-state|substitutions|journal");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|npc-state|encounter|substitutions|journal");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
@@ -1297,6 +1409,7 @@ int main(int argc, char** argv)
         else if (filter == "disposition")
             disposition(*crypto);
         else if (filter == "npc-state") disposition(*crypto, true);
+        else if (filter == "encounter") encounter(*crypto);
         else if (filter == "substitutions")
             substitutions(*crypto);
         else if (filter == "journal") journal(*crypto);

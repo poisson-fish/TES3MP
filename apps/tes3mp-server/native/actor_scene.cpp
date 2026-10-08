@@ -2037,6 +2037,31 @@ namespace TES3MP::Native
         }
         operation();
     }
+    void InteriorActorScene::withHiddenActors(std::span<const uint64_t> actors, const std::function<void()>& operation)
+    {
+        struct Restore
+        {
+            struct Body { btBroadphaseProxy* proxy; int group, mask; };
+            std::vector<Body> bodies;
+            ~Restore() { for (auto it = bodies.rbegin(); it != bodies.rend(); ++it) {
+                it->proxy->m_collisionFilterGroup = it->group;
+                it->proxy->m_collisionFilterMask = it->mask;
+            } }
+        } restore;
+        restore.bodies.reserve(actors.size());
+        for (auto id : actors)
+        {
+            auto& scene = hasPlayer(id) ? forPlayer(id) : forActor(id);
+            if (!scene.mImpl || !scene.mImpl->mActor) continue;
+            auto* body = scene.mImpl->mActor->mCollisionObject;
+            auto* proxy = body->getBroadphaseHandle();
+            if (!proxy) throw std::invalid_argument("Scoped hull has no collision witness");
+            restore.bodies.push_back({proxy, proxy->m_collisionFilterGroup, proxy->m_collisionFilterMask});
+            proxy->m_collisionFilterGroup = 0;
+            proxy->m_collisionFilterMask = 0;
+        }
+        operation();
+    }
     void InteriorActorScene::prepareSceneryDoors(Prepared& prepared, std::span<const ActorSceneDoor> doors) const
     {
         auto& frames = prepared.mState->sceneryDoors;

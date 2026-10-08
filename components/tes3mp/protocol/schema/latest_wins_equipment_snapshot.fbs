@@ -80,6 +80,8 @@ table LatestWinsEquipmentSnapshot {
   motions:[NativeActorMotion] (id: 3);
   appearances:[PlayerAppearance] (id: 4);
   character_bodies:bool (id: 5);
+  hidden_actors:[ulong] (id: 6);
+  physical_scope:ulong = 1 (id: 7);
 }
 
 root_type LatestWinsEquipmentSnapshot;

@@ -18,6 +18,7 @@ namespace MWScript
     class ReferenceResolver;
     class ScriptState;
     class DialogueState;
+    class ReferenceState;
     struct GlobalScriptDesc;
     // Bounded subset of the stock compiler/interpreter. Callers supply
     // explicitly owned globals/banks and stage the returned state in their transaction.
@@ -50,7 +51,8 @@ namespace MWScript
         const ESM::RefId& id() const { return mId; }
         const Compiler::Locals& declarations() const { return mDeclarations; }
         bool bankCapable() const { return mBank; }
-        Interpreter::Program compileResult(std::string_view source) const;
+        Interpreter::Program compileResult(std::string_view source, bool physical = false,
+            const ESM::RefId& reference = {}) const;
         State initial() const;
         void validate(const State& state) const;
         Invocation execute(const State& before, Interpreter::ExecutionTrace* trace = nullptr) const;
@@ -58,12 +60,13 @@ namespace MWScript
             const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
             Interpreter::ExecutionTrace* trace = nullptr, ScriptState* bank = nullptr,
             GlobalScriptDesc* caller = nullptr, DialogueState* dialogue = nullptr,
-            const Interpreter::Program* result = nullptr, MWMechanics::NpcStats* sourceNpcStats = nullptr) const;
+            const Interpreter::Program* result = nullptr, MWMechanics::NpcStats* sourceNpcStats = nullptr,
+            ReferenceState* referenceState = nullptr) const;
 
     private:
         Invocation executeImpl(const State&, Interpreter::ExecutionTrace*, const ExecutionContext*,
             const MWWorld::ESMStore*, const ReferenceResolver*, ScriptState*, GlobalScriptDesc*,
-            DialogueState*, const Interpreter::Program*, MWMechanics::NpcStats*) const;
+            DialogueState*, const Interpreter::Program*, MWMechanics::NpcStats*, ReferenceState*) const;
         ESM::RefId mId;
         Compiler::Locals mDeclarations;
         Interpreter::Program mProgram;

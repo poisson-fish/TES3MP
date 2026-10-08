@@ -22,6 +22,7 @@ namespace MWScript
 {
     class Locals;
     class DialogueState;
+    class ReferenceState;
 
     class MissingImplicitRefError : public std::runtime_error
     {
@@ -42,6 +43,7 @@ namespace MWScript
         const ReferenceResolver* mResolver = nullptr;
         ScriptState* mScriptState = nullptr;
         DialogueState* mDialogueState = nullptr;
+        ReferenceState* mReferenceState = nullptr;
         std::shared_ptr<GlobalScriptDesc> mGlobalScriptDesc;
 
         void requireUnscopedService() const;
@@ -81,7 +83,8 @@ namespace MWScript
         InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
             const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
             MWMechanics::NpcStats* detachedPlayerStats = nullptr, ScriptState* scriptState = nullptr,
-            DialogueState* dialogueState = nullptr, MWMechanics::NpcStats* sourceNpcStats = nullptr);
+            DialogueState* dialogueState = nullptr, MWMechanics::NpcStats* sourceNpcStats = nullptr,
+            ReferenceState* referenceState = nullptr);
         ///< Scoped callers supply staged locals/stats. Unprovided services reject;
         ///< no fallback to the stock protagonist, world globals or script manager.
 
@@ -95,6 +98,8 @@ namespace MWScript
         // Only the validated invocation source may change detached NPC state.
         // Stock callers retain the ordinary NPC writer.
         void modDisposition(const MWWorld::Ptr& actor, int value) const;
+        void disable(const MWWorld::Ptr& reference) const;
+        bool disabled(const MWWorld::Ptr& reference) const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
         DialogueState* getDialogueState() const;

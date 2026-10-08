@@ -22,6 +22,7 @@
 #include <chrono>
 #include "test_allocations.hpp"
 #include "../canonical_persistence_file.hpp"
+#include "../interest_projection.hpp"
 #include <tes3mp/server_command_reducer.hpp>
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/protocol_frame.hpp>
@@ -5593,8 +5594,9 @@ namespace TES3MP::Native::Testing
     {
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
+        const bool storyEncounter = effectFamily == "story-encounter";
         const bool dialogueNpc = effectFamily == "dialogue-npc-state";
-        const bool personalIntents = dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
+        const bool personalIntents = storyEncounter || dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
         const bool personalDialogue = personalIntents || effectFamily == "dialogue";
         const bool personalBanks = personalDialogue || effectFamily == "script-banks";
         const bool personalScheduling = personalBanks || effectFamily == "personal-scheduling";
@@ -5613,7 +5615,7 @@ namespace TES3MP::Native::Testing
         const bool mixedPassives = passiveSelf || statPassives || harmfulPassives || effectFamily == "mixed-passives";
         if (sneakDetection) effectFamily = "concealment";
         if (jumpConsumers) { effectFamily = "movement-effects"; deepMovement = true; wetMovement = false; }
-        const bool genericTargets = effectFamily == "target-recipients" || cellActors;
+        const bool genericTargets = !storyEncounter && (effectFamily == "target-recipients" || cellActors);
         const bool spellCompleteness = genericTargets || effectFamily == "spell-completeness";
         const bool committedBodies = spellCompleteness || effectFamily == "actor-bodies";
         const bool manualRespawn = effectFamily == "player-respawn";
@@ -6339,7 +6341,7 @@ namespace TES3MP::Native::Testing
                                 select.mFunction = ESM::DialogueCondition::Function_PcAlchemy;
                                 info.mSelects.push_back(select);
                                 info.mResponse = "A private passage for %PCName|%PCClass|%cell|%ambient_counter_83|%pccrimelevel.";
-                                info.mResultScript += "Choice \"Proceed\" 7\n";
+                                info.mResultScript += storyEncounter ? "Disable\nset ambient_counter_83 to GetDisabled\n" : "Choice \"Proceed\" 7\n";
                             }
                         }
                         if (dialogueDisposition && std::string_view(name) == "passage_k61")
@@ -7795,6 +7797,7 @@ namespace TES3MP::Native::Testing
             }
             for (auto record : {placedActor, floor.mId, door.mId})
             {
+                if (storyEncounter && record == door.mId) continue;
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                 // Leave the door clear for the two-desktop Touch capture.
                 if (record == placedActor) placed.mPos = worldCollision
@@ -7863,7 +7866,7 @@ namespace TES3MP::Native::Testing
                     ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                     placed.mPos = {{x, y, 1}, {0, 0, 0}}; placed.save(out);
                 }
-            if (characterCreation)
+            if (characterCreation && !storyEncounter)
             {
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
                 placed.mRefID = ESM::RefId::stringRefId("chargen_autocalc_npc");
@@ -9291,7 +9294,8 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (personalIntents                              ? "native-inventory-85\nmanifest "
+            out << (storyEncounter                               ? "native-inventory-86\nmanifest "
+                : personalIntents                              ? "native-inventory-85\nmanifest "
                     : personalDialogue                           ? "native-inventory-84\nmanifest "
                     : personalBanks                              ? "native-inventory-83\nmanifest "
                     : personalScheduling                         ? "native-inventory-82\nmanifest "
@@ -9628,6 +9632,200 @@ namespace TES3MP::Native::Testing
                         return owner.prepareNativePlayerTick(
                             authority, id<ServerTick>(tick), 1.f / 30, std::move(input), &world, {}, {});
                     };
+                    if (storyEncounter)
+                    {
+                        require(service.hasStoryEncounters(), "V86 encounter policy absent");
+                        const auto original = image(service);
+                        const auto sceneImage = native.characterBinding().mNavigatingActor->image();
+                        auto alice = prepare(native, 5, 1, 101, request);
+                        require(alice && native.physicalScope(id<PlayerId>(1), alice.get()) != 1
+                            && native.physicalScope(id<PlayerId>(1)) == 1
+                            && native.physicalScope(id<PlayerId>(2), alice.get()) == 1,
+                            "Encounter was not detached or crossed characters");
+                        const auto verifyView = [&](InventoryService& owner, const PreparedNativeInventory* candidate,
+                            uint64_t tick, bool aliceRemoved, bool bobRemoved) {
+                            for (uint64_t observer : {1u, 2u})
+                            {
+                                const bool removed = observer == 1 ? aliceRemoved : bobRemoved;
+                                const auto gear = owner.projectInventory(authority, id<SessionId>(observer),
+                                    id<ServerTick>(tick), id<CanonicalRevision>(tick), candidate);
+                                const auto fight = owner.projectCombat(authority, id<SessionId>(observer),
+                                    id<ServerTick>(tick), id<CanonicalRevision>(tick), candidate);
+                                require(gear && gear->equipment && fight,
+                                    "Encounter projection unavailable");
+                                require(removed ? gear->equipment->hiddenActors == std::vector<uint64_t>{request.speaker}
+                                        && gear->equipment->actors.empty() && gear->equipment->motions.empty()
+                                        && fight->actors().empty()
+                                    : gear->equipment->hiddenActors.empty() && gear->equipment->actors.size() == 1
+                                        && fight->actors().size() == 1,
+                                    "NPC visibility and combat disagreed about scope");
+                                const auto spatial = ServerApp::projectInterestViews(authority, id<ServerTick>(tick),
+                                    id<CanonicalRevision>(tick), true, &owner, candidate);
+                                require(spatial && spatial->size() == 2
+                                    && (*spatial)[observer - 1].second.view().entries().size()
+                                        == ((aliceRemoved || bobRemoved) ? 1 : 2),
+                                    "Spatial peer interest crossed physical scope");
+                                require(gear->equipment->members.size() == ((aliceRemoved || bobRemoved) ? 1 : 2)
+                                    && fight->players().size() == ((aliceRemoved || bobRemoved) ? 0 : 1),
+                                    "Peer bodies/combat crossed scope");
+                                const auto decoded = decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(*gear->equipment));
+                                const auto* decodedGear = std::get_if<LatestWinsEquipmentSnapshot>(&decoded);
+                                require(decodedGear && *decodedGear == *gear->equipment, "Encounter suppression did not round-trip");
+                            }
+                        };
+                        verifyView(native, alice.get(), 5, true, false);
+                        const auto leaves = ServerApp::projectInterestChanges(authority, authority,
+                            id<ServerTick>(5), id<CanonicalRevision>(5), true, &native, alice.get());
+                        require(leaves && leaves->size() == 2 && std::ranges::all_of(*leaves, [](const auto& delivery) {
+                            return delivery.observations.changes().size() == 1
+                                && delivery.observations.changes().front().kind == ObservationChangeKind::Leave;
+                        }), "Scope entry did not remove prior reliable peer observations");
+                        std::unique_ptr<PreparedNativeInventory> pair;
+                        require(native.appendDialogueIntent(authority, proposal(1, 101, request), pair, &world)
+                            && native.appendDialogueIntent(authority, proposal(2, 101, request), pair, &world),
+                            "Paired Disable exceeded the bounded discovery/retry budget");
+                        pair = native.prepareNativePlayerTick(authority, id<ServerTick>(5), 1.f / 30,
+                            std::move(pair), &world, {}, {});
+                        require(bool(pair), "Paired encounter preparation failed");
+                        verifyView(native, pair.get(), 5, true, true);
+                        require(pair->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && image(service) == original,
+                            "Paired encounter rejection leaked either character's scope");
+                        require(alice->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && image(service) == original
+                            && native.characterBinding().mNavigatingActor->image() == sceneImage,
+                            "Rejected encounter write leaked gameplay, resources or collision");
+                        verifyView(native, nullptr, 4, false, false);
+                        auto committed = prepare(native, 5, 1, 101, request);
+                        require(committed && committed->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                            == CanonicalDurabilityResult::Committed, "Private Disable did not commit");
+                        verifyView(native, nullptr, 5, true, false);
+                        const auto saved = image(service);
+                        const auto beforeCampaign = readActorCampaign({reinterpret_cast<const char*>(original.data()), original.size()});
+                        const auto afterCampaign = readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()});
+                        require(std::ranges::equal(beforeCampaign.inventory, afterCampaign.inventory)
+                            && beforeCampaign.combat->actors[2] == afterCampaign.combat->actors[2]
+                            && beforeCampaign.life->generation == afterCampaign.life->generation,
+                            "A's removal changed B's public NPC inventory/resources/life");
+                        const auto scopes = state(service);
+                        require(scopes[0].encounterLife == request.life && scopes[1].encounterLife == 0
+                            && scopes[2].encounterLife == 0 && scopes[3].encounterLife == 0,
+                            "Disable crossed other character/story banks");
+                        // Collision and projectile queries share actual stock Bullet bodies.
+                        auto& room = *native.characterBinding().mNavigatingActor;
+                        const auto npc = room.snapshot();
+                        const std::array<float, 3> from{npc.mPosition[0] - 100, npc.mPosition[1], npc.mPosition[2] + 64};
+                        const std::array<float, 3> to{npc.mPosition[0] + 100, npc.mPosition[1], npc.mPosition[2] + 64};
+                        const auto publicHit = room.projectileContact(from, to);
+                        require(publicHit && publicHit->actor == request.speaker, "Shared encounter NPC hull absent");
+                        const std::array hidden{request.speaker};
+                        const std::array rollbackHidden{request.speaker, request.speaker};
+                        bool hiddenHit = false;
+                        try { room.withHiddenActors(rollbackHidden, [&] {
+                            const auto hit = room.projectileContact(from, to);
+                            hiddenHit = !hit || hit->actor != request.speaker;
+                            throw std::runtime_error("injected scope query rollback");
+                        }); } catch (const std::runtime_error&) {}
+                        require(hiddenHit && room.projectileContact(from, to)->actor == request.speaker,
+                            "Scoped collision leaked an invisible blocker or failed rollback");
+                        auto walkingScene = native.characterBinding().mCreateActorSet({});
+                        const auto record = ESM::RefId::stringRefId("npc_door_actor");
+                        const std::array bodies{DynamicActorBody{PlayerHullBase, record,
+                            {npc.mPosition[0], npc.mPosition[1] - 120, npc.mPosition[2] + 1}, 0,
+                            native.characterBinding().mEngineCells.at(authority.players()[0].transform().cell()),
+                            std::make_shared<const ESM::NPC>(*source.store().get<ESM::NPC>().find(record))}};
+                        walkingScene->bindPlayers(source, bodies);
+                        auto& walker = walkingScene->forPlayer(PlayerHullBase);
+                        const auto walkingStart = walker.image();
+                        const auto walk = [&](bool removed) {
+                            for (size_t tick = 0; tick < 45; ++tick)
+                            {
+                                std::unique_ptr<InteriorActorScene::Prepared> step;
+                                const auto prepareStep = [&] { step = walker.prepareControlled(
+                                    ActorMovement{.enabled = true, .walkSpeed = 200}, {0, 1, 0}, 0, 0); };
+                                if (removed) walkingScene->withHiddenActors(hidden, prepareStep);
+                                else prepareStep();
+                                walker.install(*step);
+                            }
+                            return walker.snapshot().mPosition[1];
+                        };
+                        const float sharedStop = walk(false);
+                        auto resetWalker = walker.prepareRestore(walkingStart); walker.install(*resetWalker);
+                        const float privatePassage = walk(true);
+                        require(sharedStop < npc.mPosition[1] && privatePassage > npc.mPosition[1] + 50,
+                            "Stock controlled movement disagreed with scoped NPC collision");
+                        const auto attackProposal = [&](uint64_t sessionId) {
+                            const auto* session = authority.findActiveSession(id<SessionId>(sessionId));
+                            const auto* player = authority.findPlayer(session->playerId());
+                            ClientMeleeAttackCommand attack{session->sessionId(), session->sessionGeneration(),
+                                id<CommandSequence>(202), id<CommandId>(202), id<CanonicalRevision>(5),
+                                id<ActorId>(request.speaker), id<ServerTick>(5), id<CombatRevision>(5),
+                                id<CombatRevision>(5), MeleeAttackType::Chop, 1.f};
+                            return ServerCommandProposal(attack.sessionId, attack.sessionGeneration,
+                                attack.commandSequence, attack.commandId, attack.observedCanonicalRevision,
+                                EntityPrecondition(session->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                MeleeAttackCommandProposal(attack));
+                        };
+                        require(!native.prepareMeleeAttack(authority, attackProposal(1), id<ServerTick>(6))
+                            && native.prepareMeleeAttack(authority, attackProposal(2), id<ServerTick>(6)),
+                            "A could attack its removed NPC or B lost shared combat eligibility");
+                        std::unique_ptr<PreparedNativeInventory> invalid;
+                        auto fresh = request; fresh.revision = 1;
+                        require(!native.appendDialogueIntent(authority, proposal(1, 102, fresh), invalid, &world)
+                            && !invalid && image(service) == saved, "Removed source accepted fresh lookup/dialogue");
+                        auto established = records;
+                        for (size_t i = 0; i < 2; ++i) {
+                            established[i].characterProfile = completed[i]; established[i].savedPlayer = authority.players()[i];
+                        }
+                        auto restoredRegistry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+                            PlayerIdentityRegistry::create(*crypto, storage, established));
+                        InventoryHost restart(descriptor, manifest, *restoredRegistry, *crypto, saved);
+                        auto& restored = dynamic_cast<InventoryService&>(restart.service());
+                        require(image(restored) == saved && restored.physicalScope(id<PlayerId>(1)) != 1,
+                            "Restart reset scope/origin or regenerated NPC loot");
+                        const auto [scriptImage, inner] = readPersonalScriptCampaign(
+                            {reinterpret_cast<const char*>(saved.data()), saved.size()});
+                        auto futureOrigin = policy->restore(scriptImage);
+                        ++futureOrigin[0].encounterLife;
+                        ++futureOrigin[0].last.sourceLife;
+                        ++futureOrigin[0].npcs.front().life;
+                        const auto corrupt = sealPersonalScriptCampaign(inner, policy->encode(futureOrigin));
+                        bool rejectedOrigin = false;
+                        try { InventoryHost invalidHost(descriptor, manifest, *restoredRegistry, *crypto,
+                            std::as_bytes(std::span(corrupt))); }
+                        catch (const std::exception& error)
+                        { rejectedOrigin = std::string_view(error.what()).find("Encounter origin") != std::string_view::npos; }
+                        require(rejectedOrigin && image(restored) == saved,
+                            "Recovery accepted a future private NPC origin or installed partial state");
+                        verifyView(restored, nullptr, 5, true, false);
+                        auto duplicate = prepare(restored, 6, 1, 101, request);
+                        const auto quiet = restored.projectPersonalDialogue(authority, id<SessionId>(1),
+                            id<ServerTick>(6), id<CanonicalRevision>(6), duplicate.get());
+                        require(duplicate && quiet[0].response.empty() && quiet[0].messages.empty(),
+                            "Scoped restart replayed output or required removed speaker");
+                        require(duplicate->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                            == CanonicalDurabilityResult::Committed, "Scoped duplicate tick failed");
+                        auto bob = prepare(restored, 7, 2, 101, request);
+                        require(bool(bob), "B's opportunity was consumed by A");
+                        verifyView(restored, bob.get(), 7, true, true);
+                        std::vector<std::byte> uncertain;
+                        require(bob->commit([&](auto bytes) {
+                            uncertain.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Failed;
+                        }) == CanonicalDurabilityResult::Failed && restored.inventoryImage().empty(),
+                            "Uncertain scope write did not close authority");
+                        InventoryHost recovered(descriptor, manifest, *restoredRegistry, *crypto, uncertain);
+                        auto& both = dynamic_cast<InventoryService&>(recovered.service());
+                        require(image(both) == uncertain && both.physicalScope(id<PlayerId>(1)) != both.physicalScope(id<PlayerId>(2)),
+                            "Uncertain restart merged or reset scopes");
+                        verifyView(both, nullptr, 7, true, true);
+                        auto next = both.prepareNativePlayerTick(authority, id<ServerTick>(8), 1.f / 30, {}, &world, {}, {});
+                        require(next && next->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                            == CanonicalDurabilityResult::Committed, "Two terminal scopes could not advance independent physics");
+                        std::cout << "story encounter host: A's stock Disable preserves B's source/life/inventory/opportunity; "
+                            "scope-bound visibility/collision/combat and peer separation; rejected/uncertain writes, "
+                            "duplicate suppression and silent exact restart\n";
+                        return;
+                    }
                     const auto before = image(service);
                     const auto npcRecord = ESM::RefId::stringRefId("npc_door_actor");
                     const auto baseDisposition = source.store().get<ESM::NPC>().find(npcRecord)->mNpdt.mDisposition;

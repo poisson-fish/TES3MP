@@ -1,4 +1,5 @@
 #include "interpretercontext.hpp"
+#include "referencestate.hpp"
 
 #include <cmath>
 #include <sstream>
@@ -206,7 +207,7 @@ namespace MWScript
     InterpreterContext::InterpreterContext(MWScript::Locals* locals, ExecutionContext execution,
         const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
         MWMechanics::NpcStats* detachedPlayerStats, ScriptState* scriptState, DialogueState* dialogueState,
-        MWMechanics::NpcStats* sourceNpcStats)
+        MWMechanics::NpcStats* sourceNpcStats, ReferenceState* referenceState)
         : mLocals(locals)
         , mPlayerStats(detachedPlayerStats)
         , mSourceNpcStats(sourceNpcStats)
@@ -216,6 +217,7 @@ namespace MWScript
         , mResolver(&resolver)
         , mScriptState(scriptState)
         , mDialogueState(dialogueState)
+        , mReferenceState(referenceState)
     {
         execution.validate();
         if (dialogueState) dialogueState->validateExecution(execution);
@@ -250,6 +252,26 @@ namespace MWScript
     {
         if (mExecution)
             throw std::runtime_error("Script service lacks scoped transaction");
+    }
+
+    void InterpreterContext::disable(const MWWorld::Ptr& reference) const
+    {
+        if (mExecution)
+        {
+            if (!mReferenceState) throw std::invalid_argument("Disable lacks staged physical scope");
+            mReferenceState->disable(*mExecution, reference);
+        }
+        else MWBase::Environment::get().getWorld()->disable(reference);
+    }
+
+    bool InterpreterContext::disabled(const MWWorld::Ptr& reference) const
+    {
+        if (mExecution)
+        {
+            if (!mReferenceState) throw std::invalid_argument("GetDisabled lacks staged physical scope");
+            return mReferenceState->disabled(*mExecution, reference);
+        }
+        return !reference.getRefData().isEnabled();
     }
 
     DialogueState* InterpreterContext::getDialogueState() const
