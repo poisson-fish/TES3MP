@@ -1,4 +1,4 @@
-"""Rendered source-only Disable checks for the bounded single-NPC fixture."""
+"""Rendered bounded source Disable/return/Enable and silent recovery checks."""
 import math
 import time
 

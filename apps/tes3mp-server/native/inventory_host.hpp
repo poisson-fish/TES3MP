@@ -8,6 +8,10 @@
 
 namespace TES3MP::Native
 {
+    // V88 executes bounded stock Enable on the detached disabled source at the
+    // V87 safe-return boundary. Restoration/occupancy persist together while
+    // terminal story state stays frozen. Only the living original life admits;
+    // fresh images, unchanged capability 41 and presentation views.
     // V87 retains V86's terminal outcome as a dormant story. Grounded, living
     // online characters rejoin shared exploration beyond the NPC/peer hull
     // separation boundary during a quiescent durable tick. Fresh images only;

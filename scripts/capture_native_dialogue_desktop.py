@@ -27,6 +27,8 @@ def read_json(path, limit):
 
 
 def capture(args):
+    if args.enable_source and not (args.runtime / "native.txt").read_text().startswith("native-inventory-88\n"):
+        raise ValueError("Source Enable proof requires a fresh V88 campaign")
     args.output.mkdir(parents=True, exist_ok=False)
     settings = dict(line.split("=", 1) for line in (args.runtime / "server.cfg").read_text().splitlines()
                     if "=" in line and not line.lstrip().startswith("#"))
@@ -44,6 +46,7 @@ def capture(args):
     sequences = dict.fromkeys(paths, 0)
     processes, finished = {}, set()
     result = dict(success=False, checks=[], synthetic=True, impairment="100ms +/-25ms, 10% loss/reorder")
+    result["source_enable"] = args.enable_source
     if args.encounter:
         result["impairment"] = "direct"
     save = args.runtime / (settings["player_identity_file"] + ".world-v2")
@@ -279,11 +282,13 @@ if __name__ == "__main__":
     parser.add_argument("--recover-from", type=lambda p: Path(p).resolve())
     parser.add_argument("--encounter", action="store_true")
     parser.add_argument("--return-path", action="store_true")
+    parser.add_argument("--enable-source", action="store_true")
     parser.add_argument("--substitutions", action="store_true")
     parser.add_argument("--disposition", action="store_true")
     parser.add_argument("--speaker-name", default="", help="Expected winning speaker display name")
     parser.add_argument("--no-screenshots", action="store_true",
                         help="Validate semantic evidence without native-window capture; this remains synthetic")
     args = parser.parse_args()
+    args.return_path |= args.enable_source
     args.encounter |= args.return_path
     capture(args)

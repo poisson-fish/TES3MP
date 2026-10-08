@@ -228,7 +228,7 @@ namespace MWScript
             void execute(Interpreter::Runtime& runtime) override
             {
                 MWWorld::Ptr ptr = R()(runtime);
-                MWBase::Environment::get().getWorld()->enable(ptr);
+                static_cast<InterpreterContext&>(runtime.getContext()).enable(ptr);
             }
         };
 
@@ -1807,6 +1807,17 @@ namespace MWScript
             extensions.registerInstruction("startscript", "c", Compiler::Misc::opcodeStartScript,
                 Compiler::Misc::opcodeStartScriptExplicit);
             extensions.registerInstruction("stopscript", "c", Compiler::Misc::opcodeStopScript);
+        }
+
+        void registerEnableOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerInstruction("enable", "x", Compiler::Misc::opcodeEnable, Compiler::Misc::opcodeEnableExplicit);
+        }
+
+        void installEnableOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpEnable<ImplicitRef>>(Compiler::Misc::opcodeEnable);
+            interpreter.installSegment5<OpEnable<ExplicitRef>>(Compiler::Misc::opcodeEnableExplicit);
         }
 
         void registerDisableOpcodes(Compiler::Extensions& extensions)

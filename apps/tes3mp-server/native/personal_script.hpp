@@ -13,7 +13,7 @@ namespace TES3MP::Native
 {
     // Explicitly admitted source-free banks and scoped dialogue results share
     // character/story state. Authenticated dialogue also owns bounded source-NPC
-    // disposition; scene-changing effects remain closed. Scheduled policies suspend
+    // disposition and bounded terminal Disable/safe-return Enable. Scheduled policies suspend
     // offline characters and execute once per admitted host tick without catch-up.
     class PersonalScripts
     {
@@ -70,6 +70,7 @@ namespace TES3MP::Native
             // origin life is frozen; no inventory, loot or alive NPC is cloned.
             uint64_t encounterLife = 0;
             bool encounterReturned = false; // Dormant outcome; origin and story receipts remain frozen.
+            bool encounterEnabled = false; // Stock source Enable committed at safe return; never renews the story.
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -88,7 +89,7 @@ namespace TES3MP::Native
             std::string cellName;
         };
         PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false,
-            bool banks = false, bool intents = false, bool returns = false);
+            bool banks = false, bool intents = false, bool returns = false, bool enables = false);
         uint64_t campaign() const { return mCampaign; }
         bool scheduled() const { return mScheduled; }
         bool banks() const { return mBanks; }
@@ -96,8 +97,10 @@ namespace TES3MP::Native
         bool intents() const { return mIntents; }
         bool encounters() const { return mEncounters; }
         bool returns() const { return mReturns; }
+        bool enables() const { return mEnables; }
         static uint64_t physicalScope(const State&, uint64_t character);
-        Prepared prepareReturn(const State&, uint64_t character) const;
+        Prepared prepareReturn(const State&, uint64_t character, const MWWorld::ESMStore* = nullptr,
+            uint64_t sourceLife = 0) const;
         State initial() const;
         std::vector<char> encode(const State&) const;
         State restore(std::span<const char>) const;
@@ -130,6 +133,8 @@ namespace TES3MP::Native
         bool mIntents = false;
         bool mEncounters = false;
         bool mReturns = false;
+        bool mEnables = false;
+        std::vector<Interpreter::Program> mRestorations;
         struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
         std::vector<std::vector<ResultProgram>> mResults;
         void validate(const Instance&, size_t) const;

@@ -5594,7 +5594,8 @@ namespace TES3MP::Native::Testing
     {
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
-        const bool storyReturn = effectFamily == "story-return";
+        const bool storyEnable = effectFamily == "story-enable";
+        const bool storyReturn = storyEnable || effectFamily == "story-return";
         const bool storyEncounter = storyReturn || effectFamily == "story-encounter";
         const bool dialogueNpc = effectFamily == "dialogue-npc-state";
         const bool personalIntents = storyEncounter || dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
@@ -9295,7 +9296,8 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (storyReturn                                  ? "native-inventory-87\nmanifest "
+            out << (storyEnable                                  ? "native-inventory-88\nmanifest "
+                : storyReturn                                   ? "native-inventory-87\nmanifest "
                 : storyEncounter                                ? "native-inventory-86\nmanifest "
                 : personalIntents                              ? "native-inventory-85\nmanifest "
                     : personalDialogue                           ? "native-inventory-84\nmanifest "
@@ -9810,6 +9812,7 @@ namespace TES3MP::Native::Testing
                         if (storyReturn)
                         {
                             require(policy->returns(), "V87 return admission absent");
+                            require(policy->enables() == storyEnable, "Source Enable admission differs from descriptor");
                             const auto beforeReturn = image(restored);
                             const auto returnTick = [&](InventoryService& owner) {
                                 const auto* session = authority.findActiveSession(id<SessionId>(1));
@@ -9872,11 +9875,26 @@ namespace TES3MP::Native::Testing
                             }) == CanonicalDurabilityResult::Committed, "Return did not commit");
                             auto returnedStories = state(restored);
                             auto expected = returnedStories; expected[0] = scopes[0]; expected[0].encounterReturned = true;
+                            expected[0].encounterEnabled = storyEnable;
                             // Other banks may schedule after rejoining; the terminal bank is frozen.
                             require(policy->encode(returnedStories) == policy->encode(expected)
                                 && returnedStories[1].dialogueRevision == 0 && !returnedStories[1].encounterLife,
                                 "Return changed the completed story or unfinished opportunity");
                             verifyView(restored, nullptr, 7, false, false);
+                            if (storyEnable)
+                            {
+                                require(returnedStories[0].encounterEnabled && !returnedStories[1].encounterEnabled,
+                                    "Enable restored another character's source");
+                                const auto restoredNpc = room.projectileContact(from, to);
+                                require(restoredNpc && restoredNpc->actor == request.speaker,
+                                    "Enabled source lost its stock Bullet collision");
+                                const auto restoredCampaign = readActorCampaign(
+                                    {reinterpret_cast<const char*>(returnImage.data()), returnImage.size()});
+                                require(std::ranges::equal(afterCampaign.inventory, restoredCampaign.inventory)
+                                    && restoredCampaign.life->generation == afterCampaign.life->generation
+                                    && restoredCampaign.combat->actors[2] == afterCampaign.combat->actors[2],
+                                    "Enable renewed public inventory/resources/life");
+                            }
                             auto freshReturn = request; freshReturn.revision = 1;
                             std::unique_ptr<PreparedNativeInventory> blocked;
                             require(!restored.appendDialogueIntent(authority, proposal(1, 102, freshReturn), blocked, &world),

@@ -246,22 +246,17 @@ Quest/Topic progression. Journal/topic identities, bank writes and contextual re
 commit with gameplay; uncommitted Lua/UI callbacks stay closed. Bind bounded winning DIAL/INFO policy;
 revalidate speaker scope/life/script. Unstaged filters and physical results reject.
 
-**Authenticated dialogue (V85).** Owned banks supply lexical locals against validated
-living unscripted speakers. First topic seeds knowledge; durable revisions/receipts/choices
-bind source/life. Reserve two intents within sixteen invocations. Filters read detached
-character attributes/skills/resources through stock comparisons; result stat writes stay closed.
-Clients retain early personal baselines through body installation and reopen other-story
-choices silently. Bounded stock response substitutions use authenticated character/speaker, staged ranks/bounty,
-owned globals and shared stock cell naming before results; errors/waits discard output.
-Thresholds 0–100 share stock disposition with authenticated character/speaker snapshots;
-Source-only stock ModDisposition persists ≤64 character/story placement bases.
-Recovery validates records/lives before filtering; NPC/bank/progression/receipt/gameplay
-failures discard everything. Public combat/lives/loot stay unchanged;
-scene edits/broader NPC restoration stay closed.
-Journal text captures authenticated substitutions and
-result-time globals with authoritative calendar dates; private story views install stock entries
-silently. Journal notices share durability. Payload v2/policy changes reject old frames/images;
-clients never expand, restamp or replay saved entries.
+**Authenticated dialogue (V85).** Owned lexical banks/revisions/choices bind living
+unscripted source/life; two intents within sixteen invocations. Stock filters read
+detached character stats/resources; stat writes reject. Stock substitutions use
+authenticated speakers/characters, staged social state/globals and authoritative
+cell names; errors/waits discard output. Stock disposition thresholds 0–100 and
+source-only ModDisposition own ≤64 private placement bases. Recovery validates
+records/lives; NPC/bank/progression/receipt/gameplay failures discard everything.
+Journal text freezes result-time substitutions/globals and calendar dates; notices
+share durability. Payload v2 rejects prior frames/images. Clients preserve early
+baselines, silently install stock entries and reopen other-story choices without
+expansion, restamping or replay. V85 scene edits remain closed.
 
 **Terminal encounter (V86).** One dry interior/unscripted NPC with static geometry
 bounds all interacting dependencies. Source-only stock Disable discovers scope,
@@ -278,6 +273,12 @@ terminal bank/progression/receipts. Other banks resume; completed-source request
 reject. Grounded online living bodies return at a quiescent authoritative NPC/peer
 hull separation boundary. No teleport, public mutation or scene/loot renewal.
 Fresh images persist one-way dormancy; capability 41/views are unchanged.
+
+**Source restoration (V88).** Fixed stock Enable at V87's safe boundary restores
+only the detached living original source life. Charge ≤16 instructions and one
+call within the transaction budget. Persist Enable/occupancy atomically; freeze
+terminal story/origin/receipts. Fresh images, unchanged capability/views, silent
+recovery; general restoration remains closed.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

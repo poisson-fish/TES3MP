@@ -52,7 +52,7 @@ namespace MWScript
         const Compiler::Locals& declarations() const { return mDeclarations; }
         bool bankCapable() const { return mBank; }
         Interpreter::Program compileResult(std::string_view source, bool physical = false,
-            const ESM::RefId& reference = {}) const;
+            const ESM::RefId& reference = {}, bool restoration = false) const;
         State initial() const;
         void validate(const State& state) const;
         Invocation execute(const State& before, Interpreter::ExecutionTrace* trace = nullptr) const;

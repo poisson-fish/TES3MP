@@ -98,6 +98,7 @@ namespace MWScript
         // Only the validated invocation source may change detached NPC state.
         // Stock callers retain the ordinary NPC writer.
         void modDisposition(const MWWorld::Ptr& actor, int value) const;
+        void enable(const MWWorld::Ptr& reference) const;
         void disable(const MWWorld::Ptr& reference) const;
         bool disabled(const MWWorld::Ptr& reference) const;
         const MWWorld::ESMStore& getContent() const;

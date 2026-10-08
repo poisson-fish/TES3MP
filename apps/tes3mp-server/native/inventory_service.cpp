@@ -6217,8 +6217,10 @@ namespace TES3MP::Native
         }
         // V87 returns a dormant terminal encounter to shared exploration only
         // from a grounded, living, authenticated body clear of every shared hull.
-        // The completed bank/origin/receipts remain untouched and suspended.
+        // V88 additionally stages stock source Enable against the living original
+        // life. The completed bank/origin/receipts remain untouched and suspended.
         if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->returns() && native->combat
+            && (!mBinding.mPersonalScripts->enables() || (native->life && native->combat->actors[2][8][2] > 0))
             && !native->casting && native->projectiles.empty() && !native->target && native->relocations.empty()
             && std::ranges::none_of(native->timedEffects, [](const auto& effect) { return effect.sourceKind != 3 && effect.sourceKind != 5; })
             && std::ranges::none_of(native->combat->swings, [](const auto& swing) { return swing && swing->pending(); })
@@ -6249,8 +6251,21 @@ namespace TES3MP::Native
                         + transaction->scene->forPlayer(PlayerHullBase + 1 - i).selectedActorHorizontalRadius() + 32.);
                     if (std::hypot(x - double(q.x()) / 1024, y - double(q.y()) / 1024) < peerDistance) continue;
                 }
-                auto returned = mBinding.mPersonalScripts->prepareReturn(*personalState(transaction.get()), player.value());
-                if (returned.result.executed) native->personalScripts = std::move(returned);
+                const auto* stories = personalState(transaction.get());
+                const auto invocations = native->personalScripts ? native->personalScripts->invocations : 0;
+                if (mBinding.mPersonalScripts->enables()
+                    && invocations >= PersonalScripts::MaximumInvocationsPerTransaction) continue;
+                if (mBinding.mPersonalScripts->enables() && std::ranges::any_of(*stories, [&](const auto& story) {
+                    return story.last.character == player.value() && story.encounterLife
+                        && story.encounterLife != native->life->generation;
+                })) continue;
+                auto returned = mBinding.mPersonalScripts->prepareReturn(*stories, player.value(),
+                    &mRuntime.mStore, native->life ? native->life->generation : 0);
+                if (returned.result.executed)
+                {
+                    returned.invocations += invocations;
+                    native->personalScripts = std::move(returned);
+                }
             }
         }
         return transaction;

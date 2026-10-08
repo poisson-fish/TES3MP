@@ -40,14 +40,20 @@ Paired rendered/semantic proof: `build/m5-encounter-desktop-05/result.json` and
 rendering/collision/unfinished choices. Reconnect/restart are silent; the stock
 GUI lifetime guard closes removed replicas.
 
-**V87 return:** fresh images, unchanged capability 41/views. Online living grounded
-characters rejoin during a quiescent physics commit, beyond hull-sized NPC/peer
-gaps (minimum 256/128 units). Occupancy changes; dormant removal/origin and terminal
-bank/progression/receipts stay frozen. Other banks resume; B keeps its opportunity.
-State/atomic failure/recovery proof: `build/logs/m5-return-{state,host-08}.log`.
-Rendered return/reconnect/restart: `build/m5-return-{desktop,restart}-01/result.json`;
-A/B regroup, shared NPC visibility/collision return, A stays complete and B unfinished.
+**V87 return:** fresh images/capability 41; grounded online living bodies rejoin
+at a quiescent hull separation boundary (minimum NPC/peer gaps 256/128 units).
+Dormant removal/origin and terminal bank/progression/receipts freeze; other banks resume.
+Proof: `build/logs/m5-return-{state,host-08}.log`,
+`build/m5-return-{desktop,restart}-01/result.json`.
 
-**Next:** bounded source-NPC Enable under the
-[M5 contract](DECISIONS.md#m5-implementation-contract). Relocation/escorts/mutable
-scenes, broader restoration and unchanged Seyda Neen/TR proofs remain open. M5 stays open.
+**V88 Enable:** fresh images, unchanged views; fixed stock source-NPC Enable at
+V87's boundary against the living original life. ≤16 instructions/call within
+the 16-call transaction budget. Restoration/occupancy persist atomically; terminal
+story/origin/receipts freeze. No public loot/life renewal.
+Native: `build/logs/m5-enable-{state,host-02,stock}.log`.
+Rendered: `build/m5-enable-{desktop-02,restart-01}/result.json`;
+NPC visibility/collision return, A stays complete, B unfinished, recovery silent.
+
+**Next:** bounded stock source-NPC relocation within the admitted interior under
+the [M5 contract](DECISIONS.md#m5-implementation-contract). Escorts/mutable scenes,
+broader restoration and unchanged Seyda Neen/TR proofs remain open. M5 stays open.

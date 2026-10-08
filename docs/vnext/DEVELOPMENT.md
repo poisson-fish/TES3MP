@@ -86,7 +86,11 @@ source origins/receipts recover without public loot/life copies. V87 fresh image
 retain dormant outcomes while grounded online living characters return during a
 quiescent physics tick: >=256 units from the NPC, >=128 from shared peers, enlarged by
 resource hull radii plus 32 units. The terminal bank/source stays closed; other banks
-resume. Capability 41/views are unchanged; no Enable or broader restoration yet.
+resume. Capability 41/views are unchanged; V87 retains removal without Enable.
+V88 fresh images execute stock source-only Enable at that safe-return boundary;
+one living original life, ≤16 instructions/call within the existing 16-call tick
+budget. Restoration/occupancy persist together; terminal banks/receipts stay frozen.
+Other Enable callers and broader restoration remain closed; recovery is silent.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.

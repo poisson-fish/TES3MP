@@ -11,6 +11,7 @@
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/locals.hpp>
 #include <apps/openmw/mwscript/miscextensions.hpp>
+#include <apps/openmw/mwscript/referencestate.hpp>
 #include <apps/openmw/mwscript/statsextensions.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/cell.hpp>
@@ -1238,7 +1239,7 @@ namespace
             "isolation, waits/bounds/late rollback, duplicate semantics, durable recovery and silent stock journal installation\n";
     }
 
-    void encounter(CredentialCrypto& crypto)
+    void encounter(CredentialCrypto& crypto, bool enable = false)
     {
         Fixture fixture(crypto, {}, true);
         struct WindowReference final : MWGui::ReferenceInterface
@@ -1346,22 +1347,38 @@ namespace
         }
         PersonalScripts prior(7, priorDefinitions, crypto, true, true, true);
         rejects([&] { runtime.restore(prior.encode(prior.initial())); }, "Encounter silently migrated prior policy");
-        PersonalScripts returning(7, fixture.definitions, crypto, true, true, true, true);
+        PersonalScripts returning(7, fixture.definitions, crypto, true, true, true, true, enable);
         auto removal = run(returning, returning.initial(), 11);
-        auto returned = returning.prepareReturn(removal.state, 11);
+        if (enable)
+        {
+            rejects([&] { returning.prepareReturn(removal.state, 11); }, "Enable admitted without content/life binding");
+            for (uint64_t life : {0u, 2u, 4u})
+                rejects([&] { returning.prepareReturn(removal.state, 11, &fixture.content, life); },
+                    "Enable revived a stale or unavailable origin life");
+            require(returning.encode(removal.state) == removal.image && fixture.actor.getPtr().getRefData().isEnabled(),
+                "Rejected Enable changed private/public state");
+            PersonalScripts oldReturn(7, fixture.definitions, crypto, true, true, true, true);
+            rejects([&] { returning.restore(oldReturn.encode(oldReturn.initial())); }, "V88 silently migrated V87");
+        }
+        auto returned = returning.prepareReturn(removal.state, 11, &fixture.content, 3);
         auto expected = removal.state;
         expected[0].encounterReturned = true;
+        expected[0].encounterEnabled = enable;
         require(returned.result.executed && returned.image == returning.encode(expected)
             && PersonalScripts::physicalScope(returned.state, 11) == 1
             && PersonalScripts::physicalScope(returned.state, 22) == 1,
             "Return changed story state/origin/receipt instead of only physical occupancy");
+        if (enable)
+            require(returned.invocations == 1 && returned.result.trace.executed > 0 && returned.result.trace.executed <= 16
+                && returned.response.empty() && returned.result.presentation.empty()
+                && fixture.actor.getPtr().getRefData().isEnabled(), "Return did not execute silent bounded stock Enable");
         require(returning.encode(returning.restore(returned.image)) == returned.image,
             "Dormant encounter did not restore exactly");
         require(!returning.prepareReturn(returned.state, 11).result.executed
             && run(returning, returned.state, 11, 102).result.outcome == SharedWorldScript::Outcome::Rejected
             && run(returning, returned.state, 22).result.executed,
             "Return reopened A's removed source, repeated work or consumed B's opportunity");
-        rejects([&] { returning.restore(alice.image); }, "V87 silently migrated V86 state");
+        rejects([&] { returning.restore(alice.image); }, "Return policy silently migrated V86 state");
         rejects([&] { runtime.restore(returned.image); }, "V86 accepted returned encounter state");
         auto impossible = returning.initial(); impossible[0].encounterReturned = true;
         rejects([&] { returning.encode(impossible); }, "Return without a durable outcome was accepted");
@@ -1371,6 +1388,50 @@ namespace
         // Last instance's return flag is a canonical bounded word.
         malformed[malformed.size() - 8] = 2;
         rejects([&] { returning.restore(malformed); }, "Noncanonical return flag restored");
+        if (enable)
+        {
+            auto inconsistent = returned.state; inconsistent[0].encounterEnabled = false;
+            rejects([&] { returning.encode(inconsistent); }, "Occupancy restored without durable Enable");
+            inconsistent = removal.state; inconsistent[0].encounterEnabled = true;
+            rejects([&] { returning.encode(inconsistent); }, "Enable restored without safe occupancy");
+            // Both implicit and named stock callers dispatch through the same owned writer.
+            struct Source final : MWScript::ReferenceState
+            {
+                MWScript::ExecutionContext expected;
+                MWWorld::Ptr ptr;
+                int enabled = 0;
+                void enable(const MWScript::ExecutionContext& context, const MWWorld::Ptr& source) override
+                {
+                    require(context == expected && source == ptr, "Enable accepted foreign source/context");
+                    ++enabled; ptr.getRefData().enable();
+                }
+                void disable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
+                { throw std::invalid_argument("Only Enable admitted"); }
+                bool disabled(const MWScript::ExecutionContext&, const MWWorld::Ptr&) const override
+                { return !ptr.getRefData().isEnabled(); }
+            } source;
+            resolver.expected = removal.state[0].last; source.expected = resolver.expected;
+            MWWorld::ManualRef detached(fixture.content, id("speaker_r29")); source.ptr = detached.getPtr();
+            resolver.actor = source.ptr; resolver.player = foreignPlayer.getPtr();
+            MWScript::InterpreterContext context(nullptr, resolver.expected, fixture.content, resolver,
+                nullptr, nullptr, nullptr, nullptr, &source);
+            MWScript::InterpreterContext unowned(nullptr, resolver.expected, fixture.content, resolver);
+            Interpreter::Interpreter interpreter; Interpreter::installOpcodes(interpreter);
+            MWScript::Misc::installOpcodes(interpreter);
+            for (const auto text : {"Enable", "speaker_r29->Enable"})
+            {
+                const auto program = fixture.definitions[0].script->compileResult(text, true, id("speaker_r29"), true);
+                source.ptr.getRefData().disable(); interpreter.run(program, context, 16);
+                require(source.ptr.getRefData().isEnabled(), "Stock Enable failed to restore staged source");
+                rejects([&] { interpreter.run(program, unowned, 16); }, "Full stock installer bypassed Enable ownership");
+            }
+            rejects([&] { interpreter.run(fixture.definitions[0].script->compileResult(
+                "player->Enable", true, id("speaker_r29"), true), context, 16); }, "Enable accepted foreign player");
+            require(source.enabled == 2 && fixture.actor.getPtr().getRefData().isEnabled(),
+                "Enable repeated or mutated public source");
+            rejects([&] { fixture.definitions[0].script->compileResult("Enable", true, id("speaker_r29")); },
+                "V86/V87 admitted Enable without restoration policy");
+        }
         std::cout << "story encounter: stock Disable/GetDisabled; one source/cell, discovery rollback/retry; "
             "A removes privately, B completes independently; late failure/waits, bound receipts and silent exact restart\n";
     }
@@ -1431,7 +1492,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|npc-state|encounter|substitutions|journal");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|npc-state|encounter|enable|substitutions|journal");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
@@ -1447,6 +1508,7 @@ int main(int argc, char** argv)
             disposition(*crypto);
         else if (filter == "npc-state") disposition(*crypto, true);
         else if (filter == "encounter") encounter(*crypto);
+        else if (filter == "enable") encounter(*crypto, true);
         else if (filter == "substitutions")
             substitutions(*crypto);
         else if (filter == "journal") journal(*crypto);

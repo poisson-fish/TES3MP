@@ -11,6 +11,7 @@ namespace MWScript
     {
     public:
         virtual ~ReferenceState() = default;
+        virtual void enable(const ExecutionContext&, const MWWorld::Ptr&) = 0;
         virtual void disable(const ExecutionContext&, const MWWorld::Ptr&) = 0;
         virtual bool disabled(const ExecutionContext&, const MWWorld::Ptr&) const = 0;
     };

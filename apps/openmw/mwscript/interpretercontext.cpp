@@ -254,6 +254,16 @@ namespace MWScript
             throw std::runtime_error("Script service lacks scoped transaction");
     }
 
+    void InterpreterContext::enable(const MWWorld::Ptr& reference) const
+    {
+        if (mExecution)
+        {
+            if (!mReferenceState) throw std::invalid_argument("Enable lacks staged physical scope");
+            mReferenceState->enable(*mExecution, reference);
+        }
+        else MWBase::Environment::get().getWorld()->enable(reference);
+    }
+
     void InterpreterContext::disable(const MWWorld::Ptr& reference) const
     {
         if (mExecution)

@@ -18,9 +18,11 @@ parser.add_argument('--substitutions', action='store_true', help='Exercise priva
 parser.add_argument('--disposition', action='store_true', help='Exercise stock disposition >=55/<55 instead of stat thresholds')
 parser.add_argument('--encounter', action='store_true', help='V86 source-only Disable; base fixture must contain one dry static interior/NPC')
 parser.add_argument('--return-path', action='store_true', help='Fresh V87 encounter with bounded shared-exploration return')
+parser.add_argument('--enable-source', action='store_true', help='Fresh V88 stock source Enable at safe return')
 for name in ('base-content', 'stock-config', 'profiles', 'content', 'runtime', 'binary', 'settings'):
     parser.add_argument('--' + name, type=lambda p: Path(p).resolve(), required=True)
 args = parser.parse_args()
+args.return_path |= args.enable_source
 args.encounter |= args.return_path
 content, runtime = args.content, args.runtime
 content.mkdir()
@@ -122,7 +124,7 @@ subprocess.run([str(binary / 'tes3mp_native_bootstrap.exe'), str(config), str(ru
     *(['npc_door_actor'] * 2 if args.encounter else ['npc_hit_female', 'npc_hit_beast']), '1', '60:-100:1', str(args.settings),
     'player-physics', 'shared_script', shared, 'globals', '0'], check=True, cwd=binary)
 native = (runtime / 'native.txt').read_text().replace('native-inventory-80',
-    'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
+    'native-inventory-88' if args.enable_source else 'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
 native += 'personal_scripts 2 ' + ' '.join(stories) + '\n'
 prior = (runtime / 'manifest.txt').read_text().strip()
 manifest = hashlib.sha256((prior + native).encode()).hexdigest()
@@ -147,5 +149,5 @@ for i, role in enumerate(('Alice', 'Bob')):
     (user / 'openmw.cfg').write_text((config / 'openmw.cfg').read_text()+'\n'+(runtime / 'client-content.cfg').read_text())
 (runtime / 'players.txt').write_text('\n'.join(rows)+'\n', newline='\n')
 shutil.copyfile(args.profiles, runtime / 'profiles.json')
-print('Prepared fresh ' + ('V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
+print('Prepared fresh ' + ('V88 Enable encounter' if args.enable_source else 'V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
       + ': ' + ('disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))

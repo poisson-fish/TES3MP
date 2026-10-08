@@ -6,6 +6,7 @@
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/scriptstate.hpp>
 #include <apps/openmw/mwscript/referencestate.hpp>
+#include <apps/openmw/mwscript/miscextensions.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
@@ -15,6 +16,8 @@
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadfact.hpp>
 #include <components/interpreter/defines.hpp>
+#include <components/interpreter/interpreter.hpp>
+#include <components/interpreter/installopcodes.hpp>
 #include <limits>
 #include <source_location>
 #include <sstream>
@@ -30,6 +33,7 @@ namespace TES3MP::Native
         constexpr uint64_t DialogueMagic = 0x3454535054335354;
         constexpr uint64_t EncounterMagic = 0x3854535054335354;
         constexpr uint64_t EncounterReturnMagic = 0x3954535054335354;
+        constexpr uint64_t EncounterEnableMagic = 0x4154535054335354;
         constexpr uint64_t IntentMagic = 0x3754535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
@@ -301,13 +305,14 @@ namespace TES3MP::Native
     }
 
     PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
-        bool scheduled, bool banks, bool intents, bool returns)
+        bool scheduled, bool banks, bool intents, bool returns, bool enables)
         : mCampaign(campaign)
         , mDefinitions(std::move(definitions))
         , mScheduled(scheduled)
         , mBanks(banks)
         , mIntents(intents)
         , mReturns(returns)
+        , mEnables(enables)
     {
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         size_t scripts = 0;
@@ -318,6 +323,7 @@ namespace TES3MP::Native
         mEncounters = std::ranges::any_of(mDefinitions, [](const auto& entry) { return bool(entry.encounter); });
         require(!mEncounters || mIntents);
         require(!mReturns || mEncounters);
+        require(!mEnables || mReturns);
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
@@ -328,6 +334,8 @@ namespace TES3MP::Native
                 && entry.encounter->cell.is<ESM::StringRefId>() && !entry.encounter->cell.empty()
                 && entry.encounter->record.getRefIdString().size() <= 128
                 && entry.encounter->cell.getRefIdString().size() <= 128));
+            if (mEnables)
+                mRestorations.push_back(entry.script->compileResult("Enable", true, entry.encounter->record, true));
             require(entry.members.size() < MaximumScriptsPerBank
                 && (mBanks || (entry.members.empty() && entry.running))
                 && entry.script->bankCapable() == mBanks);
@@ -394,6 +402,11 @@ namespace TES3MP::Native
         if (mEncounters)
         {
             constexpr std::string_view limits = "terminal-source-disable-1;one-npc;one-cell;static-geometry;12-banks;4-calls;no-summons";
+            binding.insert(binding.end(), limits.begin(), limits.end());
+        }
+        if (mEnables)
+        {
+            constexpr std::string_view limits = "safe-return-source-enable-1;frozen-story;living-origin-life;16-instructions";
             binding.insert(binding.end(), limits.begin(), limits.end());
         }
         if (mDialogues)
@@ -469,6 +482,8 @@ namespace TES3MP::Native
         require(!state.encounterLife || (mEncounters && last.sourceReference == expected.encounter->reference
             && last.sourceLife == state.encounterLife && state.choices.empty()));
         require(!state.encounterReturned || (mReturns && state.encounterLife));
+        require(!state.encounterEnabled || (mEnables && state.encounterLife && state.encounterReturned));
+        require(!mEnables || state.encounterEnabled == state.encounterReturned);
         if (state.encounterLife)
             require(std::ranges::any_of(state.npcs, [&](const auto& npc) {
                 return npc.reference == expected.encounter->reference && npc.life == state.encounterLife
@@ -564,7 +579,8 @@ namespace TES3MP::Native
             }));
         std::vector<char> bytes;
         word(bytes,
-            mReturns         ? EncounterReturnMagic
+            mEnables         ? EncounterEnableMagic
+                : mReturns   ? EncounterReturnMagic
                 : mEncounters ? EncounterMagic
                 : mIntents   ? IntentMagic
                 : mDialogues ? DialogueMagic
@@ -597,6 +613,7 @@ namespace TES3MP::Native
                 npcs(bytes, state[i]);
                 if (mEncounters) word(bytes, state[i].encounterLife);
                 if (mReturns) word(bytes, state[i].encounterReturned);
+                if (mEnables) word(bytes, state[i].encounterEnabled);
             }
         }
         require(bytes.size() <= MaximumImageBytes);
@@ -608,7 +625,8 @@ namespace TES3MP::Native
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
         require(input.word()
-            == (mReturns         ? EncounterReturnMagic
+            == (mEnables         ? EncounterEnableMagic
+                : mReturns      ? EncounterReturnMagic
                 : mEncounters    ? EncounterMagic
                 : mIntents   ? IntentMagic
                     : mDialogues ? DialogueMagic
@@ -642,6 +660,7 @@ namespace TES3MP::Native
                 npcs(preflight, nullptr);
                 if (mEncounters) preflight.take(8);
                 if (mReturns) require(preflight.word() <= 1);
+                if (mEnables) require(preflight.word() <= 1);
             }
         }
         require(preflight.bytes.empty());
@@ -669,6 +688,7 @@ namespace TES3MP::Native
                 npcs(input, &entry);
                 if (mEncounters) entry.encounterLife = input.word();
                 if (mReturns) { const auto returned = input.word(); require(returned <= 1); entry.encounterReturned = returned; }
+                if (mEnables) { const auto enabled = input.word(); require(enabled <= 1); entry.encounterEnabled = enabled; }
             }
             validate(entry, i); state.push_back(std::move(entry));
         }
@@ -778,7 +798,8 @@ namespace TES3MP::Native
         return 1;
     }
 
-    PersonalScripts::Prepared PersonalScripts::prepareReturn(const State& before, uint64_t character) const
+    PersonalScripts::Prepared PersonalScripts::prepareReturn(const State& before, uint64_t character,
+        const MWWorld::ESMStore* content, uint64_t sourceLife) const
     {
         Prepared prepared;
         require(mReturns && character);
@@ -789,8 +810,47 @@ namespace TES3MP::Native
         require(found != before.end());
         prepared.result.outcome = SharedWorldScript::Outcome::Committed;
         if (found->encounterReturned) return prepared;
+        const auto index = size_t(found - before.begin());
+        if (mEnables)
+        {
+            require(content && sourceLife == found->encounterLife);
+            const auto& binding = *mDefinitions[index].encounter;
+            const auto* npc = content->get<ESM::NPC>().find(binding.record);
+            require(npc->mScript.empty());
+            MWWorld::ManualRef restored(*content, binding.record);
+            restored.getPtr().getRefData().disable();
+            struct Restoration final : MWScript::ReferenceState, MWScript::ReferenceResolver
+            {
+                MWScript::ExecutionContext expected;
+                MWWorld::Ptr source;
+                void enable(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
+                {
+                    require(execution == expected && ptr.hasLiveReference() && ptr == source
+                        && ptr.getType() == ESM::NPC::sRecordId);
+                    source.getRefData().enable();
+                }
+                void disable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
+                { throw std::invalid_argument("Safe return admits only source Enable"); }
+                bool disabled(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
+                { require(execution == expected && ptr == source); return !source.getRefData().isEnabled(); }
+                MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool activeOnly) const override
+                {
+                    require(execution == expected && (id.empty() || id == source.getCellRef().getRefId()));
+                    return activeOnly && !source.getRefData().isEnabled() ? MWWorld::Ptr{} : source;
+                }
+            } scene;
+            scene.expected = found->last; scene.source = restored.getPtr();
+            MWScript::InterpreterContext context(nullptr, scene.expected, *content, scene,
+                nullptr, nullptr, nullptr, nullptr, &scene);
+            Interpreter::Interpreter interpreter; Interpreter::installOpcodes(interpreter);
+            MWScript::Misc::installEnableOpcodes(interpreter);
+            interpreter.run(mRestorations[index], context, 16, &prepared.result.trace);
+            require(restored.getPtr().getRefData().isEnabled());
+            prepared.invocations = 1;
+        }
         prepared.state = before;
-        prepared.state[size_t(found - before.begin())].encounterReturned = true;
+        prepared.state[index].encounterReturned = true;
+        prepared.state[index].encounterEnabled = mEnables;
         prepared.image = encode(prepared.state);
         prepared.result.executed = true;
         return prepared;
@@ -836,6 +896,8 @@ namespace TES3MP::Native
                 MWScript::ExecutionContext expected;
                 MWWorld::Ptr source;
                 bool prepared = false, removed = false;
+                void enable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
+                { throw std::invalid_argument("Enable requires safe-return restoration admission"); }
                 void validate(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const
                 {
                     require(execution == expected && ptr.hasLiveReference() && ptr == source

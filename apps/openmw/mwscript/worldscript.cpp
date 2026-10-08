@@ -324,7 +324,8 @@ namespace MWScript
         return result;
     }
 
-    Interpreter::Program WorldScript::compileResult(std::string_view text, bool physical, const ESM::RefId& reference) const
+    Interpreter::Program WorldScript::compileResult(std::string_view text, bool physical, const ESM::RefId& reference,
+        bool restoration) const
     {
         require(mBank && text.size() <= MaximumSourceBytes && text.find('\0') == std::string_view::npos,
             "Dialogue result source exceeds bounds or lacks bank");
@@ -334,6 +335,8 @@ namespace MWScript
         Compiler::Dialogue::registerExtensions(extensions);
         Stats::registerDispositionResultOpcode(extensions);
         if (physical) Misc::registerDisableOpcodes(extensions);
+        require(!restoration || (physical && !reference.empty()), "Restoration lacks bounded source");
+        if (restoration) Misc::registerEnableOpcodes(extensions);
         context.setExtensions(&extensions);
         std::string source = "begin " + std::string(mId.getRefIdString()) + "\n";
         for (const auto kind : {'s', 'l', 'f'})
