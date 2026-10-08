@@ -22,8 +22,8 @@ Resume retains inactivity/expiry/generation/replay bounds (`build/logs/resume-in
 (`build/logs/respawn-same-cell-{client-build,locomotion}.log`). Operator accepted
 revival/Seyda Neen safe-point respawn, 2026-10-04; unarmed confirmed.
 
-**Exterior trace:** `build/logs/seyda-six-actors.log`: six actors/nine interiors.
-Single-cell preview disables travel; scripts/scripted inventory await M5.
+**Exterior trace:** `build/logs/seyda-six-actors.log`: six actors/nine interiors;
+scripts/scripted inventory await M5.
 
 **M4 combat/body:** melee accepted 2026-10-05; Argonian recoil,
 fatigue/HUD and crab-contact damage passed (`build/logs/melee-recoil-{baseline,fixed}.log`).
@@ -99,21 +99,16 @@ exact/uncertain recovery; V81/V82 preserved; incompatible policies reject.
 Trusted-source isolation/rollback/recovery/stock/host remain synthetic:
 `build/logs/m5-dialogue-{isolation,rollback,recovery,stock,host-05}.log`.
 
-**V85 authenticated dialogue:** capability 40 binds character/story, living unscripted speaker,
-reach/sight/life, revision and offered choice. ≤14 mirrored scripts reserve two intents/tick;
-one/character. Banks/progression/choices/receipts commit with gameplay. Private literal
-responses/messages and journal indices/finished flags present after durability; client results,
-greetings, services and restock writes suppress. First topic seeds story knowledge.
-Reconnect restores choices/progression silently; early baselines survive character installation.
-Other-story pending choices reopen without resubmitting topics. Synthetic
-`build/logs/m5-dialogue-intents-{state,host,client,adapter,ingress,delivery}.log`:
-two-client/story isolation, duplicates/conflicts, defer/rollback/retry/stale,
-exact/uncertain restart and stock client presentation without Journal/World/Lua services.
-`build/m5-dialogue-desktop-{06,restart-02}/result.json`: two rendered clients,
-private responses/choices, concurrent divergent progression, isolated stories,
-eight-second absences, exact restart/pending-choice continuation and no transient replay;
-100ms ±25ms/10% loss/reorder. Unobscured window screenshots inspected; clean client exits.
-Semantic input only; physical OS acceptance remains open.
+**V85 authenticated dialogue:** capability 40 binds character/story, living unscripted
+speaker, reach/sight/life, revision and offered choice. ≤14 mirrored scripts;
+two intents/tick, one/character. Banks/progression/choices/receipts join gameplay;
+private output follows durability. Client results/greetings/services/restock suppress.
+First topic seeds knowledge; early baselines and other-story choices restore silently.
+Synthetic isolation/duplicates/defer/rollback/recovery/presentation:
+`build/logs/m5-dialogue-intents-{state,host,client,adapter,ingress,delivery}.log`.
+Semantic paired desktop progression/absence/restart/no-replay:
+`build/m5-dialogue-desktop-{06,restart-02}/result.json`;
+100ms ±25ms/10% loss/reorder, screenshots inspected, clean exits.
 
 **Staged dialogue stats:** stock 8 modified attributes/27 skills, current
 health/magicka/fatigue and health percentage read authenticated character snapshots.
@@ -121,6 +116,19 @@ Result stat writes and unstaged filters remain closed. Isolation, waits, rollbac
 comparison/truncation and silent recovery: `build/logs/m5-dialogue-player-stats.log`;
 early-baseline installation: `build/logs/m5-dialogue-installation.log`.
 
-**Next:** further staged dialogue services: substitutions, disposition thresholds,
+**Bounded slice accepted, Codex/owner, 2026-10-07:** [fixture](../../scripts/prepare_native_dialogue_fixture.py):
+Strength <40/≥40, Destruction <20/≥20. Synthetic progression/recovery:
+`build/m5-dialogue-stats-{desktop-02,restart-01}/result.json` (no screenshots).
+`build/m5-dialogue-ui-01/agent-signoff.json`: private stat branches/choices,
+reopened choices, north 20/30. Owner confirmed silent completed restart:
+north 20/30, south 20/20; no choices/replayed notices.
+`build/logs/m5-dialogue-operator-restart-01.log`.
+Pending-choice restart continuation remains synthetic; finished-topic clicks
+show no other-story summary. Screenshots inspected; scripted character setup,
+custom mouse bindings.
+Stats regression: `build/logs/m5-dialogue-player-stats-ui-signoff.log`.
+
+**Next:** substitutions, disposition thresholds,
 journal text/timestamps ([M5 contract](DECISIONS.md#m5-implementation-contract)).
-Physical results/NPC restoration remain later slices.
+Physical results/NPC restoration, scoped recovery and unchanged Seyda Neen/TR
+proofs remain; M5 stays open.

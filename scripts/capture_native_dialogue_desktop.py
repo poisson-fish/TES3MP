@@ -105,6 +105,8 @@ def capture(args):
                 and v["quests"][0]["finished"] == (index in (20, 30)))
 
         def screenshot(role, label):
+            if args.no_screenshots:
+                return
             destination = args.output / f"{role}-{label}.png"
             subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                 str(Path(__file__).with_name("capture_desktop_window.ps1")), "-ProcessId", str(processes[role].pid),
@@ -213,11 +215,16 @@ def capture(args):
                     if len(transients) != expected or len({v["revision"] for v in transients}) != expected:
                         raise RuntimeError("Duplicate/missing response occurrence")
                     for v in transients:
-                        response = (f'The {direction} passage awaits.' if v["revision"] == 1 else
+                        stat, threshold = ("Strength", 40) if story == 91 else ("Destruction", 20)
+                        response = (f'Your {stat} is {"below" if role == "Alice" else "at least"} {threshold}. '
+                                    f'The {direction} passage awaits.' if v["revision"] == 1 else
                                     f'Your {direction} passage is {"taken" if role == "Alice" else "declined"}.')
                         messages = [f'Private {direction} notice'] if v["revision"] == 1 else []
                         if v["response"] != response or v["messages"] != messages:
                             raise RuntimeError("Private response/choice branch differs")
+            if not previous:
+                result["checks"].append(dict(stat_filters=True, strength_threshold=40, destruction_threshold=20,
+                                             Alice="below both", Bob="at least both"))
             result["final_views"] = {r: {s: view(r, s) for s in (91, 92)} for r in paths}
             for role in paths:
                 finished.add(role)
@@ -253,4 +260,6 @@ if __name__ == "__main__":
         parser.add_argument("--" + name, type=lambda p: Path(p).resolve(), required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--recover-from", type=lambda p: Path(p).resolve())
+    parser.add_argument("--no-screenshots", action="store_true",
+                        help="Validate semantic evidence without native-window capture; this remains synthetic")
     capture(parser.parse_args())
