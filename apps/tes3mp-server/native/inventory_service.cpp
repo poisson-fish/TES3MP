@@ -5334,6 +5334,14 @@ namespace TES3MP::Native
         auto stats = loadCombatStats(mRuntime.mStore, mCombat->actors[self], mTimedEffects, self,
             mBinding.mCharacterCreation);
         stats.setBounty(mCombat->players[self].bounty);
+        stats.setDrawState(static_cast<MWMechanics::DrawState>(mCombat->players[self].drawState));
+        for (const auto& condition : mCombat->conditions)
+            if (condition.actor == self)
+            {
+                const auto* spell = spellBySource(mRuntime.mStore, condition.source);
+                if (!spell) return reject("character condition content");
+                stats.getSpells().add(spell, false);
+            }
         for (const auto& faction : mCombat->players[self].factions)
         {
             stats.joinFaction(faction.id);
@@ -5347,9 +5355,16 @@ namespace TES3MP::Native
         std::optional<std::string_view> customClassName;
         if (const auto* custom = std::get_if<CustomClassDefinition>(&*mBinding.mCharacters[self]->characterClass()))
             customClassName = custom->name;
+        auto speakerStats = loadCombatStats(mRuntime.mStore, mCombat->actors[npc], mTimedEffects, npc);
+        // Disposition result writes and NPC crime reactions are not admitted yet;
+        // the authored base and committed source-specific Charm are canonical.
+        speakerStats.setBaseDisposition(ptr.get<ESM::NPC>()->mBase->mNpdt.mDisposition);
+        speakerStats.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Charm),
+            MWMechanics::EffectParam(committedDisposition(mRuntime.mStore,
+                ptr.getCellRef().getRefId(), mTimedEffects, npc).charm));
         auto prepared = mBinding.mPersonalScripts->prepareIntent(prior->state, session->playerId().value(),
-            proposal.commandId().value(), request, 0, cell.getCellName(mRuntime.mStore), mRuntime.mStore, resolver,
-            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats, customClassName);
+            proposal.commandId().value(), request, cell.getCellName(mRuntime.mStore), mRuntime.mStore, resolver,
+            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats, customClassName, &speakerStats);
         if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
             return reject(prepared.result.diagnostic.c_str());
         if (prepared.result.executed)

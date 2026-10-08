@@ -4,6 +4,7 @@
 #include <apps/openmw/mwdialogue/dialoguemanagerimp.hpp>
 #include <apps/openmw/mwdialogue/journalimp.hpp>
 #include <apps/openmw/mwdialogue/selectwrapper.hpp>
+#include <apps/openmw/mwmechanics/disposition.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwscript/dialogueextensions.hpp>
 #include <apps/openmw/mwscript/interpretercontext.hpp>
@@ -286,7 +287,7 @@ namespace
             execution.sourceReference = 41;
             execution.sourceLife = 3;
             resolver.expected = execution;
-            return runtime.prepareIntent(state, character, command, request, 0, "", fixture.content, resolver);
+            return runtime.prepareIntent(state, character, command, request, "", fixture.content, resolver);
         };
         DialogueIntent request{ 31, 41, 3, 0, "passage_k61", -1 };
         auto prepared = run(11, 101, request);
@@ -350,7 +351,7 @@ namespace
         resolver.expected.sourceReference = 41;
         resolver.expected.sourceLife = 3;
         resolver.actor = bad.actor.getPtr();
-        auto failed = badRuntime.prepareIntent(badState, 11, 101, request, 0, "", bad.content, resolver);
+        auto failed = badRuntime.prepareIntent(badState, 11, 101, request, "", bad.content, resolver);
         require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.image.empty()
                 && failed.response.empty() && failed.result.presentation.empty(),
             "Late rejected result leaked presentation/progression");
@@ -404,7 +405,7 @@ namespace
             resolver.expected.causalEvent = instance.eventCursor + 1;
             resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
             auto intent = request; intent.story = story;
-            return runtime.prepareIntent(state, character, 101, intent, 0, "", fixture.content, resolver,
+            return runtime.prepareIntent(state, character, 101, intent, "", fixture.content, resolver,
                 PersonalScripts::MaximumInvocationsPerTransaction, snapshot);
         };
         std::vector<C::Function> functions{C::Function_PcStrength, C::Function_PcIntelligence,
@@ -503,6 +504,174 @@ namespace
                      "character/story isolation, missing-player defer, read-only result boundary and silent recovery\n";
     }
 
+    void disposition(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        ESM::Attribute attribute; attribute.mId = ESM::Attribute::Personality;
+        fixture.content.insertStatic(attribute);
+        for (const auto& [name, number] : std::vector<std::pair<const char*, float>>{
+            {"fDispRaceMod", 10}, {"fDispPersonalityMult", .5f}, {"fDispPersonalityBase", 50},
+            {"fDispFactionRankMult", .2f}, {"fDispFactionRankBase", 1}, {"fDispFactionMod", .5f},
+            {"fDispCrimeMod", .1f}, {"fDispDiseaseMod", -20}, {"fDispWeaponDrawn", -10}})
+        {
+            ESM::GameSetting setting; setting.blank(); setting.mId = id(name);
+            setting.mValue.setType(ESM::VT_Float); setting.mValue.setFloat(number);
+            fixture.content.insertStatic(setting);
+        }
+        for (const char* name : {"guild_q84", "a_guild", "b_guild"})
+        {
+            ESM::Faction faction; faction.blank(); faction.mId = id(name);
+            for (int i = 0; i < 10; ++i) faction.mRanks[i] = "Rank " + std::to_string(i);
+            faction.mReactions = {{id("guild_q84"), 10}, {id("a_guild"), 8}, {id("b_guild"), -4}};
+            fixture.content.insertStatic(faction);
+        }
+        for (const auto& [name, race] : std::vector<std::pair<const char*, const char*>>{
+            {"reader_a", "race_a"}, {"reader_b", "race_b"}, {"speaker_a", "race_a"}, {"speaker_b", "race_b"}})
+        {
+            ESM::NPC npc; npc.blank(); npc.mId = id(name); npc.mRace = id(race);
+            npc.mFaction = id("guild_q84"); fixture.content.insertStatic(npc);
+        }
+        MWWorld::ManualRef a(fixture.content, id("reader_a")), b(fixture.content, id("reader_b"));
+        MWWorld::ManualRef sa(fixture.content, id("speaker_a")), sb(fixture.content, id("speaker_b"));
+        MWMechanics::NpcStats statsA(fixture.content), statsB(fixture.content), speaker(fixture.content);
+        const auto personality = [](auto& stats, float value) {
+            MWMechanics::AttributeValue attribute; attribute.setBase(value); attribute.setModifier(.75f);
+            stats.setAttribute(ESM::Attribute::Personality, attribute, 0.f);
+        };
+        personality(statsA, 30); personality(statsB, 70);
+        speaker.setBaseDisposition(50); speaker.setCrimeDispositionModifier(3);
+        const auto calculation = [&](const auto& playerStats, const auto& speakerStats, bool clamp = true) {
+            return MWMechanics::derivedDisposition(*sa.getPtr().get<ESM::NPC>()->mBase, speakerStats,
+                *a.getPtr().get<ESM::NPC>()->mBase, playerStats, fixture.content.get<ESM::GameSetting>(),
+                [&](const ESM::RefId& from, const ESM::RefId& to) {
+                    const auto& reactions = fixture.content.get<ESM::Faction>().find(from)->mReactions;
+                    const auto found = reactions.find(to); return found == reactions.end() ? 0 : found->second;
+                }, clamp);
+        };
+        require(calculation(statsA, speaker) == 53, "Stock base/crime/race/modified-personality truncation changed");
+        auto ranked = statsA; ranked.joinFaction(id("guild_q84"));
+        ranked.setFactionRank(id("guild_q84"), 2, fixture.content);
+        require(calculation(ranked, speaker) == 60, "Stock own-faction reaction/rank changed");
+        ranked.expell(id("guild_q84"), false);
+        require(calculation(ranked, speaker) == 53, "Expelled own faction contributed disposition");
+        auto foreign = statsA;
+        foreign.joinFaction(id("a_guild")); foreign.joinFaction(id("b_guild"));
+        require(calculation(foreign, speaker) == 51, "Stock least favorable faction reaction changed");
+        foreign.expell(id("a_guild"), false); foreign.expell(id("b_guild"), false);
+        require(calculation(foreign, speaker) == 53, "Expelled foreign faction contributed disposition");
+        auto bounty = statsA; bounty.setBounty(100);
+        require(calculation(bounty, speaker) == 43, "Stock bounty penalty changed");
+        auto drawn = statsA; drawn.setDrawState(MWMechanics::DrawState::Weapon);
+        require(calculation(drawn, speaker) == 43, "Stock weapon penalty changed");
+        drawn.setDrawState(MWMechanics::DrawState::Spell);
+        require(calculation(drawn, speaker) == 53, "Spell draw incorrectly applied weapon penalty");
+        for (auto type : {ESM::Spell::ST_Disease, ESM::Spell::ST_Blight})
+        {
+            ESM::Spell disease; disease.blank(); disease.mId = id("disease_" + std::to_string(type));
+            disease.mData.mType = type; auto diseased = statsA; diseased.getSpells().add(&disease, false);
+            require(calculation(diseased, speaker) == 33, "Stock disease penalty changed");
+        }
+        auto charmed = speaker;
+        charmed.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Charm), MWMechanics::EffectParam(6.75f));
+        require(calculation(statsA, charmed) == 60, "Stock Charm addition/truncation changed");
+        auto extreme = speaker; extreme.setBaseDisposition(500);
+        require(calculation(statsA, extreme) == 100 && calculation(statsA, extreme, false) == 503,
+            "Stock upper clamp/unclamped result changed");
+        extreme.setBaseDisposition(-500);
+        require(calculation(statsA, extreme) == 0 && calculation(statsA, extreme, false) == -496,
+            "Stock lower clamp/truncation changed");
+
+        for (auto& definition : fixture.definitions)
+        {
+            auto& topic = definition.dialogues[1]; auto& high = topic.mInfo.front();
+            high.mActor = {}; high.mData.mDisposition = 60; high.mResponse = "High disposition.";
+            auto low = high; low.mId = id("low_disposition"); low.mData.mDisposition = 0;
+            low.mResponse = "Low disposition."; topic.mInfo.insert(std::next(topic.mInfo.begin()), low);
+            topic.mInfo.back().mActor = {};
+        }
+        PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true);
+        auto state = runtime.initial(); const auto before = runtime.encode(state);
+        Resolver resolver; resolver.actor = sa.getPtr();
+        const auto run = [&](const PersonalScripts& policy, const PersonalScripts::State& input,
+            uint64_t character, uint64_t story, const MWMechanics::NpcStats* playerStats,
+            const MWMechanics::NpcStats* speakerStats, uint64_t command = 101, int choice = -1, uint64_t revision = 0) {
+            const auto found = std::ranges::find_if(input, [&](const auto& value) {
+                return value.last.character == character && value.last.story == story; });
+            resolver.player = character == 11 ? a.getPtr() : b.getPtr();
+            resolver.expected = found->last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = found->eventCursor + 1;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
+            return policy.prepareIntent(input, character, command, {story, 41, 3, revision, "passage_k61", choice},
+                "", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction,
+                playerStats, {}, speakerStats);
+        };
+        const auto low = run(runtime, state, 11, 31, &statsA, &speaker);
+        const auto high = run(runtime, state, 22, 31, &statsB, &speaker);
+        require(low.result.executed && high.result.executed && low.response == "Low disposition."
+            && high.response == "High disposition." && low.state[1].dialogueRevision == 0
+            && low.state[2].dialogueRevision == 0 && high.state[0].dialogueRevision == 0
+            && runtime.encode(state) == before, "Private disposition branches crossed character/story or mutated before commit");
+        require(run(runtime, state, 11, 31, &statsA, &charmed).response == "High disposition.",
+            "Committed speaker Charm did not change the exact threshold branch");
+        require(run(runtime, state, 22, 31, &drawn, &speaker).response == "Low disposition.",
+            "Authenticated race was replaced by another character's race");
+        resolver.actor = sb.getPtr();
+        require(run(runtime, state, 11, 31, &statsA, &charmed).response == "Low disposition.",
+            "Selected speaker race was replaced by a cached speaker");
+        resolver.actor = sa.getPtr();
+        for (const auto [playerSnapshot, speakerSnapshot] : {
+            std::pair<const MWMechanics::NpcStats*, const MWMechanics::NpcStats*>{nullptr, &speaker}, {&statsA, nullptr}})
+        {
+            const auto failed = run(runtime, state, 11, 31, playerSnapshot, speakerSnapshot);
+            require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty()
+                && failed.response.empty() && failed.result.presentation.empty(), "Unstaged disposition fell back to stock context");
+        }
+        for (bool missingPlayer : {false, true})
+        {
+            resolver.wait = !missingPlayer; resolver.waitPlayer = missingPlayer;
+            const auto failed = run(runtime, state, 11, 31, &statsA, &speaker);
+            require(failed.result.outcome == SharedWorldScript::Outcome::Deferred && failed.state.empty()
+                && failed.image.empty() && failed.response.empty() && failed.result.presentation.empty(),
+                "Unavailable disposition dependency leaked a branch/result");
+        }
+        resolver.wait = resolver.waitPlayer = false;
+        require(run(runtime, state, 11, 31, &statsA, &speaker).image == low.image, "Disposition retry changed the candidate");
+        auto late = fixture.definitions;
+        for (auto& definition : late)
+            for (auto& info : definition.dialogues[1].mInfo) info.mResultScript += "\nGoodbye";
+        PersonalScripts failing(7, late, crypto, true, true, true);
+        for (const auto character : {11u, 22u})
+        {
+            const auto failed = run(failing, failing.initial(), character, 31, character == 11 ? &statsA : &statsB, &speaker);
+            require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty()
+                && failed.image.empty() && failed.response.empty() && failed.result.presentation.empty(),
+                "Late disposition result failure leaked bank/progression/choice/private output");
+        }
+        state = runtime.restore(low.image);
+        const auto duplicate = run(runtime, state, 11, 31, &statsA, &speaker);
+        require(duplicate.result.outcome == SharedWorldScript::Outcome::Committed && !duplicate.result.executed
+            && duplicate.response.empty() && duplicate.result.presentation.empty() && state[0].choices.size() == 2,
+            "Restart lost choices or replayed the private disposition branch");
+        require(run(runtime, state, 11, 32, &statsA, &speaker).result.executed, "Disposition consumed another story");
+        const auto completed = run(runtime, state, 11, 31, &statsA, &speaker, 102, 7, 1);
+        require(completed.result.executed && completed.state[0].dialogue.quests.front().mFinished,
+            "Recovered disposition choice could not continue");
+        state = runtime.restore(completed.image);
+        const auto finished = run(runtime, state, 11, 31, &statsA, &speaker, 102, 7, 1);
+        require(!finished.result.executed && finished.response.empty() && state[0].choices.empty(),
+            "Finished disposition recovery replayed output/choices");
+        for (int threshold : {-1, 101})
+        {
+            auto invalid = fixture.definitions; invalid[0].dialogues[1].mInfo.front().mData.mDisposition = threshold;
+            rejects([&] { PersonalScripts rejected(7, invalid, crypto, true, true, true); }, "Unbounded threshold admitted");
+        }
+        auto changed = fixture.definitions; changed[0].dialogues[1].mInfo.front().mData.mDisposition = 61;
+        PersonalScripts incompatible(7, changed, crypto, true, true, true);
+        rejects([&] { incompatible.restore(low.image); }, "Changed threshold policy restored incompatible progress");
+        std::cout << "dialogue disposition: shared stock terms/truncation/clamps, authenticated character/speaker; "
+                     "private threshold branches, waits, rollback/retry, policy binding and silent pending/finished recovery\n";
+    }
+
     void substitutions(CredentialCrypto& crypto)
     {
         const auto global = [](const char* name, ESM::VarType type, float number) {
@@ -560,7 +729,7 @@ namespace
             resolver.expected.causalEvent = found->eventCursor + 1;
             resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
             return policy.prepareIntent(input, character, command, {story, 41, 3, 0, "passage_k61", -1},
-                0, "Context Cell", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction, stats, customClass);
+                "Context Cell", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction, stats, customClass);
         };
         MWScript::InterpreterContext stock(nullptr, sa.getPtr(), a.getPtr(), fixture.content, &statsA);
         const auto expected = Interpreter::fixDefinesDialog(builtins, stock) + "|Context Cell|7|0|-3|1.5|%unknown|100%";
@@ -821,7 +990,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|substitutions");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|substitutions");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
@@ -833,6 +1002,8 @@ int main(int argc, char** argv)
             client(*crypto);
         else if (filter == "player-stats")
             playerStats(*crypto);
+        else if (filter == "disposition")
+            disposition(*crypto);
         else if (filter == "substitutions")
             substitutions(*crypto);
         else if (filter == "stock") stock(*crypto);

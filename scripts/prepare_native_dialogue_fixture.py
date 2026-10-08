@@ -1,4 +1,4 @@
-"""Prepare a fresh bounded V85 desktop dialogue campaign with stock stat filters.
+"""Prepare a fresh bounded V85 desktop dialogue campaign with stock dialogue filters.
 
 The supplied peaceful NPC fixture, stock config and two profiles are local inputs;
 content, credentials and campaigns stay under ignored build/.
@@ -15,6 +15,7 @@ from run_phase12_movement_capture import free_port
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--substitutions', action='store_true', help='Exercise private character/speaker/cell response expansion')
+parser.add_argument('--disposition', action='store_true', help='Exercise stock disposition >=55/<55 instead of stat thresholds')
 for name in ('base-content', 'stock-config', 'profiles', 'content', 'runtime', 'binary', 'settings'):
     parser.add_argument('--' + name, type=lambda p: Path(p).resolve(), required=True)
 args = parser.parse_args()
@@ -32,8 +33,8 @@ def string(tag, text):
 def script(name, source):
     return record(b'SCPT', sub(b'SCHD', name.encode().ljust(32, b'\0') + struct.pack('<IIIII', 0, 0, 0, 0, 0))
         + string(b'SCTX', source))
-def info(name, previous, following, kind, text, result='', selects=(), status=None):
-    data = struct.pack('<iibbbb', kind, 0, -1, -1, -1, 0)
+def info(name, previous, following, kind, text, result='', selects=(), status=None, disposition=0):
+    data = struct.pack('<iibbbb', kind, disposition, -1, -1, -1, 0)
     payload = string(b'INAM', name) + string(b'PNAM', previous) + string(b'NNAM', following)
     payload += sub(b'DATA', data) + string(b'NAME', text)
     if kind == 0:
@@ -57,10 +58,13 @@ for number, direction in ((91, 'north'), (92, 'south')):
     # Native SCVR function 10 = PC Strength; 21 = PC Destruction.
     stat, function, threshold = ('Strength', 10, 40) if number == 91 else ('Destruction', 21, 20)
     for i, (comparison, description) in enumerate((('3', 'at least'), ('4', 'below'))):
+        if args.disposition:
+            stat, threshold = 'disposition', 55
         blob += info(names[i], names[i-1] if i else '', names[i+1], 0,
             text_prefix + f'Your {stat} is {description} {threshold}. The {direction} passage awaits.',
             f'set calls to calls + 1\nJournal {quest} 10\nMessageBox "Private {direction} notice"\nChoice "Take {direction}" 7 "Wait {direction}" 9',
-            [('4JX0' + quest, 0), (f'1{function:02d}{comparison}', threshold)])
+            [('4JX0' + quest, 0)] + ([] if args.disposition else [(f'1{function:02d}{comparison}', threshold)]),
+            disposition=55 if args.disposition and i == 0 else 0)
     for i, (choice, stage, outcome) in enumerate(((7, 20, 'taken'), (9, 30, 'declined')), 2):
         blob += info(names[i], names[i-1], names[i+1] if i+1 < len(names) else '', 0,
             text_prefix + f'Your {direction} passage is {outcome}.', f'set calls to calls + 1\nJournal {quest} {stage}',
@@ -107,4 +111,4 @@ for i, role in enumerate(('Alice', 'Bob')):
     (user / 'openmw.cfg').write_text((config / 'openmw.cfg').read_text()+'\n'+(runtime / 'client-content.cfg').read_text())
 (runtime / 'players.txt').write_text('\n'.join(rows)+'\n', newline='\n')
 shutil.copyfile(args.profiles, runtime / 'profiles.json')
-print('Prepared fresh V85 dialogue fixture: Strength >=40/<40; Destruction >=20/<20')
+print('Prepared fresh V85 dialogue fixture: ' + ('disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))

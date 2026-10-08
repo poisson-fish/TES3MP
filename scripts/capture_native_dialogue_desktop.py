@@ -216,7 +216,10 @@ def capture(args):
                         raise RuntimeError("Duplicate/missing response occurrence")
                     for v in transients:
                         stat, threshold = ("Strength", 40) if story == 91 else ("Destruction", 20)
-                        response = (f'Your {stat} is {"below" if role == "Alice" else "at least"} {threshold}. '
+                        below = role == "Alice"
+                        if args.disposition:
+                            stat, threshold, below = "disposition", 55, role == "Bob"
+                        response = (f'Your {stat} is {"below" if below else "at least"} {threshold}. '
                                     f'The {direction} passage awaits.' if v["revision"] == 1 else
                                     f'Your {direction} passage is {"taken" if role == "Alice" else "declined"}.')
                         if args.substitutions:
@@ -227,8 +230,9 @@ def capture(args):
                         if v["response"] != response or v["messages"] != messages:
                             raise RuntimeError("Private response/choice branch differs")
             if not previous:
-                result["checks"].append(dict(stat_filters=True, strength_threshold=40, destruction_threshold=20,
-                                             Alice="below both", Bob="at least both"))
+                result["checks"].append(dict(disposition_filters=True, threshold=55, Alice="at least", Bob="below")
+                    if args.disposition else dict(stat_filters=True, strength_threshold=40, destruction_threshold=20,
+                                                  Alice="below both", Bob="at least both"))
             if args.substitutions:
                 result["checks"].append(dict(private_substitutions=True, character_race_class=True,
                                              speaker=args.speaker_name, cell=args.start, silent_recovery=True))
@@ -268,6 +272,7 @@ if __name__ == "__main__":
     parser.add_argument("--start", required=True)
     parser.add_argument("--recover-from", type=lambda p: Path(p).resolve())
     parser.add_argument("--substitutions", action="store_true")
+    parser.add_argument("--disposition", action="store_true")
     parser.add_argument("--speaker-name", default="", help="Expected winning speaker display name")
     parser.add_argument("--no-screenshots", action="store_true",
                         help="Validate semantic evidence without native-window capture; this remains synthetic")

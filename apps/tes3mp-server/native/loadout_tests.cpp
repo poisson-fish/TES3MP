@@ -6941,7 +6941,8 @@ int main(int argc, char** argv)
                     || std::string_view(argv[1]) == "personal-scheduling"
                     || (std::string_view(argv[1]) == "script-banks"
                         || (std::string_view(argv[1]) == "dialogue"
-                            || std::string_view(argv[1]) == "dialogue-intents")))
+                            || std::string_view(argv[1]) == "dialogue-intents"
+                            || std::string_view(argv[1]) == "dialogue-disposition")))
                 || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives"
                     || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))
         {

@@ -254,7 +254,8 @@ character attributes/skills/resources through stock comparisons; result stat wri
 Clients retain early personal baselines through body installation and reopen other-story
 choices silently. Bounded stock response substitutions use authenticated character/speaker, staged ranks/bounty,
 owned globals and shared stock cell naming before results; errors/waits discard output.
-Clients never re-expand responses or replay transient output. Changed admission policies reject old images.
+Thresholds 0–100 share stock disposition with authenticated character/speaker snapshots;
+relationship writes remain closed. Clients never re-expand/replay output; policy changes reject old images.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

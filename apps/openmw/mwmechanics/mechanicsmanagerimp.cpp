@@ -39,6 +39,7 @@
 #include "actorutil.hpp"
 #include "aicombat.hpp"
 #include "airating.hpp"
+#include "disposition.hpp"
 #include "aipursue.hpp"
 #include "autocalcspell.hpp"
 #include "playerconstruction.hpp"
@@ -424,87 +425,13 @@ namespace MWMechanics
 
     int MechanicsManager::getDerivedDisposition(const MWWorld::Ptr& ptr, bool clamp)
     {
-        const MWMechanics::NpcStats& npcStats = ptr.getClass().getNpcStats(ptr);
-        float x = static_cast<float>(npcStats.getBaseDisposition() + npcStats.getCrimeDispositionModifier());
-
-        MWWorld::LiveCellRef<ESM::NPC>* npc = ptr.get<ESM::NPC>();
-        MWWorld::Ptr playerPtr = getPlayer();
-        MWWorld::LiveCellRef<ESM::NPC>* player = playerPtr.get<ESM::NPC>();
-        const MWMechanics::NpcStats& playerStats = playerPtr.getClass().getNpcStats(playerPtr);
-
-        const MWWorld::Store<ESM::GameSetting>& gmst
-            = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
-        static const float fDispRaceMod = gmst.find("fDispRaceMod")->mValue.getFloat();
-        if (npc->mBase->mRace == player->mBase->mRace)
-            x += fDispRaceMod;
-
-        static const float fDispPersonalityMult = gmst.find("fDispPersonalityMult")->mValue.getFloat();
-        static const float fDispPersonalityBase = gmst.find("fDispPersonalityBase")->mValue.getFloat();
-        x += fDispPersonalityMult
-            * (playerStats.getAttribute(ESM::Attribute::Personality).getModified() - fDispPersonalityBase);
-
-        float reaction = 0;
-        int rank = 0;
-        const ESM::RefId& npcFaction = ptr.getClass().getPrimaryFaction(ptr);
-
-        if (playerStats.getFactionRanks().find(npcFaction) != playerStats.getFactionRanks().end())
-        {
-            if (!playerStats.getExpelled(npcFaction))
-            {
-                // faction reaction towards itself. yes, that exists
-                reaction = static_cast<float>(
-                    MWBase::Environment::get().getDialogueManager()->getFactionReaction(npcFaction, npcFaction));
-
-                rank = playerStats.getFactionRanks().find(npcFaction)->second;
-            }
-        }
-        else if (!npcFaction.empty())
-        {
-            auto playerFactionIt = playerStats.getFactionRanks().begin();
-            for (; playerFactionIt != playerStats.getFactionRanks().end(); ++playerFactionIt)
-            {
-                const ESM::RefId& itFaction = playerFactionIt->first;
-
-                // Ignore the faction, if a player was expelled from it.
-                if (playerStats.getExpelled(itFaction))
-                    continue;
-
-                int itReaction
-                    = MWBase::Environment::get().getDialogueManager()->getFactionReaction(npcFaction, itFaction);
-                if (playerFactionIt == playerStats.getFactionRanks().begin() || itReaction < reaction)
-                {
-                    reaction = static_cast<float>(itReaction);
-                    rank = playerFactionIt->second;
-                }
-            }
-        }
-        else
-        {
-            reaction = 0;
-            rank = 0;
-        }
-
-        static const float fDispFactionRankMult = gmst.find("fDispFactionRankMult")->mValue.getFloat();
-        static const float fDispFactionRankBase = gmst.find("fDispFactionRankBase")->mValue.getFloat();
-        static const float fDispFactionMod = gmst.find("fDispFactionMod")->mValue.getFloat();
-        x += factionDisposition(rank, reaction, fDispFactionRankMult, fDispFactionRankBase, fDispFactionMod);
-
-        static const float fDispCrimeMod = gmst.find("fDispCrimeMod")->mValue.getFloat();
-        static const float fDispDiseaseMod = gmst.find("fDispDiseaseMod")->mValue.getFloat();
-        x += crimeDisposition(0.f, playerStats.getBounty(), fDispCrimeMod);
-        if (playerStats.hasCommonDisease() || playerStats.hasBlightDisease())
-            x += fDispDiseaseMod;
-
-        static const float fDispWeaponDrawn = gmst.find("fDispWeaponDrawn")->mValue.getFloat();
-        x += weaponDrawnDisposition(playerStats.getDrawState() == MWMechanics::DrawState::Weapon,
-            fDispWeaponDrawn);
-
-        const float charm = ptr.getClass()
-                 .getCreatureStats(ptr)
-                 .getMagicEffects()
-                 .getOrDefault(ESM::MagicEffect::Charm)
-                 .getMagnitude();
-        return dispositionWithCharm(x, charm, clamp);
+        const MWWorld::Ptr player = getPlayer();
+        return derivedDisposition(*ptr.get<ESM::NPC>()->mBase, ptr.getClass().getNpcStats(ptr),
+            *player.get<ESM::NPC>()->mBase, player.getClass().getNpcStats(player),
+            MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>(),
+            [](const ESM::RefId& from, const ESM::RefId& to) {
+                return MWBase::Environment::get().getDialogueManager()->getFactionReaction(from, to);
+            }, clamp);
     }
 
     int MechanicsManager::getBarterOffer(const MWWorld::Ptr& ptr, int basePrice, bool buying)

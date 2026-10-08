@@ -13,7 +13,7 @@ full AI packages remain M5.
 **V78 characters:** stock/TR creation, starters, inventory/appearance and recovery
 verified synthetically; starters accepted 2026-10-04.
 `build/character-desktop-fixture-02/{complete-03,restart-02}/result.json`.
-Creation cannot simulate before completion. TR appearance-only; OS input unverified.
+Incomplete creation cannot simulate; TR appearance-only, OS input unverified.
 Resume retains inactivity/expiry/generation/replay bounds (`build/logs/resume-inactivity.log`).
 
 **Death/respawn:** capability 37; ordinary inventory retained.
@@ -32,12 +32,11 @@ Peer/creature corpse transfers/recovery retain identities/counts
 body/door/NPC 2026-10-06:
 `build/m4-user-acceptance-body-door-npc-v78-20261005-230100/operator-acceptance.json`.
 Split/regroup/restart retain bodies/inventories/resources/NPC identities;
-stale/resampled contradictions reject atomically. Doors/travel/quit survive capture
-exhaustion; relay reclaims idle endpoints.
+stale/resampled contradictions reject atomically. Doors/travel/quit survive capture exhaustion; relay reclaims idle endpoints.
 
 **V79 player cutover:** capability 38; latest-wins controls/acknowledgements, fixed
 stock physics/shared player/NPC/door hulls, durable frames/resources and bounded replay.
-Retry/hold/expiry/epoch/rollback/restart/ground regression:
+Retry/expiry/epoch/rollback/restart/ground:
 `build/logs/player-{physics-native,physics-scene,physics-world,controls-protocol,controls-queue,controls-server,physics-adapter,physics-angles}.log`.
 Two-desktop heading/jump/stop/contact/reconnect:
 `build/player-physics-desktop-impaired-16/result.json`; screenshots inspected.
@@ -52,7 +51,7 @@ Fresh campaigns require `player-physics`; V78 retains migration; movement skills
 128-input backpressure passed; combat/death/loot/respawn retained. Abort resolved.
 
 **M5 shared execution:** [runtime](../../apps/tes3mp-server/native/world_script.hpp)
-Stock compiler/opcodes, staged globals/locals/messages, atomic outcomes and GSCR/GLOB recovery.
+Stock compiler/opcodes; atomic globals/locals/messages and GSCR/GLOB recovery.
 Synthetic `build/logs/m5-world-script-{shared,rollback,recovery,admission,content}.log`:
 Fargoth declarations pass; Vodunius/chargen/skipped APIs reject.
 
@@ -84,15 +83,15 @@ V81/V82 retain single-script admission.
 ordinals/markers and globals commit with gameplay. Isolation/rollback/offline/recovery/legacy:
 `build/logs/m5-script-banks-{state,host-05,legacy-state,legacy-host,trusted-host,shared}.log`.
 
-**V84 scoped dialogue:** stock filters/results, journals/topics and bank receipts join gameplay.
-Trusted-source isolation/rollback/recovery/stock/host remain synthetic:
+**V84 dialogue:** stock filters/results/progression/bank receipts join gameplay.
+Trusted-source isolation/rollback/recovery remain synthetic:
 `build/logs/m5-dialogue-{isolation,rollback,recovery,stock,host-05}.log`.
 
 **V85 authenticated dialogue:** capability 40 binds character/story, living unscripted
 speaker, reach/sight/life, revision and offered choice. ≤14 mirrored scripts;
 two intents/tick, one/character. Banks/progression/choices/receipts join gameplay;
 private output follows durability. Client results/greetings/services/restock suppress.
-First topic seeds knowledge; early baselines and other-story choices restore silently.
+First topic seeds knowledge; baselines/choices restore silently.
 Synthetic isolation/duplicates/defer/rollback/recovery/presentation:
 `build/logs/m5-dialogue-intents-{state,host,client,adapter,ingress,delivery}.log`.
 Semantic paired desktop progression/absence/restart/no-replay:
@@ -101,8 +100,7 @@ Semantic paired desktop progression/absence/restart/no-replay:
 
 **Staged dialogue stats:** stock 8 modified attributes/27 skills, current
 health/magicka/fatigue and health percentage read authenticated character snapshots.
-Result stat writes and unstaged filters remain closed. Isolation, waits, rollback/retry,
-comparison/truncation and silent recovery: `build/logs/m5-dialogue-player-stats.log`;
+Result stat writes/unstaged filters closed. Isolation/waits/rollback/retry/truncation/recovery: `build/logs/m5-dialogue-player-stats.log`;
 early-baseline installation: `build/logs/m5-dialogue-installation.log`.
 
 **Bounded slice accepted, Codex/owner, 2026-10-07:** [fixture](../../scripts/prepare_native_dialogue_fixture.py):
@@ -112,22 +110,26 @@ Strength <40/≥40, Destruction <20/≥20. Synthetic progression/recovery:
 reopened choices, north 20/30. Owner confirmed silent completed restart:
 north 20/30, south 20/20; no choices/replayed notices.
 `build/logs/m5-dialogue-operator-restart-01.log`.
-Pending-choice restart continuation remains synthetic; finished-topic clicks
-show no other-story summary. Screenshots inspected; scripted character setup,
-custom mouse bindings.
+Pending-choice restart remains synthetic; finished topics show no other-story summary.
+Screenshots inspected; scripted setup/custom mouse bindings.
 Stats regression: `build/logs/m5-dialogue-player-stats-ui-signoff.log`.
 
 **Dialogue substitutions:** bounded stock %/^ responses read authenticated character/speaker,
 profile custom class, staged ranks/bounty/owned globals and stock cell names before results.
-Private output/rollback/retry/silent recovery:
+Private output/rollback/recovery:
 `build/logs/m5-dialogue-substitutions{,-host,-client}.log`;
 stats regression: `build/logs/m5-dialogue-substitutions-stats-regression.log`.
 Paired impaired/restart semantic proof:
 `build/m5-dialogue-substitutions-{desktop-02,restart-01}/result.json`;
 foreground captures excluded; visual acceptance remains open.
-New V85 admission rejects older policy images; action bindings remain closed.
+V85 rejects older policies; action bindings closed.
 
-**Next:** disposition thresholds,
-journal text/timestamps ([M5 contract](DECISIONS.md#m5-implementation-contract)).
+**Disposition:** authenticated 0–100 thresholds share stock character/speaker calculations.
+Private branches/waits/rollback/retry/silent recovery:
+`build/logs/m5-dialogue-disposition{,-host}.log`. Paired impaired stock branches/pending-choice
+restart: `build/m5-dialogue-disposition-{desktop-02,restart-01}/result.json`
+(synthetic; no screenshots). Relationship writes remain closed.
+
+**Next:** journal text/timestamps ([M5 contract](DECISIONS.md#m5-implementation-contract)).
 Physical results/NPC restoration, scoped recovery and unchanged Seyda Neen/TR
 proofs remain; M5 stays open.

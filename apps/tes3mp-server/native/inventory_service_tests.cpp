@@ -5591,7 +5591,8 @@ namespace TES3MP::Native::Testing
         bool lifecycle, bool spell, bool projectile, bool timed, bool area, bool playerTarget, bool collection,
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
-        const bool personalIntents = effectFamily == "dialogue-intents";
+        const bool dialogueDisposition = effectFamily == "dialogue-disposition";
+        const bool personalIntents = dialogueDisposition || effectFamily == "dialogue-intents";
         const bool personalDialogue = personalIntents || effectFamily == "dialogue";
         const bool personalBanks = personalDialogue || effectFamily == "script-banks";
         const bool personalScheduling = personalBanks || effectFamily == "personal-scheduling";
@@ -6337,6 +6338,18 @@ namespace TES3MP::Native::Testing
                                 info.mResultScript += "Choice \"Proceed\" 7\n";
                             }
                         }
+                        if (dialogueDisposition && std::string_view(name) == "passage_k61")
+                        {
+                            info.mData.mDisposition = 1;
+                            info.mResponse = "High disposition. " + info.mResponse;
+                            info.mNext = ESM::RefId::stringRefId("low_disposition");
+                            out.startRecord("INFO"); info.save(out); out.endRecord("INFO");
+                            info.mPrev = info.mId;
+                            info.mId = ESM::RefId::stringRefId("low_disposition");
+                            info.mData.mDisposition = 0;
+                            info.mResponse.replace(0, 18, "Low disposition. ");
+                            info.mNext = ESM::RefId::stringRefId("answer_7");
+                        }
                         out.startRecord("INFO"); info.save(out); out.endRecord("INFO");
                         if (personalIntents && dialogue.mType == ESM::Dialogue::Journal)
                         {
@@ -6350,7 +6363,9 @@ namespace TES3MP::Native::Testing
                         }
                         if (personalIntents && std::string_view(name) == "passage_k61")
                         {
+                            if (dialogueDisposition) info.mPrev = info.mId;
                             info.mId = ESM::RefId::stringRefId("answer_7");
+                            info.mNext = {};
                             info.mSelects.resize(1);
                             info.mSelects.front().mFunction = ESM::DialogueCondition::Function_Choice;
                             info.mSelects.front().mVariable.clear();
@@ -6363,6 +6378,14 @@ namespace TES3MP::Native::Testing
                         }
                     }
                 }
+            }
+            if (dialogueDisposition)
+            {
+                // Stock Morrowind's bounty multiplier is zero. A winning fixture
+                // setting proves the shared calculation reads this campaign's GMST.
+                ESM::GameSetting setting; setting.blank(); setting.mId = ESM::RefId::stringRefId("fDispCrimeMod");
+                setting.mValue.setType(ESM::VT_Float); setting.mValue.setFloat(.1f);
+                out.startRecord("GMST"); setting.save(out); out.endRecord("GMST");
             }
             if (encounterProfile == "vanilla-multi-loop")
             {
@@ -9515,7 +9538,7 @@ namespace TES3MP::Native::Testing
                 const auto savedCombat = readActorCampaign({reinterpret_cast<const char*>(socialImage.data()), socialImage.size()}).combat;
                 for (size_t i = 0; i < 2; ++i)
                 {
-                    auto social = savedCombat->players[i]; social.bounty = i ? 29 : 11;
+                    auto social = savedCombat->players[i]; social.bounty = i ? (dialogueDisposition ? 100000 : 29) : 11;
                     dialogueSocial.push_back({id<PlayerId>(i + 1), std::move(social)});
                 }
             }
@@ -9606,9 +9629,10 @@ namespace TES3MP::Native::Testing
                         if (!index)
                             for (const auto& value : source.store().get<ESM::Class>())
                                 if (*characterRecordId(value.mId.getRefIdString()) == cls->id.value()) className = value.mName;
-                        return "A private passage for " + completed[index].name() + "|" + className
+                        return (dialogueDisposition ? std::string(index ? "Low disposition. " : "High disposition. ") : "")
+                            + "A private passage for " + completed[index].name() + "|" + className
                             + "|NPC Door Contact Test|" + std::to_string(state(service)[index * 2].runtime.runtime.globals.front().mValue.getInteger())
-                            + "|" + std::to_string(index ? 29 : 11) + ".";
+                            + "|" + std::to_string(index ? (dialogueDisposition ? 100000 : 29) : 11) + ".";
                     };
                     auto idle = native.prepareNativePlayerTick(
                         authority, id<ServerTick>(5), 1.f / 30, nullptr, &world, {}, {});
@@ -9621,6 +9645,9 @@ namespace TES3MP::Native::Testing
                         authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), candidate.get());
                     auto bob = service.projectPersonalDialogue(
                         authority, id<SessionId>(2), id<ServerTick>(5), id<CanonicalRevision>(5), candidate.get());
+                    if (dialogueDisposition && !alice.empty() && alice[0].response != expectedResponse(0))
+                        std::cerr << "Disposition branch actual: " << alice[0].response
+                                  << " expected: " << expectedResponse(0) << '\n';
                     require(alice.size() == 2 && alice[0].response == expectedResponse(0)
                             && alice[0].choices.size() == 1 && alice[0].quests[0].index == 10 && alice[1].revision == 0
                             && bob.size() == 2 && bob[0].revision == 0 && bob[0].response.empty(),
@@ -9646,6 +9673,9 @@ namespace TES3MP::Native::Testing
                         authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), paired.get());
                     const auto pairedBob = service.projectPersonalDialogue(
                         authority, id<SessionId>(2), id<ServerTick>(5), id<CanonicalRevision>(5), paired.get());
+                    if (dialogueDisposition && pairedBob[0].response != expectedResponse(1))
+                        std::cerr << "Disposition paired branch actual: " << pairedBob[0].response
+                                  << " expected: " << expectedResponse(1) << '\n';
                     require(pairedAlice[0].response == expectedResponse(0) && pairedBob[0].response == expectedResponse(1)
                         && pairedAlice[0].response != pairedBob[0].response,
                         "Paired substitutions shared character/class/bounty/global context");
@@ -9750,7 +9780,7 @@ namespace TES3MP::Native::Testing
                             && independent[0].choices.size() == 1,
                         "Restart merged clients' progression");
                     std::cout << "dialogue intent host: authenticated character/story and speaker-life/reach; paired "
-                                 "private character/class/cell/global/bounty substitutions; rejected/stale durability; late result rollback; retry; duplicate "
+                                 "private character/class/cell/global/bounty substitutions and disposition branches; rejected/stale durability; late result rollback; retry; duplicate "
                                  "suppression; silent reconnect and exact/uncertain restart\n";
                     return;
                 }

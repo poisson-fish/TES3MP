@@ -2,13 +2,16 @@
 #include <algorithm>
 #include <apps/openmw/mwdialogue/filter.hpp>
 #include <apps/openmw/mwmechanics/npcstats.hpp>
+#include <apps/openmw/mwmechanics/disposition.hpp>
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/scriptstate.hpp>
 #include <apps/openmw/mwworld/class.hpp>
+#include <apps/openmw/mwworld/esmstore.hpp>
 #include <bit>
 #include <cmath>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadfact.hpp>
 #include <components/interpreter/defines.hpp>
 #include <limits>
 #include <source_location>
@@ -280,7 +283,8 @@ namespace TES3MP::Native
                         && info.mId.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
                         && info.mId.getRefIdString().find('\0') == std::string_view::npos
                         && info.mQuestStatus >= ESM::DialInfo::QS_None && info.mQuestStatus <= ESM::DialInfo::QS_Restart
-                        && (!mIntents || dialogue.mType != ESM::Dialogue::Topic || info.mData.mDisposition == 0)
+                        && (!mIntents || dialogue.mType != ESM::Dialogue::Topic
+                            || (info.mData.mDisposition >= 0 && info.mData.mDisposition <= 100))
                         && info.mResponse.size() <= 4096
                         && info.mResponse.find('\0') == std::string::npos
                         && info.mResultScript.size() <= MWScript::WorldScript::MaximumSourceBytes
@@ -313,7 +317,7 @@ namespace TES3MP::Native
             if (mIntents)
             {
                 constexpr std::string_view intentLimits
-                    = "authenticated-dialogue-2;14;2;8;256;4096;32768;64;root-first;bounded-substitutions;zero-threshold;unscripted-"
+                    = "authenticated-dialogue-3;14;2;8;256;4096;32768;64;root-first;bounded-substitutions;stock-disposition;unscripted-"
                       "speaker;primary-bank";
                 binding.insert(binding.end(), intentLimits.begin(), intentLimits.end());
             }
@@ -622,7 +626,7 @@ namespace TES3MP::Native
         const MWScript::ExecutionContext& execution, const ESM::RefId& topic, int choice, int disposition,
         bool talkedToPlayer, std::string_view cellName, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats,
-        std::optional<std::string_view> customClassName) const
+        std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats) const
     {
         Prepared prepared; auto& result = prepared.result; result.invocationTick = execution.invocation;
         try
@@ -659,6 +663,24 @@ namespace TES3MP::Native
             require(actor.hasLiveReference()
                 && (mIntents ? actor.getClass().getScript(actor).empty()
                              : actor.getClass().getScript(actor) == result.script));
+            if (mIntents)
+            {
+                disposition = 0;
+                if (std::ranges::any_of(record.mInfo, [](const auto& info) { return info.mData.mDisposition != 0; }))
+                {
+                    require(stats && speakerStats && actor.getType() == ESM::NPC::sRecordId);
+                    const auto player = script.resolveReference(ESM::RefId::stringRefId("player"));
+                    require(player.hasLiveReference() && player.getType() == ESM::NPC::sRecordId);
+                    disposition = MWMechanics::derivedDisposition(*actor.get<ESM::NPC>()->mBase, *speakerStats,
+                        *player.get<ESM::NPC>()->mBase, *stats, content.get<ESM::GameSetting>(),
+                        [&](const ESM::RefId& from, const ESM::RefId& to) {
+                            // Faction-reaction result writes remain closed in this policy.
+                            const auto& reactions = content.get<ESM::Faction>().find(from)->mReactions;
+                            const auto found = reactions.find(to);
+                            return found == reactions.end() ? 0 : found->second;
+                        });
+                }
+            }
             MWDialogue::Filter::Scoped scoped{ script, dialogue, disposition, cellName,
                 mIntents ? result.script : ESM::RefId{} };
             MWDialogue::Filter filter(actor, choice, talkedToPlayer, scoped);
@@ -705,9 +727,9 @@ namespace TES3MP::Native
     }
 
     PersonalScripts::Prepared PersonalScripts::prepareIntent(const State& before, uint64_t character, uint64_t command,
-        const DialogueIntent& request, int disposition, std::string_view cellName, const MWWorld::ESMStore& content,
+        const DialogueIntent& request, std::string_view cellName, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats,
-        std::optional<std::string_view> customClassName) const
+        std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats) const
     {
         Prepared rejected;
         try
@@ -746,7 +768,7 @@ namespace TES3MP::Native
             const bool talked
                 = std::ranges::find(found->talkedSpeakers, request.speaker) != found->talkedSpeakers.end();
             auto prepared = prepareDialogue(before, execution, ESM::RefId::stringRefId(request.topic), request.choice,
-                disposition, talked, cellName, content, resolver, budget, playerStats, customClassName);
+                0, talked, cellName, content, resolver, budget, playerStats, customClassName, speakerStats);
             if (prepared.result.outcome != SharedWorldScript::Outcome::Committed || !prepared.result.executed)
                 return prepared;
             auto& state = prepared.state[size_t(found - before.begin())];

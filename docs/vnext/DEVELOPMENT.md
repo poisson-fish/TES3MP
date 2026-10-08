@@ -73,7 +73,8 @@ Private responses use bounded stock substitutions with authenticated character/s
 staged ranks/bounty, owned globals and authoritative cell names before results;
 action bindings reject. Literal messages, choices and progression follow durability;
 reconnect is silent. Filters read staged modified attributes/skills, current resources
-and health percentage; result stat writes remain closed. Journal text/timestamps, nonzero disposition thresholds,
+and health percentage. Thresholds 0–100 share stock disposition with authenticated
+character/speaker snapshots and winning settings. Result stat writes, journal text/timestamps,
 physical results and NPC restoration remain closed. Prior images never silently migrate;
 V81–84 personal output stays closed. Bootstrap emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.
