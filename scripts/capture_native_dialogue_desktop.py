@@ -1,4 +1,4 @@
-"""Two rendered V85 clients: private choices, independent stories, silent recovery.
+"""Two rendered clients: private dialogue/encounters and silent recovery.
 
 Uses the normal dialogue window's topic/choice handlers. Requires the bounded
 north/south fixture and a fresh campaign for the first run; never edits saves.
@@ -44,6 +44,8 @@ def capture(args):
     sequences = dict.fromkeys(paths, 0)
     processes, finished = {}, set()
     result = dict(success=False, checks=[], synthetic=True, impairment="100ms +/-25ms, 10% loss/reorder")
+    if args.encounter:
+        result["impairment"] = "direct"
     save = args.runtime / (settings["player_identity_file"] + ".world-v2")
     previous = read_json(args.recover_from, 65536) if args.recover_from else None
     if previous and (not previous.get("success") or not save.exists()
@@ -167,76 +169,80 @@ def capture(args):
                     if confirmed["result"] != 0:
                         raise RuntimeError("Character choice rejected")
             wait(lambda: all((s := latest(r, "native_player_sample")) and s.get("physics") for r in paths), "both rendered players", 90)
-            wait(lambda: all(view(r, s) for r in paths for s in (91, 92)), "four isolated story baselines")
-            for role in paths:
-                command(role, "close")
-                command(role, 'dialoguestart "npc_door_actor"')
-            relay.schedule = NavigationImpairment()
-            if previous:
-                for role in paths:
-                    for story in (91, 92):
-                        old = previous["final_views"][role][str(story)]
-                        for v in views(role, story):
-                            if v["response"] or v["messages"] or any(v[k] != old[k] for k in ("revision", "quests", "choices", "command")):
-                                raise RuntimeError("Restart replayed output or lost private state")
-                result["checks"].append(dict(restart=True, silent=True, pending_choices=True))
-                # The current window restores story 91 first. Select the second story's topic.
-                for role in paths:
-                    command(role, 'dialoguetopic "south_passage_92 (story 92)"')
-                # Opening the second story must restore its offered choices without executing a topic.
-                for role in paths:
-                    command(role, "dialoguechoice " + ("7" if role == "Alice" else "9"), asynchronous=True)
-                wait(lambda: progression("Alice", 92, 2, 20, 0) and progression("Bob", 92, 2, 30, 0),
-                     "restarted choices progress independently")
+            if args.encounter:
+                from native_story_encounter_capture import verify_encounter
+                verify_encounter(result, previous, evidence, command, wait, view, screenshot, latest, args.return_path)
             else:
-                command("Alice", 'dialoguetopic "north_passage_91 (story 91)"')
-                wait(lambda: progression("Alice", 91, 1, 10, 2), "Alice private response and offered choices")
-                if not progression("Bob", 91, 0, 0, 0) or not progression("Alice", 92, 0, 0, 0):
-                    raise RuntimeError("First dialogue crossed character/story ownership")
-                screenshot("Alice", "private-choice")
-                screenshot("Bob", "before-own-topic")
-                command("Bob", 'dialoguetopic "north_passage_91 (story 91)"')
-                wait(lambda: progression("Bob", 91, 1, 10, 2), "Bob owns separate choices")
+                wait(lambda: all(view(r, s) for r in paths for s in (91, 92)), "four isolated story baselines")
                 for role in paths:
-                    command(role, "dialoguechoice " + ("7" if role == "Alice" else "9"), asynchronous=True)
-                wait(lambda: progression("Alice", 91, 2, 20, 0) and progression("Bob", 91, 2, 30, 0),
-                     "concurrent divergent progression")
+                    command(role, "close")
+                    command(role, 'dialoguestart "npc_door_actor"')
+                relay.schedule = NavigationImpairment()
+                if previous:
+                    for role in paths:
+                        for story in (91, 92):
+                            old = previous["final_views"][role][str(story)]
+                            for v in views(role, story):
+                                if v["response"] or v["messages"] or any(v[k] != old[k] for k in ("revision", "quests", "choices", "command")):
+                                    raise RuntimeError("Restart replayed output or lost private state")
+                    result["checks"].append(dict(restart=True, silent=True, pending_choices=True))
+                    # The current window restores story 91 first. Select the second story's topic.
+                    for role in paths:
+                        command(role, 'dialoguetopic "south_passage_92 (story 92)"')
+                    # Opening the second story must restore its offered choices without executing a topic.
+                    for role in paths:
+                        command(role, "dialoguechoice " + ("7" if role == "Alice" else "9"), asynchronous=True)
+                    wait(lambda: progression("Alice", 92, 2, 20, 0) and progression("Bob", 92, 2, 30, 0),
+                         "restarted choices progress independently")
+                else:
+                    command("Alice", 'dialoguetopic "north_passage_91 (story 91)"')
+                    wait(lambda: progression("Alice", 91, 1, 10, 2), "Alice private response and offered choices")
+                    if not progression("Bob", 91, 0, 0, 0) or not progression("Alice", 92, 0, 0, 0):
+                        raise RuntimeError("First dialogue crossed character/story ownership")
+                    screenshot("Alice", "private-choice")
+                    screenshot("Bob", "before-own-topic")
+                    command("Bob", 'dialoguetopic "north_passage_91 (story 91)"')
+                    wait(lambda: progression("Bob", 91, 1, 10, 2), "Bob owns separate choices")
+                    for role in paths:
+                        command(role, "dialoguechoice " + ("7" if role == "Alice" else "9"), asynchronous=True)
+                    wait(lambda: progression("Alice", 91, 2, 20, 0) and progression("Bob", 91, 2, 30, 0),
+                         "concurrent divergent progression")
+                    for role in paths:
+                        command(role, 'dialoguetopic "south_passage_92 (story 92)"', asynchronous=True)
+                    wait(lambda: all(progression(r, 92, 1, 10, 2) for r in paths), "independent second story pending choices")
+                    result["checks"].append(dict(private_responses=True, private_choices=True, concurrent_divergence=True,
+                                                 separate_stories=True))
                 for role in paths:
-                    command(role, 'dialoguetopic "south_passage_92 (story 92)"', asynchronous=True)
-                wait(lambda: all(progression(r, 92, 1, 10, 2) for r in paths), "independent second story pending choices")
-                result["checks"].append(dict(private_responses=True, private_choices=True, concurrent_divergence=True,
-                                             separate_stories=True))
-            for role in paths:
-                reconnect(role)
-            for role in paths:
-                for story, direction in ((91, "north"), (92, "south")):
-                    transients = [v for v in views(role, story) if v["response"] or v["messages"]]
-                    expected = 1 if previous and story == 92 else 0 if previous else 2 if story == 91 else 1
-                    if len(transients) != expected or len({v["revision"] for v in transients}) != expected:
-                        raise RuntimeError("Duplicate/missing response occurrence")
-                    for v in transients:
-                        stat, threshold = ("Strength", 40) if story == 91 else ("Destruction", 20)
-                        below = role == "Alice"
-                        if args.disposition:
-                            stat, threshold, below = "disposition", 55, role == "Bob"
-                        response = (f'Your {stat} is {"below" if below else "at least"} {threshold}. '
-                                    f'The {direction} passage awaits.' if v["revision"] == 1 else
-                                    f'Your {direction} passage is {"taken" if role == "Alice" else "declined"}.')
-                        if args.substitutions:
-                            p = profiles[role]
-                            response = (f'{role} ({p["race"]}, {p["class"]}), '
-                                        f'{args.speaker_name} greets you in {args.start}. ' + response)
-                        messages = [f'Private {direction} notice'] if v["revision"] == 1 else []
-                        if v["response"] != response or v["messages"] != messages:
-                            raise RuntimeError("Private response/choice branch differs")
-            if not previous:
-                result["checks"].append(dict(disposition_filters=True, threshold=55, Alice="at least", Bob="below")
-                    if args.disposition else dict(stat_filters=True, strength_threshold=40, destruction_threshold=20,
-                                                  Alice="below both", Bob="at least both"))
-            if args.substitutions:
-                result["checks"].append(dict(private_substitutions=True, character_race_class=True,
-                                             speaker=args.speaker_name, cell=args.start, silent_recovery=True))
-            result["final_views"] = {r: {s: view(r, s) for s in (91, 92)} for r in paths}
+                    reconnect(role)
+                for role in paths:
+                    for story, direction in ((91, "north"), (92, "south")):
+                        transients = [v for v in views(role, story) if v["response"] or v["messages"]]
+                        expected = 1 if previous and story == 92 else 0 if previous else 2 if story == 91 else 1
+                        if len(transients) != expected or len({v["revision"] for v in transients}) != expected:
+                            raise RuntimeError("Duplicate/missing response occurrence")
+                        for v in transients:
+                            stat, threshold = ("Strength", 40) if story == 91 else ("Destruction", 20)
+                            below = role == "Alice"
+                            if args.disposition:
+                                stat, threshold, below = "disposition", 55, role == "Bob"
+                            response = (f'Your {stat} is {"below" if below else "at least"} {threshold}. '
+                                        f'The {direction} passage awaits.' if v["revision"] == 1 else
+                                        f'Your {direction} passage is {"taken" if role == "Alice" else "declined"}.')
+                            if args.substitutions:
+                                p = profiles[role]
+                                response = (f'{role} ({p["race"]}, {p["class"]}), '
+                                            f'{args.speaker_name} greets you in {args.start}. ' + response)
+                            messages = [f'Private {direction} notice'] if v["revision"] == 1 else []
+                            if v["response"] != response or v["messages"] != messages:
+                                raise RuntimeError("Private response/choice branch differs")
+                if not previous:
+                    result["checks"].append(dict(disposition_filters=True, threshold=55, Alice="at least", Bob="below")
+                        if args.disposition else dict(stat_filters=True, strength_threshold=40, destruction_threshold=20,
+                                                      Alice="below both", Bob="at least both"))
+                if args.substitutions:
+                    result["checks"].append(dict(private_substitutions=True, character_race_class=True,
+                                                 speaker=args.speaker_name, cell=args.start, silent_recovery=True))
+                result["final_views"] = {r: {s: view(r, s) for s in (91, 92)} for r in paths}
             for role in paths:
                 finished.add(role)
                 command(role, "quit")
@@ -271,9 +277,13 @@ if __name__ == "__main__":
         parser.add_argument("--" + name, type=lambda p: Path(p).resolve(), required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--recover-from", type=lambda p: Path(p).resolve())
+    parser.add_argument("--encounter", action="store_true")
+    parser.add_argument("--return-path", action="store_true")
     parser.add_argument("--substitutions", action="store_true")
     parser.add_argument("--disposition", action="store_true")
     parser.add_argument("--speaker-name", default="", help="Expected winning speaker display name")
     parser.add_argument("--no-screenshots", action="store_true",
                         help="Validate semantic evidence without native-window capture; this remains synthetic")
-    capture(parser.parse_args())
+    args = parser.parse_args()
+    args.encounter |= args.return_path
+    capture(args)

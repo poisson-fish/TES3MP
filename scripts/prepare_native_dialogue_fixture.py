@@ -16,9 +16,12 @@ from run_phase12_movement_capture import free_port
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--substitutions', action='store_true', help='Exercise private character/speaker/cell response expansion')
 parser.add_argument('--disposition', action='store_true', help='Exercise stock disposition >=55/<55 instead of stat thresholds')
+parser.add_argument('--encounter', action='store_true', help='V86 source-only Disable; base fixture must contain one dry static interior/NPC')
+parser.add_argument('--return-path', action='store_true', help='Fresh V87 encounter with bounded shared-exploration return')
 for name in ('base-content', 'stock-config', 'profiles', 'content', 'runtime', 'binary', 'settings'):
     parser.add_argument('--' + name, type=lambda p: Path(p).resolve(), required=True)
 args = parser.parse_args()
+args.encounter |= args.return_path
 content, runtime = args.content, args.runtime
 content.mkdir()
 shutil.copytree(args.base_content / 'meshes', content / 'meshes')
@@ -30,6 +33,37 @@ def record(tag, payload):
     return struct.pack('<4sIII', tag, len(payload), 0, 0) + payload
 def string(tag, text):
     return sub(tag, text.encode() + b'\0')
+if args.encounter:
+    # The headless fixture omits lighting. Bind static ambient light so the
+    # rendered visibility proof is readable; gameplay records remain stock.
+    lit = bytearray()
+    offset = 0
+    while offset < len(blob):
+        tag, size, unused, flags = struct.unpack_from('<4sIII', blob, offset)
+        payload = blob[offset+16:offset+16+size]
+        if len(payload) != size:
+            raise ValueError('Truncated base fixture record')
+        witness = tag == b'NPC_' and payload[:4] == b'NAME' and payload[8:8+struct.unpack_from('<I', payload, 4)[0]].rstrip(b'\0') == b'npc_door_actor'
+        if tag == b'CELL' or witness:
+            fields, cursor, ambient = bytearray(), 0, False
+            while cursor < size:
+                field, length = struct.unpack_from('<4sI', payload, cursor)
+                value = payload[cursor+8:cursor+8+length]
+                if len(value) != length:
+                    raise ValueError('Truncated base fixture cell field')
+                if tag == b'CELL' and field == b'AMBI':
+                    value = struct.pack('<IIIf', 0x909090, 0, 0, .1)
+                    ambient = True
+                if witness and field == b'FNAM':
+                    value = b'Encounter Witness\0'
+                fields += sub(field, value)
+                cursor += 8 + length
+            if tag == b'CELL' and not ambient:
+                fields += sub(b'AMBI', struct.pack('<IIIf', 0x909090, 0, 0, .1))
+            payload = fields
+        lit += struct.pack('<4sIII', tag, len(payload), unused, flags) + payload
+        offset += 16 + size
+    blob = lit
 def script(name, source):
     return record(b'SCPT', sub(b'SCHD', name.encode().ljust(32, b'\0') + struct.pack('<IIIII', 0, 0, 0, 0, 0))
         + string(b'SCTX', source))
@@ -67,7 +101,8 @@ for number, direction in ((91, 'north'), (92, 'south')):
             disposition=55 if args.disposition and i == 0 else 0)
     for i, (choice, stage, outcome) in enumerate(((7, 20, 'taken'), (9, 30, 'declined')), 2):
         blob += info(names[i], names[i-1], names[i+1] if i+1 < len(names) else '', 0,
-            text_prefix + f'Your {direction} passage is {outcome}.', f'set calls to calls + 1\nJournal {quest} {stage}',
+            text_prefix + f'Your {direction} passage is {outcome}.', f'set calls to calls + 1\nJournal {quest} {stage}'
+            + ('\nDisable' if args.encounter and choice == 7 else ''),
             [('4JX0' + quest, 10), ('1500', choice)])
     blob += record(b'DIAL', string(b'NAME', quest) + sub(b'DATA', b'\4'))
     for i, stage in enumerate((10, 20, 30)):
@@ -84,9 +119,10 @@ config.mkdir()
     + f'\ndata="{content.as_posix()}"\ncontent=NpcDoors.esp\n')
 binary = args.binary
 subprocess.run([str(binary / 'tes3mp_native_bootstrap.exe'), str(config), str(runtime), 'NPC Door Contact Test',
-    'npc_hit_female', 'npc_hit_beast', '1', '60:-100:1', str(args.settings),
+    *(['npc_door_actor'] * 2 if args.encounter else ['npc_hit_female', 'npc_hit_beast']), '1', '60:-100:1', str(args.settings),
     'player-physics', 'shared_script', shared, 'globals', '0'], check=True, cwd=binary)
-native = (runtime / 'native.txt').read_text().replace('native-inventory-80', 'native-inventory-85')
+native = (runtime / 'native.txt').read_text().replace('native-inventory-80',
+    'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
 native += 'personal_scripts 2 ' + ' '.join(stories) + '\n'
 prior = (runtime / 'manifest.txt').read_text().strip()
 manifest = hashlib.sha256((prior + native).encode()).hexdigest()
@@ -111,4 +147,5 @@ for i, role in enumerate(('Alice', 'Bob')):
     (user / 'openmw.cfg').write_text((config / 'openmw.cfg').read_text()+'\n'+(runtime / 'client-content.cfg').read_text())
 (runtime / 'players.txt').write_text('\n'.join(rows)+'\n', newline='\n')
 shutil.copyfile(args.profiles, runtime / 'profiles.json')
-print('Prepared fresh V85 dialogue fixture: ' + ('disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))
+print('Prepared fresh ' + ('V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
+      + ': ' + ('disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))

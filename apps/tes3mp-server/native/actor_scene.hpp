@@ -202,6 +202,7 @@ namespace TES3MP::Native
         // The same resource hulls used by stock physics, for AiCombat's
         // distance-minus-half-extents flee gate.
         float selectedActorHalfExtentY() const;
+        float selectedActorHorizontalRadius() const;
         float actorHalfExtentY(uint64_t actor) const;
         float npcHalfExtentY(ESM::RefId race, float scale) const;
         const std::string& fingerprint() const;

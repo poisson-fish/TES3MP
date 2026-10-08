@@ -69,6 +69,7 @@ namespace TES3MP::Native
             // One terminal source-only Disable encounter per character. The
             // origin life is frozen; no inventory, loot or alive NPC is cloned.
             uint64_t encounterLife = 0;
+            bool encounterReturned = false; // Dormant outcome; origin and story receipts remain frozen.
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -87,14 +88,16 @@ namespace TES3MP::Native
             std::string cellName;
         };
         PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false,
-            bool banks = false, bool intents = false);
+            bool banks = false, bool intents = false, bool returns = false);
         uint64_t campaign() const { return mCampaign; }
         bool scheduled() const { return mScheduled; }
         bool banks() const { return mBanks; }
         bool dialogues() const { return mDialogues; }
         bool intents() const { return mIntents; }
         bool encounters() const { return mEncounters; }
+        bool returns() const { return mReturns; }
         static uint64_t physicalScope(const State&, uint64_t character);
+        Prepared prepareReturn(const State&, uint64_t character) const;
         State initial() const;
         std::vector<char> encode(const State&) const;
         State restore(std::span<const char>) const;
@@ -126,6 +129,7 @@ namespace TES3MP::Native
         bool mDialogues = false;
         bool mIntents = false;
         bool mEncounters = false;
+        bool mReturns = false;
         struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
         std::vector<std::vector<ResultProgram>> mResults;
         void validate(const Instance&, size_t) const;

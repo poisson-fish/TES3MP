@@ -82,7 +82,11 @@ V86: fresh descriptor/capability 41; exactly one dry interior, one living unscri
 NPC and static geometry. <=12 mirrored scripts reserve four discovery/retry calls;
 source-only stock Disable/GetDisabled. Terminal character/story scopes suspend banks
 and close new interactions, ground mutations and summons. Movement/resources continue;
-source origins/receipts recover without public loot/life copies. No Enable/return boundary yet.
+source origins/receipts recover without public loot/life copies. V87 fresh images
+retain dormant outcomes while grounded online living characters return during a
+quiescent physics tick: >=256 units from the NPC, >=128 from shared peers, enlarged by
+resource hull radii plus 32 units. The terminal bank/source stays closed; other banks
+resume. Capability 41/views are unchanged; no Enable or broader restoration yet.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.

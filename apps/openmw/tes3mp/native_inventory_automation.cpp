@@ -540,7 +540,7 @@ namespace TES3MP::OpenMWAdapter
             if (!(file >> direction) || direction > 1)
                 throw std::runtime_error("Traversal use button state invalid");
         }
-        else if (action == "probe")
+        else if (action == "probe" || action == "actorprobe")
         {
             if (!(file >> x >> y >> z >> endX >> endY >> endZ))
                 throw std::runtime_error("Traversal probe coordinates missing");
@@ -723,20 +723,29 @@ namespace TES3MP::OpenMWAdapter
             world->rotateObject(world->getPlayerPtr(), osg::Vec3f(.1f, 0,
                 std::atan2(dx, dy) + (action == "faceaway" ? float(osg::PI) : 0.f)));
         }
-        else if (action == "probe")
+        else if (action == "probe" || action == "actorprobe")
         {
             const osg::Vec3f from(x, y, z), to(endX, endY, endZ);
-            const int mask = MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door;
+            const int mask = MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door
+                | (action == "actorprobe" ? MWPhysics::CollisionType_Actor : 0);
             const auto ray = world->getRayCasting()->castRay(from, to, mask);
             const auto sphere = world->getRayCasting()->castSphere(from, to, 1.f, mask);
             MWPhysics::RayCastingResult rendered{};
-            const bool renderHit = world->castRenderingRay(rendered, from, to, true, true);
+            const bool renderHit = world->castRenderingRay(rendered, from, to, true, action != "actorprobe");
+            std::vector<MWWorld::Ptr> actorTargets;
+            if (action == "actorprobe") mPresentation.appendMeleeTargets(actorTargets);
+            const size_t renderedActors = std::ranges::count_if(actorTargets, [](const auto& ptr) {
+                return ptr.hasLiveReference() && ptr.getRefData().isEnabled() && ptr.getRefData().getBaseNode();
+            });
             mOutput << "{\"event\":\"traversal_collision_probe\",\"sequence\":" << sequence
                 << ",\"physics_hit\":" << (ray.mHit ? "true" : "false")
                 << ",\"projectile_hit\":" << (sphere.mHit ? "true" : "false")
                 << ",\"render_hit\":" << (renderHit ? "true" : "false")
                 << ",\"record\":" << std::quoted(ray.mHitObject.isEmpty() ? std::string{}
                     : ray.mHitObject.getCellRef().getRefId().toString())
+                << ",\"render_record\":" << std::quoted(rendered.mHitObject.isEmpty() ? std::string{}
+                    : rendered.mHitObject.getCellRef().getRefId().toString())
+                << ",\"rendered_actors\":" << renderedActors
                 << ",\"position\":[" << (ray.mHit ? ray.mHitPos.x() : 0.f) << ','
                 << (ray.mHit ? ray.mHitPos.y() : 0.f) << ',' << (ray.mHit ? ray.mHitPos.z() : 0.f) << "]}\n";
             mOutput.flush();

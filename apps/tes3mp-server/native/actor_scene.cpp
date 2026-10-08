@@ -1215,6 +1215,12 @@ namespace TES3MP::Native
         if (!mImpl) throw std::invalid_argument("Flee hull scene is unloaded");
         return mImpl->mAgentBounds.mHalfExtents.y();
     }
+    float InteriorActorScene::selectedActorHorizontalRadius() const
+    {
+        if (!mImpl) throw std::invalid_argument("Return hull scene is unloaded");
+        const auto& extent = mImpl->mAgentBounds.mHalfExtents;
+        return std::hypot(extent.x(), extent.y());
+    }
     float InteriorActorScene::npcHalfExtentY(ESM::RefId race, float scale) const
     {
         if (!mImpl || !std::isfinite(scale) || scale <= 0.f || scale > 100.f)

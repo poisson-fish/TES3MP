@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <source_location>
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
@@ -19,8 +20,9 @@ namespace TES3MP::Native
     namespace
     {
         static_assert(std::endian::native == std::endian::little);
-        void require(bool value)
-        { if (!value) throw std::invalid_argument("Invalid or incompatible shared world script image"); }
+        void require(bool value, std::source_location location = std::source_location::current())
+        { if (!value) throw std::invalid_argument("Invalid or incompatible shared world script image at line "
+            + std::to_string(location.line())); }
 
         // Finish a structural, allocation-free pass before ESMReader constructs
         // strings/locals. All admitted subrecords contain bounded text or scalars.

@@ -30,13 +30,15 @@
         "apps/openmw/mwbase/journal.hpp",
         "apps/openmw/mwdialogue/journalimp.cpp",
         "apps/openmw/mwdialogue/journalimp.hpp",
-        "apps/openmw/mwscript/statsextensions.hpp"
+        "apps/openmw/mwscript/statsextensions.hpp",
+        "apps/openmw/mwgui/referenceinterface.cpp"
       ],
       "tests": [
         "tes3mp_native_dialogue_tests isolation",
         "tes3mp_native_dialogue_tests rollback",
         "tes3mp_native_dialogue_tests recovery",
         "tes3mp_native_dialogue_tests stock",
+        "tes3mp_native_dialogue_tests encounter",
         "tes3mp_native_loadout_tests dialogue NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
         "tes3mp_native_dialogue_tests intents",
         "tes3mp_native_dialogue_tests client",

@@ -29,6 +29,7 @@ namespace TES3MP::Native
         constexpr uint64_t BankMagic = 0x3354535054335354;
         constexpr uint64_t DialogueMagic = 0x3454535054335354;
         constexpr uint64_t EncounterMagic = 0x3854535054335354;
+        constexpr uint64_t EncounterReturnMagic = 0x3954535054335354;
         constexpr uint64_t IntentMagic = 0x3754535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
@@ -300,12 +301,13 @@ namespace TES3MP::Native
     }
 
     PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
-        bool scheduled, bool banks, bool intents)
+        bool scheduled, bool banks, bool intents, bool returns)
         : mCampaign(campaign)
         , mDefinitions(std::move(definitions))
         , mScheduled(scheduled)
         , mBanks(banks)
         , mIntents(intents)
+        , mReturns(returns)
     {
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         size_t scripts = 0;
@@ -315,6 +317,7 @@ namespace TES3MP::Native
         require(!mIntents || mDialogues);
         mEncounters = std::ranges::any_of(mDefinitions, [](const auto& entry) { return bool(entry.encounter); });
         require(!mEncounters || mIntents);
+        require(!mReturns || mEncounters);
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
@@ -465,6 +468,7 @@ namespace TES3MP::Native
         const auto& last = state.last;
         require(!state.encounterLife || (mEncounters && last.sourceReference == expected.encounter->reference
             && last.sourceLife == state.encounterLife && state.choices.empty()));
+        require(!state.encounterReturned || (mReturns && state.encounterLife));
         if (state.encounterLife)
             require(std::ranges::any_of(state.npcs, [&](const auto& npc) {
                 return npc.reference == expected.encounter->reference && npc.life == state.encounterLife
@@ -560,7 +564,8 @@ namespace TES3MP::Native
             }));
         std::vector<char> bytes;
         word(bytes,
-            mEncounters      ? EncounterMagic
+            mReturns         ? EncounterReturnMagic
+                : mEncounters ? EncounterMagic
                 : mIntents   ? IntentMagic
                 : mDialogues ? DialogueMagic
                 : mBanks     ? BankMagic
@@ -591,6 +596,7 @@ namespace TES3MP::Native
                 conversation(bytes, state[i]);
                 npcs(bytes, state[i]);
                 if (mEncounters) word(bytes, state[i].encounterLife);
+                if (mReturns) word(bytes, state[i].encounterReturned);
             }
         }
         require(bytes.size() <= MaximumImageBytes);
@@ -602,7 +608,8 @@ namespace TES3MP::Native
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
         require(input.word()
-            == (mEncounters      ? EncounterMagic
+            == (mReturns         ? EncounterReturnMagic
+                : mEncounters    ? EncounterMagic
                 : mIntents   ? IntentMagic
                     : mDialogues ? DialogueMagic
                     : mBanks     ? BankMagic
@@ -634,6 +641,7 @@ namespace TES3MP::Native
                 conversation(preflight, nullptr);
                 npcs(preflight, nullptr);
                 if (mEncounters) preflight.take(8);
+                if (mReturns) require(preflight.word() <= 1);
             }
         }
         require(preflight.bytes.empty());
@@ -660,6 +668,7 @@ namespace TES3MP::Native
                 conversation(input, &entry);
                 npcs(input, &entry);
                 if (mEncounters) entry.encounterLife = input.word();
+                if (mReturns) { const auto returned = input.word(); require(returned <= 1); entry.encounterReturned = returned; }
             }
             validate(entry, i); state.push_back(std::move(entry));
         }
@@ -764,8 +773,27 @@ namespace TES3MP::Native
     uint64_t PersonalScripts::physicalScope(const State& state, uint64_t character)
     {
         for (const auto& instance : state)
-            if (instance.last.character == character && instance.encounterLife) return instance.last.physicalScope;
+            if (instance.last.character == character && instance.encounterLife && !instance.encounterReturned)
+                return instance.last.physicalScope;
         return 1;
+    }
+
+    PersonalScripts::Prepared PersonalScripts::prepareReturn(const State& before, uint64_t character) const
+    {
+        Prepared prepared;
+        require(mReturns && character);
+        (void)encode(before);
+        const auto found = std::ranges::find_if(before, [&](const auto& instance) {
+            return instance.last.character == character && instance.encounterLife;
+        });
+        require(found != before.end());
+        prepared.result.outcome = SharedWorldScript::Outcome::Committed;
+        if (found->encounterReturned) return prepared;
+        prepared.state = before;
+        prepared.state[size_t(found - before.begin())].encounterReturned = true;
+        prepared.image = encode(prepared.state);
+        prepared.result.executed = true;
+        return prepared;
     }
 
     PersonalScripts::Prepared PersonalScripts::prepareDialogue(const State& before,
@@ -788,6 +816,7 @@ namespace TES3MP::Native
                 return entry.character == execution.character && entry.story == execution.story; });
             require(found != mDefinitions.end());
             const auto index = size_t(found - mDefinitions.begin()); const auto& current = before[index];
+            require(!current.encounterLife); // A dormant removal never reopens this story's source.
             result.script = current.runtime.runtime.script.mId;
             if (execution == current.last)
             {
@@ -1075,7 +1104,7 @@ namespace TES3MP::Native
             for (size_t i = 0; i < before.size(); ++i)
             {
                 const auto& current = before[i];
-                if (physicalScope(before, current.last.character) != 1 || current.scheduledTick == worldTick || std::ranges::find(activeCharacters, current.last.character)
+                if (current.encounterLife || physicalScope(before, current.last.character) != 1 || current.scheduledTick == worldTick || std::ranges::find(activeCharacters, current.last.character)
                     == activeCharacters.end()) continue;
                 require(prepared.invocations < MaximumInvocationsPerTransaction
                     && current.last.invocation != std::numeric_limits<uint64_t>::max());

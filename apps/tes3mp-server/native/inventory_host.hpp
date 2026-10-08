@@ -8,6 +8,10 @@
 
 namespace TES3MP::Native
 {
+    // V87 retains V86's terminal outcome as a dormant story. Grounded, living
+    // online characters rejoin shared exploration beyond the NPC/peer hull
+    // separation boundary during a quiescent durable tick. Fresh images only;
+    // capability 41 already carries the unchanged suppression/replica views.
     // V78 optionally appends starting_items COUNT followed by quoted record,
     // quantity and equipment slot (-1 for unequipped), at most 64 entries.
     // The explicit campaign policy joins saved identity and grants once at

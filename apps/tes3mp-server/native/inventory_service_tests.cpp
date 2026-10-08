@@ -5594,7 +5594,8 @@ namespace TES3MP::Native::Testing
     {
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
-        const bool storyEncounter = effectFamily == "story-encounter";
+        const bool storyReturn = effectFamily == "story-return";
+        const bool storyEncounter = storyReturn || effectFamily == "story-encounter";
         const bool dialogueNpc = effectFamily == "dialogue-npc-state";
         const bool personalIntents = storyEncounter || dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
         const bool personalDialogue = personalIntents || effectFamily == "dialogue";
@@ -9294,7 +9295,8 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (storyEncounter                               ? "native-inventory-86\nmanifest "
+            out << (storyReturn                                  ? "native-inventory-87\nmanifest "
+                : storyEncounter                                ? "native-inventory-86\nmanifest "
                 : personalIntents                              ? "native-inventory-85\nmanifest "
                     : personalDialogue                           ? "native-inventory-84\nmanifest "
                     : personalBanks                              ? "native-inventory-83\nmanifest "
@@ -9805,6 +9807,133 @@ namespace TES3MP::Native::Testing
                             "Scoped restart replayed output or required removed speaker");
                         require(duplicate->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                             == CanonicalDurabilityResult::Committed, "Scoped duplicate tick failed");
+                        if (storyReturn)
+                        {
+                            require(policy->returns(), "V87 return admission absent");
+                            const auto beforeReturn = image(restored);
+                            const auto returnTick = [&](InventoryService& owner) {
+                                const auto* session = authority.findActiveSession(id<SessionId>(1));
+                                const auto* player = authority.findPlayer(session->playerId());
+                                const std::array controls{ServerCommandProposal(session->sessionId(), session->sessionGeneration(),
+                                    id<CommandSequence>(303), id<CommandId>(303), id<CanonicalRevision>(6),
+                                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                    PlayerLocomotionCommandProposal(id<LocomotionInputTick>(7), id<LocomotionInputSequence>(303),
+                                        LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0), {}, {},
+                                            PlayerMovementControls{})))};
+                                return owner.prepareNativePlayerTick(authority, id<ServerTick>(7), 1.f / 30, {}, &world, {}, controls);
+                            };
+                            const auto moveAlice = [&](double x, uint64_t epoch) {
+                                auto values = std::vector(authority.players().begin(), authority.players().end());
+                                const auto& p = values[0];
+                                values[0] = CanonicalPlayerEntityState(p.playerId(), p.entityId(), p.appearanceId(),
+                                    Transform(p.transform().cell(), Position3(int64_t(x * 1024),
+                                        int64_t(scene.mPosition[1] * 1024), int64_t(scene.mPosition[2] * 1024)),
+                                        p.transform().orientation()), LinearVelocity3(0, 0, 0), p.entityRevision(),
+                                    id<AuthorityEpoch>(epoch), id<ServerTick>(6));
+                                authority = std::get<CanonicalServerState>(createCanonicalServerState(values, authority.activeSessions()));
+                            };
+                            moveAlice(scene.mPosition[0] + 180, 2);
+                            auto near = returnTick(restored);
+                            require(near && restored.physicalScope(id<PlayerId>(1), near.get()) != 1,
+                                "Return occurred inside the NPC separation boundary");
+                            moveAlice(scene.mPosition[0] + 400, 3);
+                            const auto separatedPlayers = authority;
+                            auto adjacentPlayers = std::vector(authority.players().begin(), authority.players().end());
+                            const auto& peer = adjacentPlayers[1];
+                            adjacentPlayers[1] = CanonicalPlayerEntityState(peer.playerId(), peer.entityId(), peer.appearanceId(),
+                                Transform(peer.transform().cell(), Position3(int64_t((scene.mPosition[0] + 336) * 1024),
+                                    int64_t(scene.mPosition[1] * 1024), int64_t(scene.mPosition[2] * 1024)),
+                                    peer.transform().orientation()), LinearVelocity3(0, 0, 0), peer.entityRevision(),
+                                id<AuthorityEpoch>(2), id<ServerTick>(6));
+                            authority = std::get<CanonicalServerState>(createCanonicalServerState(adjacentPlayers, authority.activeSessions()));
+                            auto adjacent = returnTick(restored);
+                            require(adjacent && restored.physicalScope(id<PlayerId>(1), adjacent.get()) != 1,
+                                "Return overlapped a previously hidden shared peer hull");
+                            authority = separatedPlayers;
+                            auto release = [&] { return returnTick(restored); };
+                            auto rejectedReturn = release();
+                            if (rejectedReturn && restored.physicalScope(id<PlayerId>(1), rejectedReturn.get()) != 1)
+                                for (const auto& motion : rejectedReturn->playerMotions())
+                                    std::cerr << "return candidate player=" << motion.player.value()
+                                        << " position=" << motion.root.position().x() / 1024. << ','
+                                        << motion.root.position().y() / 1024. << ',' << motion.root.position().z() / 1024.
+                                        << " grounded=" << motion.physics.grounded << " blocked=" << motion.physics.blocked << '\n';
+                            require(rejectedReturn && restored.physicalScope(id<PlayerId>(1), rejectedReturn.get()) == 1
+                                && restored.physicalScope(id<PlayerId>(1)) != 1,
+                                "Return did not stage detached shared occupancy");
+                            verifyView(restored, rejectedReturn.get(), 7, false, false);
+                            require(rejectedReturn->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                == CanonicalDurabilityResult::Rejected && image(restored) == beforeReturn,
+                                "Rejected return leaked occupancy/progression/collision");
+                            auto returnCommit = release();
+                            std::vector<std::byte> returnImage;
+                            require(returnCommit && returnCommit->commit([&](auto bytes) {
+                                returnImage.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Committed;
+                            }) == CanonicalDurabilityResult::Committed, "Return did not commit");
+                            auto returnedStories = state(restored);
+                            auto expected = returnedStories; expected[0] = scopes[0]; expected[0].encounterReturned = true;
+                            // Other banks may schedule after rejoining; the terminal bank is frozen.
+                            require(policy->encode(returnedStories) == policy->encode(expected)
+                                && returnedStories[1].dialogueRevision == 0 && !returnedStories[1].encounterLife,
+                                "Return changed the completed story or unfinished opportunity");
+                            verifyView(restored, nullptr, 7, false, false);
+                            auto freshReturn = request; freshReturn.revision = 1;
+                            std::unique_ptr<PreparedNativeInventory> blocked;
+                            require(!restored.appendDialogueIntent(authority, proposal(1, 102, freshReturn), blocked, &world),
+                                "Returned character reopened its completed story");
+                            InventoryHost returnRestart(descriptor, manifest, *restoredRegistry, *crypto, returnImage);
+                            auto& returnedOwner = dynamic_cast<InventoryService&>(returnRestart.service());
+                            require(image(returnedOwner) == returnImage && returnedOwner.physicalScope(id<PlayerId>(1)) == 1,
+                                "Restart lost shared occupancy or regenerated the dormant outcome");
+                            verifyView(returnedOwner, nullptr, 7, false, false);
+                            auto duplicateReturn = prepare(returnedOwner, 8, 1, 101, request);
+                            const auto quietReturn = returnedOwner.projectPersonalDialogue(authority, id<SessionId>(1),
+                                id<ServerTick>(8), id<CanonicalRevision>(8), duplicateReturn.get());
+                            require(duplicateReturn && quietReturn[0].response.empty() && quietReturn[0].messages.empty(),
+                                "Return recovery replayed completion notifications");
+                            auto bobReturn = prepare(returnedOwner, 8, 2, 101, request);
+                            require(bobReturn && returnedOwner.physicalScope(id<PlayerId>(2), bobReturn.get()) != 1,
+                                "B lost its opportunity after A rejoined shared exploration");
+                            InventoryHost privatePeers(descriptor, manifest, *restoredRegistry, *crypto, beforeReturn);
+                            auto& privateOwner = dynamic_cast<InventoryService&>(privatePeers.service());
+                            auto privateBob = prepare(privateOwner, 7, 2, 101, request);
+                            require(privateBob && privateBob->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                == CanonicalDurabilityResult::Committed, "Second private outcome did not commit");
+                            authority = std::get<CanonicalServerState>(createCanonicalServerState(adjacentPlayers, authority.activeSessions()));
+                            std::vector<ServerCommandProposal> privateControls;
+                            for (const auto& session : authority.activeSessions())
+                            {
+                                const auto* player = authority.findPlayer(session.playerId());
+                                privateControls.emplace_back(session.sessionId(), session.sessionGeneration(),
+                                    id<CommandSequence>(304), id<CommandId>(304), id<CanonicalRevision>(7),
+                                    EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                    PlayerLocomotionCommandProposal(id<LocomotionInputTick>(8), id<LocomotionInputSequence>(304),
+                                        LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0), {}, {},
+                                            PlayerMovementControls{})));
+                            }
+                            auto privateReturn = privateOwner.prepareNativePlayerTick(authority, id<ServerTick>(8),
+                                1.f / 30, {}, &world, {}, privateControls);
+                            require(privateReturn && privateOwner.physicalScope(id<PlayerId>(1), privateReturn.get()) == 1
+                                && privateOwner.physicalScope(id<PlayerId>(2), privateReturn.get()) != 1,
+                                "Private peers obstructed return or simultaneous returns overlapped shared hulls");
+                            authority = separatedPlayers;
+                            InventoryHost uncertainStart(descriptor, manifest, *restoredRegistry, *crypto, beforeReturn);
+                            auto& uncertainOwner = dynamic_cast<InventoryService&>(uncertainStart.service());
+                            auto uncertainReturn = returnTick(uncertainOwner);
+                            std::vector<std::byte> uncertainImage;
+                            require(uncertainReturn && uncertainOwner.physicalScope(id<PlayerId>(1), uncertainReturn.get()) == 1
+                                && uncertainReturn->commit([&](auto bytes) {
+                                    uncertainImage.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Failed;
+                                }) == CanonicalDurabilityResult::Failed && uncertainOwner.inventoryImage().empty(),
+                                "Uncertain return did not close authority");
+                            InventoryHost uncertainRestart(descriptor, manifest, *restoredRegistry, *crypto, uncertainImage);
+                            auto& exactReturn = dynamic_cast<InventoryService&>(uncertainRestart.service());
+                            require(image(exactReturn) == uncertainImage && exactReturn.physicalScope(id<PlayerId>(1)) == 1,
+                                "Uncertain return did not recover the exact durable boundary");
+                            std::cout << "story return: grounded separated boundary; shared peer/NPC views; immutable terminal story; "
+                                "atomic rejected writes, silent exact restart and B's independent opportunity\n";
+                            return;
+                        }
                         auto bob = prepare(restored, 7, 2, 101, request);
                         require(bool(bob), "B's opportunity was consumed by A");
                         verifyView(restored, bob.get(), 7, true, true);

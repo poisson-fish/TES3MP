@@ -1,4 +1,5 @@
 #include "personal_script.hpp"
+#include <apps/openmw/mwgui/referenceinterface.hpp>
 #include <apps/openmw/mwbase/environment.hpp>
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwdialogue/dialoguemanagerimp.hpp>
@@ -1240,6 +1241,17 @@ namespace
     void encounter(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto, {}, true);
+        struct WindowReference final : MWGui::ReferenceInterface
+        {
+            int closed = 0;
+            void bind(const MWWorld::Ptr& ptr) { mPtr = ptr; }
+            void onReferenceUnavailable() override { ++closed; }
+        } window;
+        auto replica = std::make_unique<MWWorld::ManualRef>(fixture.content, id("speaker_r29"));
+        window.bind(replica->getPtr()); window.checkReferenceAvailable();
+        require(!window.closed, "Living dialogue replica was discarded");
+        replica.reset(); window.checkReferenceAvailable(); window.checkReferenceAvailable();
+        require(window.closed == 1, "Destroyed dialogue replica was dereferenced or closed repeatedly");
         for (auto& definition : fixture.definitions)
         {
             definition.encounter = PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("room_e87")};
@@ -1334,6 +1346,31 @@ namespace
         }
         PersonalScripts prior(7, priorDefinitions, crypto, true, true, true);
         rejects([&] { runtime.restore(prior.encode(prior.initial())); }, "Encounter silently migrated prior policy");
+        PersonalScripts returning(7, fixture.definitions, crypto, true, true, true, true);
+        auto removal = run(returning, returning.initial(), 11);
+        auto returned = returning.prepareReturn(removal.state, 11);
+        auto expected = removal.state;
+        expected[0].encounterReturned = true;
+        require(returned.result.executed && returned.image == returning.encode(expected)
+            && PersonalScripts::physicalScope(returned.state, 11) == 1
+            && PersonalScripts::physicalScope(returned.state, 22) == 1,
+            "Return changed story state/origin/receipt instead of only physical occupancy");
+        require(returning.encode(returning.restore(returned.image)) == returned.image,
+            "Dormant encounter did not restore exactly");
+        require(!returning.prepareReturn(returned.state, 11).result.executed
+            && run(returning, returned.state, 11, 102).result.outcome == SharedWorldScript::Outcome::Rejected
+            && run(returning, returned.state, 22).result.executed,
+            "Return reopened A's removed source, repeated work or consumed B's opportunity");
+        rejects([&] { returning.restore(alice.image); }, "V87 silently migrated V86 state");
+        rejects([&] { runtime.restore(returned.image); }, "V86 accepted returned encounter state");
+        auto impossible = returning.initial(); impossible[0].encounterReturned = true;
+        rejects([&] { returning.encode(impossible); }, "Return without a durable outcome was accepted");
+        for (size_t size = 0; size < returned.image.size(); ++size)
+            rejects([&] { returning.restore(std::span(returned.image).first(size)); }, "Truncated returned encounter restored");
+        auto malformed = returned.image;
+        // Last instance's return flag is a canonical bounded word.
+        malformed[malformed.size() - 8] = 2;
+        rejects([&] { returning.restore(malformed); }, "Noncanonical return flag restored");
         std::cout << "story encounter: stock Disable/GetDisabled; one source/cell, discovery rollback/retry; "
             "A removes privately, B completes independently; late failure/waits, bound receipts and silent exact restart\n";
     }

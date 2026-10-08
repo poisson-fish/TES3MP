@@ -270,8 +270,14 @@ occurrence; each attempt is instruction-bounded and charged. Persist character/s
 scope and placement/record/life origins with gameplay; never clone loot/lives.
 Lookup, peer/NPC presentation, Bullet hulls and combat share scope. Collision masks
 restore without allocation on failure. Terminal scopes suspend banks/new interactions;
-Enable, departure and return await separate admission. Capability 41/fresh images gate
+Enable and departure await separate admission. Capability 41/fresh images gate
 compatibility; exact receipts acknowledge silently without resolving removed speakers.
+
+**Dormant return (V87).** Only occupancy rejoins; freeze private removal/origin and
+terminal bank/progression/receipts. Other banks resume; completed-source requests
+reject. Grounded online living bodies return at a quiescent authoritative NPC/peer
+hull separation boundary. No teleport, public mutation or scene/loot renewal.
+Fresh images persist one-way dormancy; capability 41/views are unchanged.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

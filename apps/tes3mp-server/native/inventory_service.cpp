@@ -5301,7 +5301,7 @@ namespace TES3MP::Native
             if (!prior) candidate = std::make_unique<DialogueTransaction>(*this);
             return true; // Terminal disabled sources can acknowledge exact receipts silently.
         }
-        if (PersonalScripts::physicalScope(currentState, session->playerId().value()) != 1)
+        if (receipt->encounterLife || PersonalScripts::physicalScope(currentState, session->playerId().value()) != 1)
             return reject("story encounter source disabled");
         if (hasStoryEncounters() && (!mCombat || mNpcCast || !mProjectiles.empty()
             || std::ranges::any_of(mTimedEffects, [](const auto& effect) { return effect.sourceKind != 3 && effect.sourceKind != 5; })
@@ -6214,6 +6214,44 @@ namespace TES3MP::Native
             }
             native->memberScene = fresh;
             transaction->scene = std::move(fresh);
+        }
+        // V87 returns a dormant terminal encounter to shared exploration only
+        // from a grounded, living, authenticated body clear of every shared hull.
+        // The completed bank/origin/receipts remain untouched and suspended.
+        if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->returns() && native->combat
+            && !native->casting && native->projectiles.empty() && !native->target && native->relocations.empty()
+            && std::ranges::none_of(native->timedEffects, [](const auto& effect) { return effect.sourceKind != 3 && effect.sourceKind != 5; })
+            && std::ranges::none_of(native->combat->swings, [](const auto& swing) { return swing && swing->pending(); })
+            && std::ranges::none_of(native->combat->playerCasts, [](const auto& cast) { return bool(cast); })
+            && std::ranges::none_of(native->combat->arrows, [](const auto& arrow) { return !arrow.terminal; }))
+        {
+            const auto source = mBinding.mNavigatingActor->snapshot();
+            for (size_t i = 0; i < 2; ++i)
+            {
+                const auto player = mBinding.mPlayers[i];
+                const auto& body = transaction->states[i];
+                if (physicalScope(player, transaction.get()) == 1 || !body.root || !transaction->steps[i]
+                    || !transaction->steps[i]->snapshot().mGrounded || native->combat->actors[i][8][2] <= 0
+                    || native->combat->knockedDown[i] || native->combat->hitRecoveryTicks[i]
+                    || std::ranges::none_of(inputPlayers.activeSessions(), [&](const auto& session) { return session.playerId() == player; }))
+                    continue;
+                const auto p = body.root->position();
+                const double x = double(p.x()) / 1024, y = double(p.y()) / 1024;
+                const double selfRadius = transaction->scene->forPlayer(PlayerHullBase + i).selectedActorHorizontalRadius();
+                const double npcDistance = std::max(256., selfRadius + transaction->scene->selectedActorHorizontalRadius() + 32.);
+                if (std::hypot(x - source.mPosition[0], y - source.mPosition[1]) < npcDistance) continue;
+                const auto& peer = transaction->states[1 - i];
+                if (peer.root && peer.root->cell() == body.root->cell()
+                    && physicalScope(mBinding.mPlayers[1 - i], transaction.get()) == 1)
+                {
+                    const auto q = peer.root->position();
+                    const double peerDistance = std::max(128., selfRadius
+                        + transaction->scene->forPlayer(PlayerHullBase + 1 - i).selectedActorHorizontalRadius() + 32.);
+                    if (std::hypot(x - double(q.x()) / 1024, y - double(q.y()) / 1024) < peerDistance) continue;
+                }
+                auto returned = mBinding.mPersonalScripts->prepareReturn(*personalState(transaction.get()), player.value());
+                if (returned.result.executed) native->personalScripts = std::move(returned);
+            }
         }
         return transaction;
     }
