@@ -56,44 +56,33 @@ Stock compiler/opcodes, staged globals/locals/messages, atomic outcomes and GSCR
 Synthetic `build/logs/m5-world-script-{shared,rollback,recovery,admission,content}.log`:
 Fargoth declarations pass; Vodunius/chargen/skipped APIs reject.
 
-**V80 scheduling/delivery:** fresh bootstrap binds one script/0–16 globals;
-calendar ownership rejects. World-tick invocations join gameplay durability;
-ordinals survive skipped ticks. Installation/projection/reentry never execute
-scripts.
-Capability 39 delivers ≤8 literal messages of ≤256 bytes through atomic reliable admission
-and stock UI; session/invocation checks suppress duplicates. Baselines/recovery never replay output.
-Synthetic `build/logs/m5-ambient-{host,adapter,delivery,bootstrap,bootstrap-admission,bootstrap-zero}.log`:
-atomic failure/retry/stale, offline/reentry/exact/uncertain restart,
-malformed/budget/ownership rejection, V79 recovery/upgrade/downgrade rejection.
-Inherited seam/movement recovery: `build/logs/m5-world-script-host-{shared,rollback}.log`,
+**V80 scheduling/delivery:** one script/0–16 globals; calendar ownership rejects.
+Durable tick ordinals; capability 39 sends ≤8 literal messages/≤256 bytes through
+stock UI. Recovery/baselines never replay output.
+Synthetic atomic failure/admission/offline/restart/legacy:
+`build/logs/m5-ambient-{host,adapter,delivery,bootstrap,bootstrap-admission,bootstrap-zero}.log`,
+`build/logs/m5-world-script-host-{shared,rollback}.log`,
 `build/logs/m5-player-physics-regression.log`.
-`build/m5-ambient-desktop-{02,restart-01,ui-01}/result.json`: paired occurrences,
-eight-second absences, no missed-output replay, durable continuation, clean client exits;
-100ms ±25ms/10% loss/reorder. Native-window message screenshots inspected.
-Shared regression: `build/logs/m5-context-shared-regression.log`.
+Paired 100ms ±25ms/10% loss/reorder, absences/restart/clean exits:
+`build/m5-ambient-desktop-{02,restart-01,ui-01}/result.json`; screenshots inspected.
+Regression: `build/logs/m5-context-shared-regression.log`.
 
-**M5 context:** InterpreterContext binds campaign/story/physical/character/source/life/invocation/event. Unstaged services
-reject; waits differ from absence. Personal text: staged stats.
-Synthetic `build/logs/m5-context-{lookup,rollback,stock}.log`: isolation, stale/bounds
-rejection, stock callers, rollback/retry and named-locals recovery.
-**V81/V82 personal state/scheduling:** isolated characters/stories own globals/locals,
-invocations/cursors; online established characters execute once/tick without offline catch-up.
-Gameplay-coherent markers, silent replay and exact/uncertain recovery; legacy policies retained.
-Synthetic `build/logs/m5-personal-{state,host,shared}.log`,
+**M5 context/V81–82:** explicit campaign/story/physical/character/source/life/invocation/event;
+unstaged services reject, waits differ from absence. Isolated banks/progression/cursors
+commit with gameplay; online once/tick, no catch-up, silent recovery.
+Synthetic stock/isolation/rollback/legacy:
+`build/logs/m5-context-{lookup,rollback,stock}.log`,
+`build/logs/m5-personal-{state,host,shared}.log`,
 `build/logs/m5-personal-scheduling-{state,host,legacy-state,legacy-host}.log`.
 
-**M5 cross-script:** owned banks route stock typed members,
-StartScript/StopScript/ScriptRunning; ≤64 locals/128-byte names. Targets reject.
-Synthetic `build/logs/m5-cross-script-{context,rollback,stock,lookup-regression}.log`:
-character/story isolation, identity/bounds/waits, late-failure/durability rollback/retry,
-stock GSCR locals/running recovery and stock callers. V81/V82 retain single-script admission.
+**M5 cross-script:** owned stock typed members/lifecycle; ≤64 locals/128-byte names;
+physical targets reject. Synthetic isolation/rollback/recovery/stock:
+`build/logs/m5-cross-script-{context,rollback,stock,lookup-regression}.log`.
+V81/V82 retain single-script admission.
 
-**V83 native banks:** 1–4 scripts/story, ≤16 mirrored instances. Ordered locals/flags/
-ordinals/markers and character/story globals commit with gameplay; StartScript/StopScript
-preserve ownership and stopped locals.
-Synthetic `build/logs/m5-script-banks-{state,host-05,legacy-state,legacy-host,trusted-host,shared}.log`:
-late rejection/defer/rollback/retry/stale, offline/skipped ticks, stopped-state and
-exact/uncertain recovery; V81/V82 preserved; incompatible policies reject.
+**V83 banks:** 1–4 scripts/story, ≤16 mirrored instances; stopped locals/flags/
+ordinals/markers and globals commit with gameplay. Isolation/rollback/offline/recovery/legacy:
+`build/logs/m5-script-banks-{state,host-05,legacy-state,legacy-host,trusted-host,shared}.log`.
 
 **V84 scoped dialogue:** stock filters/results, journals/topics and bank receipts join gameplay.
 Trusted-source isolation/rollback/recovery/stock/host remain synthetic:
@@ -128,7 +117,17 @@ show no other-story summary. Screenshots inspected; scripted character setup,
 custom mouse bindings.
 Stats regression: `build/logs/m5-dialogue-player-stats-ui-signoff.log`.
 
-**Next:** substitutions, disposition thresholds,
+**Dialogue substitutions:** bounded stock %/^ responses read authenticated character/speaker,
+profile custom class, staged ranks/bounty/owned globals and stock cell names before results.
+Private output/rollback/retry/silent recovery:
+`build/logs/m5-dialogue-substitutions{,-host,-client}.log`;
+stats regression: `build/logs/m5-dialogue-substitutions-stats-regression.log`.
+Paired impaired/restart semantic proof:
+`build/m5-dialogue-substitutions-{desktop-02,restart-01}/result.json`;
+foreground captures excluded; visual acceptance remains open.
+New V85 admission rejects older policy images; action bindings remain closed.
+
+**Next:** disposition thresholds,
 journal text/timestamps ([M5 contract](DECISIONS.md#m5-implementation-contract)).
 Physical results/NPC restoration, scoped recovery and unchanged Seyda Neen/TR
 proofs remain; M5 stays open.

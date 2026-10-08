@@ -6333,7 +6333,7 @@ namespace TES3MP::Native::Testing
                                 info.mSelects.push_back(select);
                                 select.mFunction = ESM::DialogueCondition::Function_PcAlchemy;
                                 info.mSelects.push_back(select);
-                                info.mResponse = "A private passage.";
+                                info.mResponse = "A private passage for %PCName|%PCClass|%cell|%ambient_counter_83|%pccrimelevel.";
                                 info.mResultScript += "Choice \"Proceed\" 7\n";
                             }
                         }
@@ -6355,7 +6355,7 @@ namespace TES3MP::Native::Testing
                             info.mSelects.front().mFunction = ESM::DialogueCondition::Function_Choice;
                             info.mSelects.front().mVariable.clear();
                             info.mSelects.front().mValue = 7;
-                            info.mResponse = "Passage complete.";
+                            info.mResponse = "Passage complete for ^PCName.";
                             info.mResultScript = "set calls to calls + 1\nJournal journey_t37 20\n";
                             out.startRecord("INFO");
                             info.save(out);
@@ -9508,7 +9508,18 @@ namespace TES3MP::Native::Testing
             require(secondCompletionTick && secondCompletionTick->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                 == CanonicalDurabilityResult::Committed, "Second completion consumed the pending scheduler tick");
             service.synchronizeCells(authority);
-            auto gameplay = native.prepareNativeTick(authority, id<ServerTick>(4), 1.f/30, {}, &world);
+            std::vector<InventoryService::PlayerAiUpdate> dialogueSocial;
+            if (personalIntents)
+            {
+                const auto socialImage = image(service);
+                const auto savedCombat = readActorCampaign({reinterpret_cast<const char*>(socialImage.data()), socialImage.size()}).combat;
+                for (size_t i = 0; i < 2; ++i)
+                {
+                    auto social = savedCombat->players[i]; social.bounty = i ? 29 : 11;
+                    dialogueSocial.push_back({id<PlayerId>(i + 1), std::move(social)});
+                }
+            }
+            auto gameplay = native.prepareNativeTick(authority, id<ServerTick>(4), 1.f/30, {}, {}, &world, dialogueSocial);
             require(gameplay && gameplay->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
                 "Completed native characters could not enter simulation");
             const auto offline = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
@@ -9590,6 +9601,15 @@ namespace TES3MP::Native::Testing
                             authority, id<ServerTick>(tick), 1.f / 30, std::move(input), &world, {}, {});
                     };
                     const auto before = image(service);
+                    const auto expectedResponse = [&](size_t index) {
+                        std::string className = "Scholar";
+                        if (!index)
+                            for (const auto& value : source.store().get<ESM::Class>())
+                                if (*characterRecordId(value.mId.getRefIdString()) == cls->id.value()) className = value.mName;
+                        return "A private passage for " + completed[index].name() + "|" + className
+                            + "|NPC Door Contact Test|" + std::to_string(state(service)[index * 2].runtime.runtime.globals.front().mValue.getInteger())
+                            + "|" + std::to_string(index ? 29 : 11) + ".";
+                    };
                     auto idle = native.prepareNativePlayerTick(
                         authority, id<ServerTick>(5), 1.f / 30, nullptr, &world, {}, {});
                     const auto idleViews = service.projectPersonalDialogue(
@@ -9601,7 +9621,7 @@ namespace TES3MP::Native::Testing
                         authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), candidate.get());
                     auto bob = service.projectPersonalDialogue(
                         authority, id<SessionId>(2), id<ServerTick>(5), id<CanonicalRevision>(5), candidate.get());
-                    require(alice.size() == 2 && alice[0].response == "A private passage."
+                    require(alice.size() == 2 && alice[0].response == expectedResponse(0)
                             && alice[0].choices.size() == 1 && alice[0].quests[0].index == 10 && alice[1].revision == 0
                             && bob.size() == 2 && bob[0].revision == 0 && bob[0].response.empty(),
                         "Personal output crossed clients/stories");
@@ -9609,6 +9629,10 @@ namespace TES3MP::Native::Testing
                                 == CanonicalDurabilityResult::Rejected
                             && image(service) == before,
                         "Rejected durability leaked dialogue/gameplay");
+                    const auto rejectedView = service.projectPersonalDialogue(
+                        authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5));
+                    require(rejectedView[0].response.empty() && rejectedView[0].choices.empty(),
+                        "Rejected durability installed expanded response or choices");
                     candidate = prepare(native, 5, 1, 101, request);
                     // A second client joins the same detached gameplay transaction.
                     auto& detached = dynamic_cast<InventoryService&>(service);
@@ -9618,6 +9642,13 @@ namespace TES3MP::Native::Testing
                         "Two-client paired intent admission failed");
                     paired = detached.prepareNativePlayerTick(
                         authority, id<ServerTick>(5), 1.f / 30, std::move(paired), &world, {}, {});
+                    const auto pairedAlice = service.projectPersonalDialogue(
+                        authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), paired.get());
+                    const auto pairedBob = service.projectPersonalDialogue(
+                        authority, id<SessionId>(2), id<ServerTick>(5), id<CanonicalRevision>(5), paired.get());
+                    require(pairedAlice[0].response == expectedResponse(0) && pairedBob[0].response == expectedResponse(1)
+                        && pairedAlice[0].response != pairedBob[0].response,
+                        "Paired substitutions shared character/class/bounty/global context");
                     require(paired && paired->commit([](auto) {
                         return CanonicalDurabilityResult::Committed;
                     }) == CanonicalDurabilityResult::Committed,
@@ -9675,7 +9706,7 @@ namespace TES3MP::Native::Testing
                     auto choice = prepare(native, 7, 1, 102, request);
                     auto output = service.projectPersonalDialogue(
                         authority, id<SessionId>(1), id<ServerTick>(7), id<CanonicalRevision>(7), choice.get());
-                    require(output[0].response == "Passage complete." && output[0].quests[0].finished
+                    require(output[0].response == "Passage complete for " + completed[0].name() + "." && output[0].quests[0].finished
                             && output[0].choices.empty(),
                         "Choice result/progression did not stage");
                     require(choice->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
@@ -9693,6 +9724,10 @@ namespace TES3MP::Native::Testing
                     InventoryHost restart(descriptor, manifest, *restoredRegistry, *crypto, saved);
                     auto& restored = dynamic_cast<InventoryService&>(restart.service());
                     require(image(restart.service()) == saved, "Exact restart changed personal/gameplay state");
+                    const auto restoredView = restart.service().projectPersonalDialogue(
+                        authority, id<SessionId>(1), id<ServerTick>(7), id<CanonicalRevision>(7));
+                    require(restoredView[0].response.empty() && restoredView[0].messages.empty() && restoredView[0].choices.size() == 1,
+                        "Exact restart replayed expanded response or lost pending choice");
                     choice = prepare(restored, 7, 1, 102, request);
                     std::vector<std::byte> uncertain;
                     require(choice->commit([&](auto bytes) {
@@ -9715,7 +9750,7 @@ namespace TES3MP::Native::Testing
                             && independent[0].choices.size() == 1,
                         "Restart merged clients' progression");
                     std::cout << "dialogue intent host: authenticated character/story and speaker-life/reach; paired "
-                                 "private views; rejected/stale durability; late result rollback; retry; duplicate "
+                                 "private character/class/cell/global/bounty substitutions; rejected/stale durability; late result rollback; retry; duplicate "
                                  "suppression; silent reconnect and exact/uncertain restart\n";
                     return;
                 }

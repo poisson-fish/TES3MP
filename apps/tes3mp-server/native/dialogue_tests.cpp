@@ -9,11 +9,19 @@
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/locals.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <apps/openmw/mwworld/cell.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/tes3mp/engine_coordinator.hpp>
 #include <components/compiler/extensions.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/loadrace.hpp>
+#include <components/esm3/loadclas.hpp>
+#include <components/esm3/loadfact.hpp>
+#include <components/esm3/loadcell.hpp>
+#include <components/esm3/loadgmst.hpp>
+#include <components/esm3/loadregn.hpp>
 #include <components/esm3/loadscpt.hpp>
+#include <components/interpreter/defines.hpp>
 #include <components/interpreter/installopcodes.hpp>
 #include <iostream>
 
@@ -87,11 +95,13 @@ namespace
                 npc.mScript = id("ledger_v63");
             content.insertStatic(npc); return content;
         }
-        Fixture(CredentialCrypto& crypto, std::string late = {}, bool intents = false)
+        Fixture(CredentialCrypto& crypto, std::string late = {}, bool intents = false,
+            std::vector<ESM::Global> extraGlobals = {})
             : actor(populate(content, intents), id("speaker_r29"))
         {
             ESM::Global global; global.blank(); global.mId = id("personal_counter");
             global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
+            extraGlobals.insert(extraGlobals.begin(), global);
             std::vector<ESM::Script> bank;
             for (const char* name : {"ledger_v63", "relay_n48"})
             {
@@ -99,8 +109,8 @@ namespace
                 script.mScriptText = std::string("begin ") + name + "\nlong calls\nend\n";
                 bank.push_back(script); content.insertStatic(script);
             }
-            auto first = std::make_shared<SharedWorldScript>(bank[0], std::vector{global}, "dialogue-content-1", crypto, bank);
-            auto second = std::make_shared<SharedWorldScript>(bank[1], std::vector{global}, "dialogue-content-1", crypto, bank);
+            auto first = std::make_shared<SharedWorldScript>(bank[0], extraGlobals, "dialogue-content-1", crypto, bank);
+            auto second = std::make_shared<SharedWorldScript>(bank[1], extraGlobals, "dialogue-content-1", crypto, bank);
             for (const auto [character, story] : {std::pair{11u, 31u}, {22u, 31u}, {11u, 32u}})
                 definitions.push_back({character, story, first, {{second, false}}, false, records(late)});
             if (intents)
@@ -493,6 +503,166 @@ namespace
                      "character/story isolation, missing-player defer, read-only result boundary and silent recovery\n";
     }
 
+    void substitutions(CredentialCrypto& crypto)
+    {
+        const auto global = [](const char* name, ESM::VarType type, float number) {
+            ESM::Global value; value.blank(); value.mId = id(name); value.mValue.setType(type);
+            if (type == ESM::VT_Float) value.mValue.setFloat(number);
+            else value.mValue.setInteger(int(number));
+            return value;
+        };
+        Fixture fixture(crypto, {}, true, {global("personal_counter_long", ESM::VT_Long, 7),
+            global("personal_flag", ESM::VT_Short, -3), global("personal_fraction", ESM::VT_Float, 1.5f)});
+        for (const char* name : {"reader", "speaker"})
+        {
+            ESM::Race race; race.blank(); race.mId = id(std::string(name) + "_race"); race.mName = race.mId.toString();
+            ESM::Class cls; cls.blank(); cls.mId = id(std::string(name) + "_class"); cls.mName = cls.mId.toString();
+            fixture.content.insertStatic(race); fixture.content.insertStatic(cls);
+        }
+        ESM::Faction faction; faction.blank(); faction.mId = id("guild_q84"); faction.mName = "Guild Q84";
+        for (int i = 0; i < 10; ++i) faction.mRanks[i] = "Rank " + std::to_string(i);
+        fixture.content.insertStatic(faction);
+        const auto npc = [&](const char* name, const char* display, bool speaker, int rank) {
+            ESM::NPC value; value.blank(); value.mId = id(name); value.mName = display;
+            value.mRace = id(speaker ? "speaker_race" : "reader_race");
+            value.mClass = id(speaker ? "speaker_class" : "reader_class");
+            if (speaker) { value.mFaction = faction.mId; value.mNpdt.mRank = static_cast<unsigned char>(rank); }
+            fixture.content.insertStatic(value);
+        };
+        npc("reader_a", "Ada ^PCName", false, 0); npc("reader_b", "Beren", false, 0);
+        npc("speaker_a", "Guide A", true, 2); npc("speaker_b", "Guide B", true, 6);
+        MWWorld::ManualRef a(fixture.content, id("reader_a")), b(fixture.content, id("reader_b"));
+        MWWorld::ManualRef sa(fixture.content, id("speaker_a")), sb(fixture.content, id("speaker_b"));
+        MWMechanics::NpcStats statsA(fixture.content), statsB(fixture.content);
+        statsA.setBounty(11); statsB.setBounty(29);
+        statsA.joinFaction(faction.mId); statsA.setFactionRank(faction.mId, 3, fixture.content);
+        const std::string builtins = "%PCName|^PCRace|%PCClass|%name|%race|%class|%faction|%rank|"
+            "%pcrank|%pcnextrank|%nextpcrank|%pccrimelevel";
+        const auto response = builtins + "|%cell|%PERSONAL_counter_long|%personal_counter|%personal_flag|"
+            "%personal_fraction|%unknown|100%";
+        for (auto& definition : fixture.definitions)
+        {
+            auto& first = definition.dialogues[1].mInfo.front();
+            first.mActor = {}; first.mResponse = response;
+            first.mSelects.erase(first.mSelects.begin() + 1); // Vary the owned global independently by story.
+            definition.dialogues[1].mInfo.back().mActor = {};
+        }
+        PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true);
+        auto state = runtime.initial(); state[2].runtime.runtime.globals.front().mValue.setInteger(4);
+        const auto before = runtime.encode(state);
+        Resolver resolver; resolver.actor = sa.getPtr(); resolver.player = a.getPtr();
+        const auto run = [&](const PersonalScripts& policy, const PersonalScripts::State& input,
+                             uint64_t character, uint64_t story, const MWMechanics::NpcStats* stats,
+                             uint64_t command = 101, std::optional<std::string_view> customClass = {}) {
+            const auto found = std::ranges::find_if(input,
+                [&](const auto& value) { return value.last.character == character && value.last.story == story; });
+            resolver.expected = found->last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = found->eventCursor + 1;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
+            return policy.prepareIntent(input, character, command, {story, 41, 3, 0, "passage_k61", -1},
+                0, "Context Cell", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction, stats, customClass);
+        };
+        MWScript::InterpreterContext stock(nullptr, sa.getPtr(), a.getPtr(), fixture.content, &statsA);
+        const auto expected = Interpreter::fixDefinesDialog(builtins, stock) + "|Context Cell|7|0|-3|1.5|%unknown|100%";
+        auto prepared = run(runtime, state, 11, 31, &statsA);
+        require(prepared.result.executed && prepared.response == expected
+            && prepared.state[0].runtime.runtime.globals.front().mValue.getInteger() == 1
+            && prepared.state[1].dialogueRevision == 0 && prepared.state[2].dialogueRevision == 0
+            && prepared.result.presentation == std::vector<std::string>{"Private notice"}
+            && runtime.encode(state) == before,
+            "Response differs from stock speaker/character substitution or pre-result global ordering");
+        require(run(runtime, state, 11, 31, &statsA).image == prepared.image, "Substitution rollback retry differs");
+        auto otherStory = run(runtime, state, 11, 32, &statsA);
+        require(otherStory.result.executed && otherStory.response.find("|7|4|-3|1.5|") != std::string::npos,
+            "Response read another story's globals");
+        resolver.actor = sb.getPtr(); resolver.player = b.getPtr();
+        auto other = run(runtime, state, 22, 31, &statsB);
+        require(other.result.executed && other.response.starts_with("Beren|reader_race|reader_class|Guide B|")
+            && other.response.find("|Rank 6|Rank 0|Rank 0|Rank 0|29|") != std::string::npos,
+            "Response inherited another character/speaker or changed stock absent-faction defaults");
+        resolver.actor = sa.getPtr(); resolver.player = a.getPtr();
+        const auto empty = [&](const auto& value) {
+            require(!value.result.executed && value.state.empty() && value.image.empty() && value.response.empty()
+                && value.result.presentation.empty() && runtime.encode(state) == before,
+                "Failed substitution leaked progress or partial private output");
+        };
+        resolver.waitPlayer = true;
+        auto deferred = run(runtime, state, 11, 31, &statsA); empty(deferred);
+        require(deferred.result.outcome == SharedWorldScript::Outcome::Deferred, "Replacement wait swallowed");
+        resolver.waitPlayer = false;
+        empty(run(runtime, state, 11, 31, nullptr));
+        resolver.player = {}; empty(run(runtime, state, 11, 31, &statsA)); resolver.player = a.getPtr();
+        empty(run(runtime, state, 11, 31, &statsA, 101, "Wayfarer"));
+        ESM::NPC customBody; customBody.blank(); customBody.mId = id("custom_reader");
+        customBody.mName = "Cerys"; customBody.mRace = id("reader_race"); fixture.content.insertStatic(customBody);
+        MWWorld::ManualRef custom(fixture.content, customBody.mId); resolver.player = custom.getPtr();
+        auto customOutput = run(runtime, state, 11, 31, &statsA, 101, "Wayfarer");
+        require(customOutput.result.executed && customOutput.response.starts_with("Cerys|reader_race|Wayfarer|"),
+            "Canonical custom class text was absent or inherited the NPC template class");
+        empty(run(runtime, state, 11, 31, &statsA)); resolver.player = a.getPtr();
+        {
+            MWWorld::ManualRef expired(fixture.content, id("reader_a")); resolver.player = expired.getPtr();
+        }
+        empty(run(runtime, state, 11, 31, &statsA)); resolver.player = a.getPtr();
+        statsA.setFactionRank(faction.mId, 9, fixture.content);
+        auto maximumRank = run(runtime, state, 11, 31, &statsA);
+        require(maximumRank.result.executed && maximumRank.response.find("|Rank 2|Rank 9|Rank 9|Rank 9|11|") != std::string::npos,
+            "Next rank escaped stock maximum");
+        statsA.setFactionRank(faction.mId, 3, fixture.content);
+        require(run(runtime, state, 11, 31, &statsA).image == prepared.image, "Replacement wait consumed occurrence");
+        auto late = fixture.definitions;
+        for (auto& definition : late) definition.dialogues[1].mInfo.front().mResultScript += "\nGoodbye";
+        PersonalScripts bad(7, late, crypto, true, true, true);
+        auto lateFailure = run(bad, bad.initial(), 11, 31, &statsA); empty(lateFailure);
+        require(lateFailure.result.outcome == SharedWorldScript::Outcome::Rejected, "Late unsupported result accepted");
+        auto unsupported = fixture.definitions;
+        for (auto& definition : unsupported) definition.dialogues[1].mInfo.front().mResponse = "%PCName %actionjump";
+        PersonalScripts action(7, unsupported, crypto, true, true, true);
+        empty(run(action, action.initial(), 11, 31, &statsA));
+        npc("large_reader", std::string(64, 'x').c_str(), false, 0);
+        MWWorld::ManualRef large(fixture.content, id("large_reader")); resolver.player = large.getPtr();
+        for (int count : {64, 65})
+        {
+            auto bounded = fixture.definitions; std::string text;
+            for (int i = 0; i < count; ++i) text += "^PCName";
+            for (auto& definition : bounded) definition.dialogues[1].mInfo.front().mResponse = text;
+            PersonalScripts limit(7, bounded, crypto, true, true, true);
+            auto value = run(limit, limit.initial(), 11, 31, &statsA);
+            if (count == 64) require(value.result.executed && value.response.size() == 4096, "Exact output bound rejected");
+            else empty(value);
+        }
+        resolver.player = a.getPtr();
+        auto resumed = runtime.restore(prepared.image);
+        auto replay = run(runtime, resumed, 11, 31, &statsA);
+        require(!replay.result.executed && replay.result.outcome == SharedWorldScript::Outcome::Committed
+            && replay.response.empty() && replay.result.presentation.empty() && resumed[0].choices.size() == 2,
+            "Recovery replayed substitutions/messages or lost choices");
+        // A different policy must not inherit another context's cached global names.
+        Fixture second(crypto, {}, true, {global("other_bank", ESM::VT_Long, 23)});
+        for (auto& definition : second.definitions) definition.dialogues[1].mInfo.front().mResponse = "%other_bank";
+        PersonalScripts separate(7, second.definitions, crypto, true, true, true);
+        resolver.actor = second.actor.getPtr();
+        auto separateOutput = run(separate, separate.initial(), 11, 31, nullptr);
+        require(separateOutput.result.executed && separateOutput.response == "23", "Global-name cache crossed policies");
+        rejects([&] { separate.restore(prepared.image); }, "Changed substitution policy restored incompatible receipt");
+        ESM::Cell cell; cell.blank(); cell.mData.mFlags = ESM::Cell::Interior; cell.mName = "Named Interior";
+        require(MWWorld::Cell(cell).getCellName(fixture.content) == cell.mName, "Stock interior display name changed");
+        cell.mData.mFlags = 0; cell.mName.clear(); cell.mRegion = id("region_a");
+        ESM::Region region; region.blank(); region.mId = cell.mRegion; region.mName = "Region A";
+        fixture.content.insertStatic(region);
+        require(MWWorld::Cell(cell).getCellName(fixture.content) == region.mName, "Stock unnamed exterior region changed");
+        region.mName.clear(); region.mId = id("region_b"); cell.mRegion = region.mId; fixture.content.insertStatic(region);
+        require(MWWorld::Cell(cell).getCellName(fixture.content) == region.mId.getRefIdString(), "Stock unnamed region ID changed");
+        cell.mRegion = {};
+        ESM::GameSetting defaultName; defaultName.mId = id("sDefaultCellname");
+        defaultName.mValue.setType(ESM::VT_String); defaultName.mValue.setString("Wilderness");
+        fixture.content.insertStatic(defaultName);
+        require(MWWorld::Cell(cell).getCellName(fixture.content) == "Wilderness", "Stock default exterior name changed");
+        std::cout << "dialogue substitutions: stock character/speaker/rank/bounty/cell and typed owned globals; "
+            "pre-result reads, two characters/stories, no recursive replacement; bounds, waits and late-result rollback; "
+            "retry, silent receipt/choice recovery and per-policy global lookup\n";
+    }
+
     void client(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto, {}, true);
@@ -554,7 +724,7 @@ namespace
         view.speaker = 41;
         view.life = 3;
         view.topic = "passage_k61";
-        view.response = "Committed passage.";
+        view.response = "Committed for Ada ^PCName.";
         view.choices = { { "Proceed", 7 } };
         view.quests = { { "journey_t37", 10, false } };
         coordinator.views.front() = view;
@@ -567,7 +737,8 @@ namespace
         manager.presentPersonalDialogue(foreign);
         require(callback.responses.empty(), "Old speaker life presented");
         manager.presentPersonalDialogue(view);
-        require(callback.responses.size() == 2 && manager.isInChoice() && manager.getChoices().front().second == 7,
+        require(callback.responses.size() == 2 && callback.responses.front() == "passage_k61:Committed for Ada ^PCName."
+                && manager.isInChoice() && manager.getChoices().front().second == 7,
             "Committed response/choice/progression not presented");
         manager.questionAnswered(7, &callback);
         require(coordinator.submitted.size() == 2 && coordinator.submitted.back().topic == "passage_k61"
@@ -650,7 +821,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|substitutions");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
@@ -662,6 +833,8 @@ int main(int argc, char** argv)
             client(*crypto);
         else if (filter == "player-stats")
             playerStats(*crypto);
+        else if (filter == "substitutions")
+            substitutions(*crypto);
         else if (filter == "stock") stock(*crypto);
         else throw std::invalid_argument("Unknown dialogue filter");
         std::cout << "PASS dialogue " << filter << '\n'; return 0;

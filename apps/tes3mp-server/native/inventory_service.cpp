@@ -17,6 +17,7 @@
 #include <apps/openmw/mwmechanics/airating.hpp>
 #include <apps/openmw/mwmechanics/aitimer.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <apps/openmw/mwworld/cell.hpp>
 #include <apps/openmw/mwworld/inventoryrecordid.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/inventoryitem.hpp>
@@ -5330,11 +5331,25 @@ namespace TES3MP::Native
         resolver.expected.causalEvent = instance->eventCursor + 1;
         resolver.expected.sourceReference = request.speaker;
         resolver.expected.sourceLife = request.life;
-        const auto stats = loadCombatStats(mRuntime.mStore, mCombat->actors[self], mTimedEffects, self,
+        auto stats = loadCombatStats(mRuntime.mStore, mCombat->actors[self], mTimedEffects, self,
             mBinding.mCharacterCreation);
+        stats.setBounty(mCombat->players[self].bounty);
+        for (const auto& faction : mCombat->players[self].factions)
+        {
+            stats.joinFaction(faction.id);
+            stats.setFactionRank(faction.id, faction.rank, mRuntime.mStore);
+            if (faction.expelled) stats.expell(faction.id, false);
+        }
+        const auto engineCell = mBinding.mEngineCells.find(player->transform().cell());
+        if (engineCell == mBinding.mEngineCells.end())
+            return reject("speaker cell content");
+        const MWWorld::Cell cell(*mRuntime.mStore.get<ESM::Cell>().find(engineCell->second));
+        std::optional<std::string_view> customClassName;
+        if (const auto* custom = std::get_if<CustomClassDefinition>(&*mBinding.mCharacters[self]->characterClass()))
+            customClassName = custom->name;
         auto prepared = mBinding.mPersonalScripts->prepareIntent(prior->state, session->playerId().value(),
-            proposal.commandId().value(), request, 0, "", mRuntime.mStore, resolver,
-            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats);
+            proposal.commandId().value(), request, 0, cell.getCellName(mRuntime.mStore), mRuntime.mStore, resolver,
+            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats, customClassName);
         if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
             return reject(prepared.result.diagnostic.c_str());
         if (prepared.result.executed)

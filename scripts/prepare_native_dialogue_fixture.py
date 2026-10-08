@@ -14,6 +14,7 @@ from native_combat_families_capture import sub
 from run_phase12_movement_capture import free_port
 
 parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--substitutions', action='store_true', help='Exercise private character/speaker/cell response expansion')
 for name in ('base-content', 'stock-config', 'profiles', 'content', 'runtime', 'binary', 'settings'):
     parser.add_argument('--' + name, type=lambda p: Path(p).resolve(), required=True)
 args = parser.parse_args()
@@ -45,6 +46,7 @@ def info(name, previous, following, kind, text, result='', selects=(), status=No
         payload += sub(status, b'\1')
     return record(b'INFO', payload)
 shared = 'dialogue_clock_91'
+text_prefix = '%PCName (%PCRace, %PCClass), %name greets you in %cell. ' if args.substitutions else ''
 blob += script(shared, f'begin {shared}\nend {shared}\n')
 stories = []
 for number, direction in ((91, 'north'), (92, 'south')):
@@ -56,12 +58,12 @@ for number, direction in ((91, 'north'), (92, 'south')):
     stat, function, threshold = ('Strength', 10, 40) if number == 91 else ('Destruction', 21, 20)
     for i, (comparison, description) in enumerate((('3', 'at least'), ('4', 'below'))):
         blob += info(names[i], names[i-1] if i else '', names[i+1], 0,
-            f'Your {stat} is {description} {threshold}. The {direction} passage awaits.',
+            text_prefix + f'Your {stat} is {description} {threshold}. The {direction} passage awaits.',
             f'set calls to calls + 1\nJournal {quest} 10\nMessageBox "Private {direction} notice"\nChoice "Take {direction}" 7 "Wait {direction}" 9',
             [('4JX0' + quest, 0), (f'1{function:02d}{comparison}', threshold)])
     for i, (choice, stage, outcome) in enumerate(((7, 20, 'taken'), (9, 30, 'declined')), 2):
         blob += info(names[i], names[i-1], names[i+1] if i+1 < len(names) else '', 0,
-            f'Your {direction} passage is {outcome}.', f'set calls to calls + 1\nJournal {quest} {stage}',
+            text_prefix + f'Your {direction} passage is {outcome}.', f'set calls to calls + 1\nJournal {quest} {stage}',
             [('4JX0' + quest, 10), ('1500', choice)])
     blob += record(b'DIAL', string(b'NAME', quest) + sub(b'DATA', b'\4'))
     for i, stage in enumerate((10, 20, 30)):

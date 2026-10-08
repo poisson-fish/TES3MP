@@ -81,10 +81,12 @@ namespace TES3MP::Native
         Prepared prepareDialogue(const State&, const MWScript::ExecutionContext&, const ESM::RefId& topic,
             int choice, int disposition, bool talkedToPlayer, std::string_view cellName,
             const MWWorld::ESMStore&, const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction,
-            const MWMechanics::NpcStats* playerStats = nullptr) const;
+            const MWMechanics::NpcStats* playerStats = nullptr,
+            std::optional<std::string_view> customClassName = {}) const;
         Prepared prepareIntent(const State&, uint64_t character, uint64_t command, const DialogueIntent&,
             int disposition, std::string_view cellName, const MWWorld::ESMStore&, const MWScript::ReferenceResolver&,
-            size_t budget = MaximumInvocationsPerTransaction, const MWMechanics::NpcStats* playerStats = nullptr) const;
+            size_t budget = MaximumInvocationsPerTransaction, const MWMechanics::NpcStats* playerStats = nullptr,
+            std::optional<std::string_view> customClassName = {}) const;
 
     private:
         uint64_t mCampaign;

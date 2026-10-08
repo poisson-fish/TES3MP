@@ -20,6 +20,7 @@ namespace ESM4
 namespace MWWorld
 {
     class CellStore;
+    class ESMStore;
 
     class Cell : public ESM::CellVariant
     {
@@ -44,6 +45,7 @@ namespace MWWorld
         const ESM::RefId& getRegion() const { return mRegion; }
         std::string_view getNameId() const { return mNameID; }
         std::string_view getDisplayName() const { return mDisplayname; }
+        std::string_view getCellName(const ESMStore& store) const;
         std::string_view getDescription() const { return mDescription; }
         const MoodData& getMood() const { return mMood; }
         float getWaterHeight() const { return mWaterHeight; }

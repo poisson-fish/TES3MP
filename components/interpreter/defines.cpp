@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <sstream>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -67,20 +69,36 @@ namespace
         return a.length() > b.length();
     }
 
+    void append(std::string& output, std::string_view value, size_t maximumBytes)
+    {
+        if (value.size() > maximumBytes - output.size())
+            throw std::invalid_argument("Dialogue substitution output exceeds bounds");
+        if (maximumBytes != std::numeric_limits<size_t>::max() && value.find('\0') != std::string_view::npos)
+            throw std::invalid_argument("Invalid dialogue substitution text");
+        output.append(value);
+    }
+
+    template<class T> void appendNumber(std::string& output, T value, size_t maximumBytes)
+    {
+        std::ostringstream formatted;
+        formatted << value;
+        append(output, formatted.str(), maximumBytes);
+    }
+
     bool findReplacement(std::string_view temp, size_t& i, size_t& start, Interpreter::Context& context,
-        std::ostringstream& retval, bool dialogue)
+        std::string& retval, bool dialogue, size_t maximumBytes)
     {
         for (const auto& [name, binding] : sActionBindings)
         {
             if (check(temp, name, i, start))
             {
-                retval << context.getActionBinding(binding);
+                append(retval, context.getActionBinding(binding), maximumBytes);
                 return true;
             }
         }
         if (check(temp, "pccrimelevel", i, start))
         {
-            retval << context.getPCBounty();
+            appendNumber(retval, context.getPCBounty(), maximumBytes);
             return true;
         }
         for (const auto& [name, methods] : sContextMethods)
@@ -89,40 +107,48 @@ namespace
             if (check(temp, name, i, start))
             {
                 if (method) // Not all variables are available outside of dialogue
-                    retval << (context.*method)();
+                    append(retval, (context.*method)(), maximumBytes);
                 return true;
             }
         }
         return false;
     }
 
-    std::string fixDefinesReal(std::string_view text, bool dialogue, Interpreter::Context& context)
+    std::string fixDefinesReal(std::string_view text, bool dialogue, Interpreter::Context& context,
+        size_t maximumBytes = std::numeric_limits<size_t>::max())
     {
+        const bool transactional = maximumBytes != std::numeric_limits<size_t>::max();
+        if (text.size() > maximumBytes)
+            throw std::invalid_argument("Dialogue substitution input exceeds bounds");
+        std::vector<std::string> scopedGlobals;
+        auto& names = transactional ? scopedGlobals : globals;
+        bool loadedGlobals = false;
         size_t start = 0;
-        std::ostringstream retval;
+        std::string retval;
         for (size_t i = 0; i < text.length(); ++i)
         {
             char eschar = text[i];
             if (eschar == '%' || eschar == '^')
             {
-                retval << text.substr(start, i - start);
+                append(retval, text.substr(start, i - start), maximumBytes);
                 std::string_view temp = text.substr(i + 1);
 
                 bool found = false;
                 try
                 {
-                    found = findReplacement(temp, i, start, context, retval, dialogue);
+                    found = findReplacement(temp, i, start, context, retval, dialogue, maximumBytes);
                     /* Not a builtin, try global variables */
                     if (!found)
                     {
                         /* if list of globals is empty, grab it and sort it by descending string length */
-                        if (globals.empty())
+                        if (names.empty() && !loadedGlobals)
                         {
-                            globals = context.getGlobals();
-                            sort(globals.begin(), globals.end(), longerStr);
+                            names = context.getGlobals();
+                            sort(names.begin(), names.end(), longerStr);
                         }
+                        loadedGlobals = true;
 
-                        for (const std::string& global : globals)
+                        for (const std::string& global : names)
                         {
                             found = check(temp, global, i, start);
                             if (found)
@@ -132,13 +158,13 @@ namespace
                                 switch (type)
                                 {
                                     case 's':
-                                        retval << context.getGlobalShort(global);
+                                        appendNumber(retval, context.getGlobalShort(global), maximumBytes);
                                         break;
                                     case 'l':
-                                        retval << context.getGlobalLong(global);
+                                        appendNumber(retval, context.getGlobalLong(global), maximumBytes);
                                         break;
                                     case 'f':
-                                        retval << context.getGlobalFloat(global);
+                                        appendNumber(retval, context.getGlobalFloat(global), maximumBytes);
                                         break;
                                 }
                                 break;
@@ -148,6 +174,8 @@ namespace
                 }
                 catch (std::exception& e)
                 {
+                    if (transactional)
+                        throw;
                     Log(Debug::Error) << "Error: Failed to replace escape character, with the following error: "
                                       << e.what();
                     Log(Debug::Error) << "Full text below:\n" << text;
@@ -159,12 +187,12 @@ namespace
                     /* leave unmodified */
                     i += 1;
                     start = i;
-                    retval << eschar;
+                    append(retval, std::string_view(&eschar, 1), maximumBytes);
                 }
             }
         }
-        retval << text.substr(start, text.length() - start);
-        return retval.str();
+        append(retval, text.substr(start, text.length() - start), maximumBytes);
+        return retval;
     }
 
 }
@@ -174,6 +202,11 @@ namespace Interpreter
     std::string fixDefinesDialog(std::string_view text, Context& context)
     {
         return fixDefinesReal(text, true, context);
+    }
+
+    std::string fixDefinesDialog(std::string_view text, Context& context, size_t maximumBytes)
+    {
+        return fixDefinesReal(text, true, context, maximumBytes);
     }
 
     std::string fixDefinesMsgBox(std::string_view text, Context& context)

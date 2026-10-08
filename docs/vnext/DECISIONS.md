@@ -252,7 +252,9 @@ living unscripted speakers. First topic seeds knowledge; durable revisions/recei
 bind source/life. Reserve two intents within sixteen invocations. Filters read detached
 character attributes/skills/resources through stock comparisons; result stat writes stay closed.
 Clients retain early personal baselines through body installation and reopen other-story
-choices silently. Literal responses/progression never execute results or replay transient output.
+choices silently. Bounded stock response substitutions use authenticated character/speaker, staged ranks/bounty,
+owned globals and shared stock cell naming before results; errors/waits discard output.
+Clients never re-expand responses or replay transient output. Changed admission policies reject old images.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

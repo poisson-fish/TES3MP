@@ -6,7 +6,7 @@
       "id": "M5-003",
       "slice": "character/story dialogue transactions, authenticated intents and committed presentation",
       "owner": "OpenMW dialogue Filter, Quest/Topic and MWScript stock compiler/opcodes",
-      "purpose": "Stock INFO ordering, comparisons and result bytecode use explicit character/story state. V84 retains trusted calls. V85 binds authenticated topics and offered choices to a living placed unscripted NPC and the owned primary bank; current reach, sight, life and complete execution identity validate. Journals, topics, choices, bank writes and revision/command receipts join gameplay durability. Reliable private views carry literal responses, messages and progression metadata; reconnect is silent. The stock client manager submits intents and presents committed views without local filters, results, Journal, World or Lua writes. Bounds and policy/content identities reject incompatible images. Physical results, greetings, journal text/timestamps and unsupported filter services remain closed.",
+      "purpose": "Stock INFO ordering, comparisons and result bytecode use explicit character/story state. V84 retains trusted calls. V85 binds authenticated topics and offered choices to a living placed unscripted NPC and the owned primary bank; current reach, sight, life and complete execution identity validate. Journals, topics, choices, bank writes and revision/command receipts join gameplay durability. Stock response substitutions read authenticated character/speaker/content, staged faction ranks/bounty, authoritative cell names and owned globals before result execution. Bounded expansion propagates errors/waits and isolates global-name lookup; unsupported action bindings reject. Reliable private views carry expanded responses, literal messages and progression metadata; reconnect is silent. The stock client manager presents committed views without re-expansion, local filters, results, Journal, World or Lua writes. Bounds and policy/content identities reject incompatible images. Physical results, greetings, nonzero disposition thresholds, journal text/timestamps and unsupported filter services remain closed.",
       "paths": [
         "apps/openmw/mwdialogue/filter.cpp",
         "apps/openmw/mwdialogue/filter.hpp",
@@ -20,7 +20,12 @@
         "apps/openmw/mwscript/dialogueextensions.hpp",
         "apps/openmw/mwbase/dialoguemanager.hpp",
         "apps/openmw/mwdialogue/dialoguemanagerimp.cpp",
-        "apps/openmw/mwdialogue/dialoguemanagerimp.hpp"
+        "apps/openmw/mwdialogue/dialoguemanagerimp.hpp",
+        "components/interpreter/defines.cpp",
+        "components/interpreter/defines.hpp",
+        "apps/openmw/mwworld/cell.cpp",
+        "apps/openmw/mwworld/cell.hpp",
+        "apps/openmw/mwworld/worldimp.cpp"
       ],
       "tests": [
         "tes3mp_native_dialogue_tests isolation",
@@ -31,6 +36,7 @@
         "tes3mp_native_dialogue_tests intents",
         "tes3mp_native_dialogue_tests client",
         "tes3mp_native_dialogue_tests player-stats",
+        "tes3mp_native_dialogue_tests substitutions",
         "openmw_tes3mp_adapter_tests chargen-installation",
         "tes3mp_native_loadout_tests dialogue-intents NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
         "openmw_tes3mp_adapter_tests personal-dialogue",

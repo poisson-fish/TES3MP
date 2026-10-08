@@ -69,9 +69,11 @@ online established characters once/tick without catch-up. V83 uses
 V84 adds `dialogues COUNT "RECORD"...` per story (1–16 DIAL, 64 INFO, 16 conditions/INFO).
 V85 requires fresh campaigns/capability 40: ≤14 mirrored scripts reserve two dialogue calls/tick,
 one/character; first topic seeds menus. Living unscripted speakers validate reach/sight/life.
-Private literal responses/messages, choices and progression metadata follow durability;
+Private responses use bounded stock substitutions with authenticated character/speaker,
+staged ranks/bounty, owned globals and authoritative cell names before results;
+action bindings reject. Literal messages, choices and progression follow durability;
 reconnect is silent. Filters read staged modified attributes/skills, current resources
-and health percentage; result stat writes remain closed. Journal text/timestamps, substitutions, nonzero disposition thresholds,
+and health percentage; result stat writes remain closed. Journal text/timestamps, nonzero disposition thresholds,
 physical results and NPC restoration remain closed. Prior images never silently migrate;
 V81–84 personal output stays closed. Bootstrap emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.

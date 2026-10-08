@@ -5,6 +5,8 @@
 #include "../mwbase/environment.hpp"
 
 #include <components/esm3/loadcell.hpp>
+#include <components/esm3/loadgmst.hpp>
+#include <components/esm3/loadregn.hpp>
 #include <components/esm4/loadcell.hpp>
 #include <components/esm4/loadwrld.hpp>
 #include <components/misc/algorithm.hpp>
@@ -14,6 +16,37 @@
 
 namespace MWWorld
 {
+    std::string_view Cell::getCellName(const ESMStore& store) const
+    {
+        if (!isExterior() || !getDisplayName().empty())
+            return getDisplayName();
+
+        if (!getRegion().empty())
+        {
+            std::string_view regionName
+                = ESM::visit(ESM::VisitOverload{
+                                 [&](const ESM::Cell&) -> std::string_view {
+                                     if (const ESM::Region* region = store.get<ESM::Region>().search(getRegion()))
+                                         return !region->mName.empty() ? region->mName : region->mId.getRefIdString();
+                                     return {};
+                                 },
+                                 [&](const ESM4::Cell&) -> std::string_view { return {}; },
+                             },
+                    *this);
+            if (!regionName.empty())
+                return regionName;
+        }
+
+        if (!getWorldSpace().empty() && ESM::isEsm4Ext(getWorldSpace()))
+        {
+            if (const ESM4::World* worldspace = store.get<ESM4::World>().search(getWorldSpace()))
+                if (!worldspace->mFullName.empty())
+                    return worldspace->mFullName;
+        }
+
+        return store.get<ESM::GameSetting>().find("sDefaultCellname")->mValue.getString();
+    }
+
     namespace
     {
         std::string getDescription(const ESM4::World& value)

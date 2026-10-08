@@ -547,33 +547,7 @@ namespace MWWorld
 
     std::string_view World::getCellName(const MWWorld::Cell& cell) const
     {
-        if (!cell.isExterior() || !cell.getDisplayName().empty())
-            return cell.getDisplayName();
-
-        if (!cell.getRegion().empty())
-        {
-            std::string_view regionName
-                = ESM::visit(ESM::VisitOverload{
-                                 [&](const ESM::Cell& cellIn) -> std::string_view {
-                                     if (const ESM::Region* region = mStore.get<ESM::Region>().search(cell.getRegion()))
-                                         return !region->mName.empty() ? region->mName : region->mId.getRefIdString();
-                                     return {};
-                                 },
-                                 [&](const ESM4::Cell& cellIn) -> std::string_view { return {}; },
-                             },
-                    cell);
-            if (!regionName.empty())
-                return regionName;
-        }
-
-        if (!cell.getWorldSpace().empty() && ESM::isEsm4Ext(cell.getWorldSpace()))
-        {
-            if (const ESM4::World* worldspace = mStore.get<ESM4::World>().search(cell.getWorldSpace()))
-                if (!worldspace->mFullName.empty())
-                    return worldspace->mFullName;
-        }
-
-        return mStore.get<ESM::GameSetting>().find("sDefaultCellname")->mValue.getString();
+        return cell.getCellName(mStore);
     }
 
     void World::removeRefScript(const MWWorld::CellRef* ref)
