@@ -30,6 +30,16 @@
 
 namespace
 {
+    bool isStagedPlayerStat(ESM::DialogueCondition::Function function)
+    {
+        using Condition = ESM::DialogueCondition;
+        return (function >= Condition::Function_PcBlock && function <= Condition::Function_PcHandToHand)
+            || function == Condition::Function_PcStrength
+            || (function >= Condition::Function_PcIntelligence && function <= Condition::Function_PcLuck)
+            || function == Condition::Function_PcHealth || function == Condition::Function_PcMagicka
+            || function == Condition::Function_PcFatigue || function == Condition::Function_PcHealthPercent;
+    }
+
     bool matchesStaticFilters(const MWDialogue::SelectWrapper& select, const MWWorld::Ptr& actor)
     {
         const ESM::RefId selectId = select.getId();
@@ -166,10 +176,14 @@ bool MWDialogue::Filter::testActor(const ESM::DialInfo& info) const
 
 bool MWDialogue::Filter::testPlayer(const ESM::DialInfo& info) const
 {
-    if (mScoped && info.mPcFaction.empty() && info.mData.mPCrank == -1)
+    if (mScoped)
+    {
+        if (!info.mPcFaction.empty() || info.mData.mPCrank != -1)
+            throw std::invalid_argument("Dialogue player factions are not staged");
         return info.mCell.empty() || Misc::StringUtils::ciStartsWith(mScoped->cellName, info.mCell.getRefIdString());
-    const MWWorld::Ptr player = mScoped ? mScoped->script.getPlayer() : MWMechanics::getPlayer();
-    MWMechanics::NpcStats& stats = mScoped ? mScoped->script.getPlayerStats() : player.getClass().getNpcStats(player);
+    }
+    const MWWorld::Ptr player = MWMechanics::getPlayer();
+    MWMechanics::NpcStats& stats = player.getClass().getNpcStats(player);
 
     // check player faction and rank
     if (!info.mPcFaction.empty())
@@ -278,7 +292,7 @@ bool MWDialogue::Filter::testFunctionLocal(const MWDialogue::SelectWrapper& sele
 
 bool MWDialogue::Filter::testSelectStruct(const SelectWrapper& select) const
 {
-    if (mScoped)
+    if (mScoped && !isStagedPlayerStat(select.getFunction()))
     {
         // Reject unknown services before any singleton read. Ordering and all
         // accepted comparisons below remain the stock filter implementation.
@@ -362,18 +376,19 @@ bool MWDialogue::Filter::testSelectStructNumeric(const SelectWrapper& select) co
 
         case ESM::DialogueCondition::Function_PcHealthPercent:
         {
-            MWWorld::Ptr player = MWMechanics::getPlayer();
+            const auto player = mScoped ? MWWorld::Ptr{} : MWMechanics::getPlayer();
+            const auto& stats = mScoped ? mScoped->script.getPlayerStats() : player.getClass().getCreatureStats(player);
             return select.selectCompare(
-                static_cast<int>(player.getClass().getCreatureStats(player).getHealth().getRatio() * 100));
+                static_cast<int>(stats.getHealth().getRatio() * 100));
         }
 
         case ESM::DialogueCondition::Function_PcMagicka:
         case ESM::DialogueCondition::Function_PcFatigue:
         case ESM::DialogueCondition::Function_PcHealth:
         {
-            MWWorld::Ptr player = MWMechanics::getPlayer();
-
-            float value = player.getClass().getCreatureStats(player).getDynamic(select.getArgument()).getCurrent();
+            const auto player = mScoped ? MWWorld::Ptr{} : MWMechanics::getPlayer();
+            const auto& stats = mScoped ? mScoped->script.getPlayerStats() : player.getClass().getCreatureStats(player);
+            float value = stats.getDynamic(select.getArgument()).getCurrent();
 
             return select.selectCompare(value);
         }
@@ -442,7 +457,8 @@ int MWDialogue::Filter::getSelectStructInteger(const SelectWrapper& select) cons
         case ESM::DialogueCondition::Function_PcLuck:
         {
             ESM::RefId attribute = ESM::Attribute::indexToRefId(select.getArgument());
-            return static_cast<int>(player.getClass().getCreatureStats(player).getAttribute(attribute).getModified());
+            const auto& stats = mScoped ? mScoped->script.getPlayerStats() : player.getClass().getCreatureStats(player);
+            return static_cast<int>(stats.getAttribute(attribute).getModified());
         }
         case ESM::DialogueCondition::Function_PcBlock:
         case ESM::DialogueCondition::Function_PcArmorer:
@@ -473,7 +489,8 @@ int MWDialogue::Filter::getSelectStructInteger(const SelectWrapper& select) cons
         case ESM::DialogueCondition::Function_PcHandToHand:
         {
             ESM::RefId skill = ESM::Skill::indexToRefId(select.getArgument());
-            return static_cast<int>(player.getClass().getNpcStats(player).getSkill(skill).getModified());
+            const auto& stats = mScoped ? mScoped->script.getPlayerStats() : player.getClass().getNpcStats(player);
+            return static_cast<int>(stats.getSkill(skill).getModified());
         }
         case ESM::DialogueCondition::Function_FriendHit:
         {

@@ -6323,6 +6323,16 @@ namespace TES3MP::Native::Testing
                                 select.mComparison = ESM::DialogueCondition::Comp_Eq;
                                 select.mValue = 0;
                                 info.mSelects.push_back(select);
+                                // Authoritative filtering must stage the authenticated
+                                // character's current resource and modified stat banks.
+                                select.mFunction = ESM::DialogueCondition::Function_PcHealth;
+                                select.mVariable.clear();
+                                select.mComparison = ESM::DialogueCondition::Comp_Gt;
+                                info.mSelects.push_back(select);
+                                select.mFunction = ESM::DialogueCondition::Function_PcIntelligence;
+                                info.mSelects.push_back(select);
+                                select.mFunction = ESM::DialogueCondition::Function_PcAlchemy;
+                                info.mSelects.push_back(select);
                                 info.mResponse = "A private passage.";
                                 info.mResultScript += "Choice \"Proceed\" 7\n";
                             }
@@ -6341,6 +6351,7 @@ namespace TES3MP::Native::Testing
                         if (personalIntents && std::string_view(name) == "passage_k61")
                         {
                             info.mId = ESM::RefId::stringRefId("answer_7");
+                            info.mSelects.resize(1);
                             info.mSelects.front().mFunction = ESM::DialogueCondition::Function_Choice;
                             info.mSelects.front().mVariable.clear();
                             info.mSelects.front().mValue = 7;
@@ -9579,6 +9590,12 @@ namespace TES3MP::Native::Testing
                             authority, id<ServerTick>(tick), 1.f / 30, std::move(input), &world, {}, {});
                     };
                     const auto before = image(service);
+                    auto idle = native.prepareNativePlayerTick(
+                        authority, id<ServerTick>(5), 1.f / 30, nullptr, &world, {}, {});
+                    const auto idleViews = service.projectPersonalDialogue(
+                        authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), idle.get());
+                    require(idle && idleViews.size() == 2 && idleViews[0].revision == 0,
+                        "Ordinary live tick lost initial personal dialogue baselines");
                     auto candidate = prepare(native, 5, 1, 101, request);
                     auto alice = service.projectPersonalDialogue(
                         authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), candidate.get());

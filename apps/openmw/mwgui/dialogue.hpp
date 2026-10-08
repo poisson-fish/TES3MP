@@ -147,6 +147,10 @@ namespace MWGui
 
         void notifyLinkClicked(TypesetBook::InteractiveId link);
 
+        // Semantic input and desktop evidence use the same handlers as GUI links.
+        void onTopicActivated(const std::string& topicId);
+        void onChoiceActivated(int id);
+
         void setPtr(const MWWorld::Ptr& actor) override;
 
         /// @return true if stale keywords were updated successfully
@@ -174,8 +178,6 @@ namespace MWGui
         void onByeClicked(MyGUI::Widget* sender);
         void onMouseWheel(MyGUI::Widget* sender, int rel);
         void onWindowResize(MyGUI::Window* sender);
-        void onTopicActivated(const std::string& topicId);
-        void onChoiceActivated(int id);
         void onGoodbyeActivated();
 
         void onScrollbarMoved(MyGUI::ScrollBar* sender, size_t pos);

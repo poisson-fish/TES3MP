@@ -502,6 +502,22 @@ namespace MWDialogue
             const auto story = found == mPersonalTopics.end() ? mPersonalStory : found->second.first;
             const auto topic = found == mPersonalTopics.end() ? std::string(keyword) : found->second.second;
             const auto speaker = multiplayer->dialogueSpeaker(mActor);
+            const auto views = multiplayer->personalDialogue();
+            const auto pending = std::ranges::find_if(views, [&](const auto& view) {
+                return view.story == story && speaker && view.speaker == speaker->first
+                    && view.life == speaker->second && view.topic == topic && !view.choices.empty();
+            });
+            if (pending != views.end())
+            {
+                mPersonalStory = story;
+                mPersonalCallback = callback;
+                mPersonalRevision = UINT64_MAX;
+                auto restored = *pending;
+                restored.response.clear();
+                restored.messages.clear();
+                presentPersonalDialogue(restored);
+                return;
+            }
             if (speaker && multiplayer->submitPersonalDialogue(story, *speaker, topic, -1))
             {
                 mPersonalStory = story;

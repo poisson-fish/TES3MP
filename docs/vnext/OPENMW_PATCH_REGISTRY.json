@@ -30,12 +30,14 @@
         "tes3mp_native_loadout_tests dialogue NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
         "tes3mp_native_dialogue_tests intents",
         "tes3mp_native_dialogue_tests client",
+        "tes3mp_native_dialogue_tests player-stats",
+        "openmw_tes3mp_adapter_tests chargen-installation",
         "tes3mp_native_loadout_tests dialogue-intents NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
         "openmw_tes3mp_adapter_tests personal-dialogue",
         "tes3mp_server_app_tests personal-dialogue-ingress",
         "tes3mp_combat_interest_projection_tests personal-dialogue"
       ],
-      "disposition": "V85 authenticated personal dialogue and presentation through gameplay durability; V84 trusted migration preserved. Physical results and broader NPC restoration remain closed.",
+      "disposition": "V85 authenticated personal dialogue and presentation through gameplay durability; V84 trusted migration preserved. Stock filters read detached character attributes, skills and resources without admitting result stat writes. Early baselines survive character installation; other-story pending choices restore silently. Two rendered clients prove private divergent progression and reconnect/restart without transient replay using semantic input. Physical results and broader NPC restoration remain closed.",
       "removal_condition": "OpenMW supplies equivalent explicit scoped dialogue filtering, result execution and transactional progression interfaces"
     },
     {

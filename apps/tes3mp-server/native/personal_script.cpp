@@ -1,6 +1,7 @@
 #include "personal_script.hpp"
 #include <algorithm>
 #include <apps/openmw/mwdialogue/filter.hpp>
+#include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/scriptstate.hpp>
 #include <apps/openmw/mwworld/class.hpp>
@@ -180,8 +181,8 @@ namespace TES3MP::Native
             const std::vector<ESM::Global>& globals;
             FilterContext(const MWScript::ExecutionContext& execution, const MWWorld::ESMStore& content,
                 const MWScript::ReferenceResolver& resolver, Bank& bank, MWScript::DialogueState& dialogue,
-                const std::vector<ESM::Global>& values)
-                : InterpreterContext(nullptr, execution, content, resolver, nullptr, &bank, &dialogue), globals(values) {}
+                const std::vector<ESM::Global>& values, MWMechanics::NpcStats* playerStats)
+                : InterpreterContext(nullptr, execution, content, resolver, playerStats, &bank, &dialogue), globals(values) {}
             const ESM::Variant& global(std::string_view id) const
             {
                 auto found = std::ranges::find(globals, ESM::RefId::stringRefId(id), &ESM::Global::mId);
@@ -602,7 +603,7 @@ namespace TES3MP::Native
     PersonalScripts::Prepared PersonalScripts::prepareDialogue(const State& before,
         const MWScript::ExecutionContext& execution, const ESM::RefId& topic, int choice, int disposition,
         bool talkedToPlayer, std::string_view cellName, const MWWorld::ESMStore& content,
-        const MWScript::ReferenceResolver& resolver, size_t budget) const
+        const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats) const
     {
         Prepared prepared; auto& result = prepared.result; result.invocationTick = execution.invocation;
         try
@@ -629,7 +630,12 @@ namespace TES3MP::Native
             MWScript::DialogueState dialogue(execution, state.dialogue, found->dialogues, mIntents);
             const auto& record = dialogue.record(topic, ESM::Dialogue::Topic);
             Bank bank(execution, *found, state);
-            FilterContext script(execution, content, resolver, bank, dialogue, state.runtime.runtime.globals);
+            // Only filtering sees the detached read snapshot. Result opcodes retain
+            // their existing service boundary, so this cannot admit stat writes.
+            std::optional<MWMechanics::NpcStats> stats;
+            if (playerStats) stats.emplace(*playerStats);
+            FilterContext script(execution, content, resolver, bank, dialogue, state.runtime.runtime.globals,
+                stats ? &*stats : nullptr);
             const auto actor = script.resolveReference({});
             require(actor.hasLiveReference()
                 && (mIntents ? actor.getClass().getScript(actor).empty()
@@ -676,7 +682,7 @@ namespace TES3MP::Native
 
     PersonalScripts::Prepared PersonalScripts::prepareIntent(const State& before, uint64_t character, uint64_t command,
         const DialogueIntent& request, int disposition, std::string_view cellName, const MWWorld::ESMStore& content,
-        const MWScript::ReferenceResolver& resolver, size_t budget) const
+        const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats) const
     {
         Prepared rejected;
         try
@@ -715,7 +721,7 @@ namespace TES3MP::Native
             const bool talked
                 = std::ranges::find(found->talkedSpeakers, request.speaker) != found->talkedSpeakers.end();
             auto prepared = prepareDialogue(before, execution, ESM::RefId::stringRefId(request.topic), request.choice,
-                disposition, talked, cellName, content, resolver, budget);
+                disposition, talked, cellName, content, resolver, budget, playerStats);
             if (prepared.result.outcome != SharedWorldScript::Outcome::Committed || !prepared.result.executed)
                 return prepared;
             auto& state = prepared.state[size_t(found - before.begin())];

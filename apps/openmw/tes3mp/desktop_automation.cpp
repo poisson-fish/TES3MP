@@ -1337,7 +1337,41 @@ namespace TES3MP::OpenMWAdapter
     ProviderResult DesktopAutomation::applyPersonalDialogue(
         const ReliablePersonalDialogue& view, MonotonicInstant now) noexcept
     {
-        return mPresentation.applyPersonalDialogue(view, now);
+        const auto result = mPresentation.applyPersonalDialogue(view, now);
+        if (result != ProviderResult::Accepted) return result;
+        if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+        {
+            const auto json = [&](std::string_view text) {
+                mOutput << '"';
+                for (unsigned char c : text)
+                    if (c < 32) mOutput << "\\u00" << std::hex << std::setw(2) << std::setfill('0') << unsigned(c) << std::dec;
+                    else { if (c == '"' || c == '\\') mOutput << '\\'; mOutput << char(c); }
+                mOutput << '"';
+            };
+            mOutput << "{\"event\":\"personal_dialogue_presented\",\"session\":" << view.targetSessionId.value()
+                << ",\"generation\":" << view.targetSessionGeneration.value() << ",\"tick\":" << view.serverTick.value()
+                << ",\"revision\":" << view.revision << ",\"story\":" << view.story << ",\"speaker\":" << view.speaker
+                << ",\"life\":" << view.life << ",\"command\":" << view.command << ",\"topic\":";
+            json(view.topic); mOutput << ",\"response\":"; json(view.response);
+            mOutput << ",\"choices\":[";
+            for (size_t i = 0; i < view.choices.size(); ++i)
+            {
+                if (i) mOutput << ',';
+                mOutput << "{\"id\":" << view.choices[i].id << ",\"text\":";
+                json(view.choices[i].text); mOutput << '}';
+            }
+            mOutput << "],\"quests\":[";
+            for (size_t i = 0; i < view.quests.size(); ++i)
+            {
+                if (i) mOutput << ',';
+                mOutput << "{\"topic\":"; json(view.quests[i].topic);
+                mOutput << ",\"index\":" << view.quests[i].index << ",\"finished\":" << (view.quests[i].finished ? "true" : "false") << '}';
+            }
+            mOutput << "],\"messages\":[";
+            for (size_t i = 0; i < view.messages.size(); ++i) { if (i) mOutput << ','; json(view.messages[i]); }
+            mOutput << "]}\n"; mOutput.flush(); ++mEvidenceEvents;
+        }
+        return result;
     }
 
     ProviderResult DesktopAutomation::applyAmbient(const ReliableAmbientBatch& batch, MonotonicInstant now) noexcept

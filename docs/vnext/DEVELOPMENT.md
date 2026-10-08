@@ -2,7 +2,7 @@
 
 ## Working loop
 
-1. Read [CURRENT](CURRENT.md), [DEVELOPMENT](DEVELOPMENT.md), [README](README.md) and active [PLAN](PLAN.md); consult [DECISIONS](DECISIONS.md) for boundaries/persistence.
+1. Follow [AGENTS.md](../../AGENTS.md)'s read order.
 2. Use code/tests/`git status`; inspect history only for unanswered questions.
 3. Preserve one writer/migration; share handlers/checks/dependencies.
 4. Run the smallest affected check; fix/rerun failures.
@@ -70,7 +70,8 @@ V84 adds `dialogues COUNT "RECORD"...` per story (1–16 DIAL, 64 INFO, 16 condi
 V85 requires fresh campaigns/capability 40: ≤14 mirrored scripts reserve two dialogue calls/tick,
 one/character; first topic seeds menus. Living unscripted speakers validate reach/sight/life.
 Private literal responses/messages, choices and progression metadata follow durability;
-reconnect is silent. Journal text/timestamps, substitutions, nonzero disposition thresholds,
+reconnect is silent. Filters read staged modified attributes/skills, current resources
+and health percentage; result stat writes remain closed. Journal text/timestamps, substitutions, nonzero disposition thresholds,
 physical results and NPC restoration remain closed. Prior images never silently migrate;
 V81–84 personal output stays closed. Bootstrap emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.

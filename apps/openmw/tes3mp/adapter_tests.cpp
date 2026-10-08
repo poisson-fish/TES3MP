@@ -1278,7 +1278,8 @@ void chargenInstallation()
         const ReconnectConfiguration reconnect{endpoint, timeouts, outbound, testContentManifestId()};
         auto runtime = std::get<std::unique_ptr<ClientSessionRuntime>>(
             ClientSessionRuntime::create(*wire, *timer, timeouts, SessionGeneration::initial(), outbound));
-        std::vector capabilities{inventoryReplicationCapability(), combatReplicationCapability(), playerAppearanceCapability()};
+        std::vector capabilities{inventoryReplicationCapability(), combatReplicationCapability(), playerAppearanceCapability(),
+            personalDialogueCapability()};
         std::ranges::sort(capabilities);
         auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(
             std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1,3,3)), capabilities, {}));
@@ -1291,7 +1292,7 @@ void chargenInstallation()
         const auto hello = [&] {
             coordinator->frame(.01f);
             wire->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
-                encodeServerHello(serverHello(false,false,false,true,true,3,false,false,false,false,false,true)),
+                encodeServerHello(serverHello(false,false,false,true,true,3,false,false,false,false,false,true,false,false,true)),
                 TransportChannel::ReliableOrdered);
             coordinator->frame(.01f);
         };
@@ -1337,6 +1338,15 @@ void chargenInstallation()
             encodeAuthenticationAccepted(accepted(std::byte{7}, MinimumResumeTokenLifetimeMilliseconds, false,
                 CharacterLifecycle::NewCharacter)), TransportChannel::ReliableOrdered);
         spatial(1,1); coordinator->frame(.01f);
+        ReliablePersonalDialogue early{value<SessionId>(1), generation, value<ServerTick>(1), value<CanonicalRevision>(1)};
+        early.story = 71; early.topics = {"early topic"}; early.revision = 1; early.command = 8;
+        early.speaker = 41; early.life = 3; early.topic = "early topic";
+        early.choices = {{"Retained choice", 7}}; early.response = "Missed response";
+        early.messages = {"Missed message"};
+        wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePersonalDialogue,
+            encodeReliablePersonalDialogue(early), TransportChannel::ReliableOrdered);
+        coordinator->frame(.01f);
+        require(presentation.personal.empty() && coordinator->personalDialogue().size() == 1);
         require(coordinator->submitCharacterCreation(CompleteCharacterCreation{}));
         if (order == 1) { inventory(completion); equipment(completion); }
         if (order != 2) profile(completion);
@@ -1358,6 +1368,9 @@ void chargenInstallation()
             && presentation.installationOrder.size() >= 3 && presentation.installationOrder[0] == 1
             && presentation.installationOrder[1] == 2 && presentation.installationOrder[2] == 3);
         require(coordinator->characterLifecycle() == CharacterLifecycle::EstablishedCharacter);
+
+        require(presentation.personal.size() == 1 && presentation.personal.front().response.empty()
+            && presentation.personal.front().messages.empty() && presentation.personal.front().choices == early.choices);
 
         // Resume uses a new session generation and a coherent current image.
         control.pending = true; coordinator->frame(.01f);

@@ -240,7 +240,7 @@ namespace TES3MP::OpenMWAdapter
             {
                 mInput.clearSessionState();
                 mPresentation.clear();
-                mPersonalDialogue.clear();
+                mPersonalDialogue.clear(); mPersonalDialogueDirty.clear();
                 if (mRuntime)
                     mRuntime->close();
             }
@@ -294,6 +294,24 @@ namespace TES3MP::OpenMWAdapter
                 {
                     handleRuntimeFailure(advanced.result, advanced.action, now);
                     return;
+                }
+                // Personal baselines can precede character/body installation.
+                // Retain their persistent state across that early return, while
+                // discarding transient output until the character is ready.
+                for (const auto& view : advanced.personalDialogue)
+                {
+                    auto found = std::ranges::find(mPersonalDialogue, view.story, &ReliablePersonalDialogue::story);
+                    auto persistent = view;
+                    persistent.response.clear();
+                    persistent.messages.clear();
+                    if (found == mPersonalDialogue.end()) mPersonalDialogue.push_back(std::move(persistent));
+                    else *found = std::move(persistent);
+                    if (std::ranges::find(mPersonalDialogueDirty, view.story) == mPersonalDialogueDirty.end())
+                        mPersonalDialogueDirty.push_back(view.story);
+                    if (mPendingPersonal && view.story == mPendingPersonal->intent.story
+                        && (view.command == mPendingPersonal->commandId.value()
+                            || view.revision > mPendingPersonal->intent.revision))
+                        mPendingPersonal.reset();
                 }
                 for (const auto& dialogue : advanced.dialogueChoiceResults)
                 {
@@ -787,26 +805,18 @@ namespace TES3MP::OpenMWAdapter
                         }
                     }
                 }
-                for (const auto& view : advanced.personalDialogue)
+                for (const auto story : mPersonalDialogueDirty)
                 {
-                    auto found = std::ranges::find(mPersonalDialogue, view.story, &ReliablePersonalDialogue::story);
-                    auto persistent = view;
-                    persistent.response.clear();
-                    persistent.messages.clear();
-                    if (found == mPersonalDialogue.end())
-                        mPersonalDialogue.push_back(std::move(persistent));
-                    else
-                        *found = std::move(persistent);
-                    if (mPendingPersonal && view.story == mPendingPersonal->intent.story
-                        && (view.command == mPendingPersonal->commandId.value()
-                            || view.revision > mPendingPersonal->intent.revision))
-                        mPendingPersonal.reset();
+                    const auto live = std::ranges::find(advanced.personalDialogue, story, &ReliablePersonalDialogue::story);
+                    const auto& view = live == advanced.personalDialogue.end()
+                        ? *std::ranges::find(mPersonalDialogue, story, &ReliablePersonalDialogue::story) : *live;
                     if (mPresentation.applyPersonalDialogue(view, now) != ProviderResult::Accepted)
                     {
                         closeForProviderFailure(ProviderResult::PresentationFailed);
                         return;
                     }
                 }
+                mPersonalDialogueDirty.clear();
                 if (mPendingPersonal && mRuntime->session().stateMachine().confirmedSnapshot())
                 {
                     const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
@@ -1276,7 +1286,7 @@ namespace TES3MP::OpenMWAdapter
                 }
                 mInput.clearSessionState();
                 mPresentation.clear();
-                mPersonalDialogue.clear();
+                mPersonalDialogue.clear(); mPersonalDialogueDirty.clear();
                 mMotion = MotionIntentTracker(mMovementMetrics);
                 mPoseEvidence.clear();
                 mPoseSequence.reset();
@@ -1355,7 +1365,7 @@ namespace TES3MP::OpenMWAdapter
 
                 mInput.clearSessionState();
                 mPresentation.clear();
-                mPersonalDialogue.clear();
+                mPersonalDialogue.clear(); mPersonalDialogueDirty.clear();
                 if (mRuntime)
                     mRuntime->close();
                 if (action == ClientSessionAction::SessionRejected || authentication || protocol)
@@ -1452,7 +1462,7 @@ namespace TES3MP::OpenMWAdapter
                     unsigned(status), location.line());
                 mInput.clearSessionState();
                 mPresentation.clear();
-                mPersonalDialogue.clear();
+                mPersonalDialogue.clear(); mPersonalDialogueDirty.clear();
                 if (mRuntime)
                     mRuntime->close();
                 mRuntime.reset();
@@ -1499,6 +1509,7 @@ namespace TES3MP::OpenMWAdapter
             };
             std::optional<PendingPersonal> mPendingPersonal;
             std::vector<ReliablePersonalDialogue> mPersonalDialogue;
+            std::vector<uint64_t> mPersonalDialogueDirty;
             std::optional<PendingDialogueChoice> mPendingDialogueChoice;
             std::optional<DialogueChoiceResolution> mDialogueChoiceResolution;
             bool mReady = false;

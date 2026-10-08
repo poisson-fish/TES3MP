@@ -10,6 +10,7 @@
 #include "../mwworld/scene.hpp"
 #include "../mwgui/container.hpp"
 #include "../mwgui/countdialog.hpp"
+#include "../mwgui/dialogue.hpp"
 #include "../mwgui/inventorywindow.hpp"
 #include "../mwgui/hud.hpp"
 #include "../mwgui/itemview.hpp"
@@ -549,12 +550,17 @@ namespace TES3MP::OpenMWAdapter
         }
         else if (action == "activate" || action == "put" || action == "drop" || action == "equip" || action == "cast" || action == "castactor"
             || action == "castdoor" || action == "castcontainer" || action == "castat" || action == "castpredict"
-            || action == "dialogue" || action == "dialoguestart")
+            || action == "dialogue" || action == "dialoguestart" || action == "dialoguetopic")
         {
             if (!(file >> std::quoted(record)) || record.size() > 64)
                 throw std::runtime_error("Traversal record argument invalid");
             if ((action == "castat" || action == "castpredict") && (!(file >> targetKind >> targetId) || targetKind < 1 || targetKind > 2 || !targetId))
                 throw std::runtime_error("Traversal spell target invalid");
+        }
+        else if (action == "dialoguechoice")
+        {
+            if (!(file >> targetId) || targetId > INT32_MAX)
+                throw std::runtime_error("Traversal dialogue choice invalid");
         }
         if (file >> trailing) throw std::runtime_error("Trailing traversal control input");
         if (action == "stoptrace")
@@ -796,6 +802,17 @@ namespace TES3MP::OpenMWAdapter
                 mOutput.flush();
                 ++mEvidenceEvents;
             }
+        }
+        else if (action == "dialoguetopic" || action == "dialoguechoice")
+        {
+            if (!wm->containsMode(MWGui::GM_Dialogue))
+                throw std::runtime_error("Traversal dialogue window is not open");
+            MWGui::DialogueWindow* dialogue = nullptr;
+            for (auto* window : wm->getGuiModeWindows(MWGui::GM_Dialogue))
+                if (auto* found = dynamic_cast<MWGui::DialogueWindow*>(window)) dialogue = found;
+            if (!dialogue) throw std::runtime_error("Traversal dialogue window missing");
+            if (action == "dialoguetopic") dialogue->onTopicActivated(record);
+            else dialogue->onChoiceActivated(static_cast<int>(targetId));
         }
         else if (action == "dialogueclose")
         {

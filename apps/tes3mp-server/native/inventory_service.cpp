@@ -5288,15 +5288,16 @@ namespace TES3MP::Native
         struct Resolver final : MWScript::ReferenceResolver
         {
             MWScript::ExecutionContext expected;
-            MWWorld::Ptr ptr;
+            MWWorld::Ptr ptr, player;
             MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool) const override
             {
-                if (execution != expected || !id.empty())
+                if (execution != expected || (!id.empty() && id != ESM::RefId::stringRefId("player")))
                     throw std::invalid_argument("Unadmitted dialogue reference");
-                return ptr;
+                return id.empty() ? ptr : player;
             }
         } resolver;
         resolver.ptr = ptr;
+        resolver.player = mRuntime.mActors[self]->getPtr();
         const auto& current = prior ? prior->state : *mPersonalScriptState;
         const auto owned = std::ranges::find_if(current, [&](const auto& state) {
             return state.last.character == session->playerId().value() && state.last.story == request.story;
@@ -5329,9 +5330,11 @@ namespace TES3MP::Native
         resolver.expected.causalEvent = instance->eventCursor + 1;
         resolver.expected.sourceReference = request.speaker;
         resolver.expected.sourceLife = request.life;
+        const auto stats = loadCombatStats(mRuntime.mStore, mCombat->actors[self], mTimedEffects, self,
+            mBinding.mCharacterCreation);
         auto prepared = mBinding.mPersonalScripts->prepareIntent(prior->state, session->playerId().value(),
             proposal.commandId().value(), request, 0, "", mRuntime.mStore, resolver,
-            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations);
+            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats);
         if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
             return reject(prepared.result.diagnostic.c_str());
         if (prepared.result.executed)
@@ -5676,9 +5679,16 @@ namespace TES3MP::Native
         if (transaction->personalInvocations >= PersonalScripts::MaximumInvocationsPerTransaction
             && std::ranges::none_of(before, [&](const auto& entry) { return entry.last == execution; })) return rejected;
         const auto budget = PersonalScripts::MaximumInvocationsPerTransaction - transaction->personalInvocations;
+        std::optional<MWMechanics::NpcStats> dialogueStats;
+        if (dialogue && transaction->combat)
+        {
+            const size_t self = size_t(player - binding.mPlayers.begin());
+            dialogueStats.emplace(loadCombatStats(mRuntime.mStore, transaction->combat->actors[self],
+                transaction->timedEffects, self, binding.mCharacterCreation));
+        }
         auto prepared = dialogue ? mBinding.mPersonalScripts->prepareDialogue(before, execution, dialogue->topic,
             dialogue->choice, dialogue->disposition, dialogue->talkedToPlayer, dialogue->cellName,
-            mRuntime.mStore, resolver, budget)
+            mRuntime.mStore, resolver, budget, dialogueStats ? &*dialogueStats : nullptr)
             : mBinding.mPersonalScripts->prepare(before, execution, mRuntime.mStore, resolver, budget);
         auto result = prepared.result;
         if (result.outcome != SharedWorldScript::Outcome::Committed)

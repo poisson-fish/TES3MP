@@ -14,12 +14,20 @@ public static class DesktopWindowCapture {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect bounds);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after,
+        int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr window, int index);
 }
 '@
 $window = (Get-Process -Id $ProcessId).MainWindowHandle
 if ($window -eq [IntPtr]::Zero) { throw 'Desktop client has no capture window' }
 [void][DesktopWindowCapture]::ShowWindow($window, 9)
 [void][DesktopWindowCapture]::SetForegroundWindow($window)
+# Foreground requests can be refused while another app owns keyboard focus.
+# Raise just this evidence window for the capture, preserving its prior setting.
+$captureWasTopmost = ([DesktopWindowCapture]::GetWindowLong($window, -20) -band 8) -ne 0
+[void][DesktopWindowCapture]::SetWindowPos($window, [IntPtr]::new(-1), 0, 0, 0, 0, 0x53)
+try {
 Start-Sleep -Milliseconds 180
 $bounds = New-Object DesktopWindowCapture+Rect
 if (-not [DesktopWindowCapture]::GetWindowRect($window, [ref]$bounds)) {
@@ -39,3 +47,8 @@ try {
     } finally { $graphics.Dispose() }
     $bitmap.Save($Output, [System.Drawing.Imaging.ImageFormat]::Png)
 } finally { $bitmap.Dispose() }
+} finally {
+    if (-not $captureWasTopmost) {
+        [void][DesktopWindowCapture]::SetWindowPos($window, [IntPtr]::new(-2), 0, 0, 0, 0, 0x13)
+    }
+}

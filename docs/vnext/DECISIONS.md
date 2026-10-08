@@ -87,12 +87,10 @@ units with one fixed-step tolerance; exclude discontinuities.
 
 ## M5 implementation contract
 
-**Status:** base policy agreed; party defaults below are drafted as a later M5
-addition. Shared scheduling/delivery and synthetic two-desktop reentry/restart proven.
-Others may temporarily interrupt opportunities,
-never permanently consume them; personal choices retain consequences. Unchanged
-scripts use proven OpenMW APIs, without mandatory quest edits or bespoke handlers.
-[PLAN](PLAN.md#m5---complete-scripted-quests-independently-and-together) owns sequencing.
+Others may temporarily interrupt opportunities, never permanently consume them.
+Personal choices retain consequences. Unchanged scripts use proven OpenMW APIs;
+quest edits/bespoke handlers are not required. [PLAN](PLAN.md#m5---complete-scripted-quests-independently-and-together)
+owns sequencing; parties are a later addition.
 
 ### Ownership and physical scope
 
@@ -251,8 +249,10 @@ revalidate speaker scope/life/script. Unstaged filters and physical results reje
 
 **Authenticated dialogue (V85).** Owned banks supply lexical locals against validated
 living unscripted speakers. First topic seeds knowledge; durable revisions/receipts/choices
-bind source/life. Reserve two intents within sixteen invocations. Clients present literal
-responses/progression without result execution or transient replay.
+bind source/life. Reserve two intents within sixteen invocations. Filters read detached
+character attributes/skills/resources through stock comparisons; result stat writes stay closed.
+Clients retain early personal baselines through body installation and reopen other-story
+choices silently. Literal responses/progression never execute results or replay transient output.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

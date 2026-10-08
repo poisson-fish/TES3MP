@@ -3,6 +3,8 @@
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwdialogue/dialoguemanagerimp.hpp>
 #include <apps/openmw/mwdialogue/journalimp.hpp>
+#include <apps/openmw/mwdialogue/selectwrapper.hpp>
+#include <apps/openmw/mwmechanics/npcstats.hpp>
 #include <apps/openmw/mwscript/dialogueextensions.hpp>
 #include <apps/openmw/mwscript/interpretercontext.hpp>
 #include <apps/openmw/mwscript/locals.hpp>
@@ -116,12 +118,17 @@ namespace
     struct Resolver final : MWScript::ReferenceResolver
     {
         MWScript::ExecutionContext expected;
-        MWWorld::Ptr actor;
-        bool wait = false;
+        MWWorld::Ptr actor, player;
+        bool wait = false, waitPlayer = false;
         MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& reference, bool) const override
         {
             require(execution == expected, "Dialogue lookup lost invocation identity");
             require(execution.sourceReference == 41 && execution.sourceLife == 3, "Stale source/life accepted");
+            if (reference == "player")
+            {
+                if (waitPlayer) throw MWScript::ScriptContextUnavailable();
+                return player;
+            }
             if ((reference.empty() || reference == id("ledger_v63")) && wait)
                 throw MWScript::ScriptContextUnavailable();
             if (reference.empty() || reference == id("ledger_v63")) return actor;
@@ -344,6 +351,148 @@ namespace
                      "rollback/retry; durable receipt and silent reconnect/restart\n";
     }
 
+    void playerStats(CredentialCrypto& crypto)
+    {
+        using C = ESM::DialogueCondition;
+        Fixture fixture(crypto, {}, true);
+        for (int i = 0; i < ESM::Attribute::Length; ++i)
+        {
+            ESM::Attribute attribute;
+            attribute.mId = *ESM::Attribute::indexToRefId(i).getIf<ESM::StringRefId>();
+            fixture.content.insertStatic(attribute);
+        }
+        for (int i = 0; i < ESM::Skill::Length; ++i)
+        {
+            ESM::Skill skill; skill.blank();
+            skill.mId = *ESM::Skill::indexToRefId(i).getIf<ESM::StringRefId>();
+            fixture.content.insertStatic(skill);
+        }
+        MWWorld::ManualRef player(fixture.content, id("speaker_r29"));
+        MWMechanics::NpcStats stats(fixture.content);
+        for (int i = 0; i < ESM::Attribute::Length; ++i)
+        {
+            MWMechanics::AttributeValue value;
+            value.setBase(40 + i); value.setModifier(20.75f); value.damage(2.f);
+            stats.setAttribute(ESM::Attribute::indexToRefId(i), value, 0.f);
+        }
+        for (int i = 0; i < ESM::Skill::Length; ++i)
+        {
+            MWMechanics::SkillValue value;
+            value.setBase(10 + i); value.setModifier(4.75f); value.damage(2.f);
+            stats.setSkill(ESM::Skill::indexToRefId(i), value);
+        }
+        for (int i = 0; i < 3; ++i)
+            stats.setDynamic(i, MWMechanics::DynamicStat<float>(100, 20, 60.5f + i), MWWorld::TimeStamp{});
+        Resolver resolver; resolver.actor = fixture.actor.getPtr(); resolver.player = player.getPtr();
+        DialogueIntent request{31, 41, 3, 0, "passage_k61", -1};
+        const auto run = [&](const PersonalScripts& runtime, const PersonalScripts::State& state,
+                             uint64_t character, uint64_t story, const MWMechanics::NpcStats* snapshot) {
+            const auto& instance = *std::ranges::find_if(state, [&](const auto& value) {
+                return value.last.character == character && value.last.story == story;
+            });
+            resolver.expected = instance.last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = instance.eventCursor + 1;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
+            auto intent = request; intent.story = story;
+            return runtime.prepareIntent(state, character, 101, intent, 0, "", fixture.content, resolver,
+                PersonalScripts::MaximumInvocationsPerTransaction, snapshot);
+        };
+        std::vector<C::Function> functions{C::Function_PcStrength, C::Function_PcIntelligence,
+            C::Function_PcWillpower, C::Function_PcAgility, C::Function_PcSpeed, C::Function_PcEndurance,
+            C::Function_PcPersonality, C::Function_PcLuck, C::Function_PcHealth, C::Function_PcMagicka,
+            C::Function_PcFatigue, C::Function_PcHealthPercent};
+        for (int i = C::Function_PcBlock; i <= C::Function_PcHandToHand; ++i)
+            functions.push_back(static_cast<C::Function>(i));
+        for (auto function : functions)
+        {
+            MWDialogue::SelectWrapper select(condition(function, "", 0));
+            const bool skill = function >= C::Function_PcBlock && function <= C::Function_PcHandToHand;
+            const bool dynamic = function == C::Function_PcHealth || function == C::Function_PcMagicka
+                || function == C::Function_PcFatigue;
+            const float value = function == C::Function_PcHealthPercent ? 50.f : dynamic
+                ? stats.getDynamic(select.getArgument()).getCurrent() : skill
+                ? static_cast<int>(stats.getSkill(ESM::Skill::indexToRefId(select.getArgument())).getModified())
+                : static_cast<int>(stats.getAttribute(ESM::Attribute::indexToRefId(select.getArgument())).getModified());
+            auto definitions = fixture.definitions;
+            for (auto& definition : definitions)
+            {
+                auto check = condition(function, "", 0); check.mValue = value;
+                definition.dialogues[1].mInfo.front().mSelects.insert(
+                    definition.dialogues[1].mInfo.front().mSelects.begin(), check);
+            }
+            PersonalScripts runtime(7, definitions, crypto, true, true, true);
+            auto state = runtime.initial(); const auto before = runtime.encode(state);
+            auto prepared = run(runtime, state, 11, 31, &stats);
+            if (!prepared.result.executed)
+                throw std::runtime_error("Staged stat filter " + std::to_string(function) + ": " + prepared.result.diagnostic);
+            require(prepared.result.executed && runtime.encode(state) == before
+                && prepared.state[1].dialogueRevision == 0 && prepared.state[2].dialogueRevision == 0,
+                "Staged stat filter failed or crossed ownership");
+            require(!run(runtime, state, 11, 31, nullptr).result.executed, "Unstaged stat read fell back to stock player");
+            MWMechanics::NpcStats other(fixture.content);
+            require(!run(runtime, state, 22, 31, &other).result.executed,
+                "Second character inherited first character's stats");
+            resolver.waitPlayer = true;
+            auto deferred = run(runtime, state, 11, 31, &stats);
+            require(deferred.result.outcome == SharedWorldScript::Outcome::Deferred && deferred.state.empty()
+                && deferred.response.empty() && deferred.result.presentation.empty(), "Missing player was treated as zero/absence");
+            resolver.waitPlayer = false;
+            require(run(runtime, state, 11, 31, &stats).image == prepared.image, "Read snapshot retry changed result");
+            state = runtime.restore(prepared.image);
+            require(!run(runtime, state, 11, 31, &stats).result.executed, "Recovered stat filter replayed response");
+            require(run(runtime, state, 11, 32, &stats).result.executed, "First story consumed another story's opportunity");
+        }
+        for (auto comparison : {C::Comp_Eq, C::Comp_Ne, C::Comp_Gt, C::Comp_Ge, C::Comp_Ls, C::Comp_Le})
+        {
+            for (float threshold : {57.5f, 58.f, 58.5f})
+            {
+                auto check = condition(C::Function_PcStrength, "", 0);
+                check.mComparison = comparison; check.mValue = threshold;
+                auto definitions = fixture.definitions;
+                for (auto& definition : definitions)
+                    definition.dialogues[1].mInfo.front().mSelects.insert(
+                        definition.dialogues[1].mInfo.front().mSelects.begin(), check);
+                PersonalScripts runtime(7, definitions, crypto, true, true, true);
+                const bool expected = MWDialogue::SelectWrapper(check).selectCompare(58);
+                auto prepared = run(runtime, runtime.initial(), 11, 31, &stats);
+                require(prepared.result.executed == expected, "Scoped comparison changed stock integer truncation/comparison");
+            }
+        }
+        for (auto function : {C::Function_PcLevel, C::Function_PcCrimeLevel, C::Function_Item, C::Function_Weather,
+                             C::Function_PcCommonDisease})
+        {
+            auto definitions = fixture.definitions;
+            for (auto& definition : definitions)
+                definition.dialogues[1].mInfo.front().mSelects.insert(
+                    definition.dialogues[1].mInfo.front().mSelects.begin(), condition(function, "unowned", 0));
+            PersonalScripts runtime(7, definitions, crypto, true, true, true);
+            const auto failed = run(runtime, runtime.initial(), 11, 31, &stats);
+            require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty(),
+                "Read-only stats opened an unstaged service");
+        }
+        // A successful read cannot open writes in the result interpreter.
+        rejects([&] {
+            Fixture bad(crypto, "player->SetStrength 1", true);
+            PersonalScripts runtime(7, bad.definitions, crypto, true, true, true);
+        }, "Read-only stat filters admitted stat result writes");
+        for (const char* late : {"Goodbye"})
+        {
+            Fixture bad(crypto, late, true);
+            for (auto& definition : bad.definitions)
+                definition.dialogues[1].mInfo.front().mSelects.insert(
+                    definition.dialogues[1].mInfo.front().mSelects.begin(), condition(C::Function_PcStrength, "", 58));
+            PersonalScripts runtime(7, bad.definitions, crypto, true, true, true);
+            auto state = runtime.initial(); const auto before = runtime.encode(state);
+            auto failed = run(runtime, state, 11, 31, &stats);
+            require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty()
+                && failed.image.empty() && failed.response.empty() && failed.result.presentation.empty()
+                && runtime.encode(state) == before && stats.getAttribute(ESM::Attribute::Strength).getModified() == 58.75f,
+                "Late stat result failure leaked state or changed read snapshot");
+        }
+        std::cout << "dialogue player stats: 8 modified attributes/27 skills, 3 current resources/health percent; "
+                     "character/story isolation, missing-player defer, read-only result boundary and silent recovery\n";
+    }
+
     void client(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto, {}, true);
@@ -441,6 +590,20 @@ namespace
         require(manager.startDialogue(fixture.actor.getPtr(), &resumed) && resumed.responses.size() == 1
                 && resumed.responses.front().find("finished") != std::string::npos,
             "Reconnect replayed response or lost progression");
+        auto second = view;
+        second.story = 32; second.revision = 1; second.topic = "followup_p82";
+        second.topics = {"followup_p82"}; second.choices = {{"Continue another story", 9}};
+        second.response = "Already seen response";
+        coordinator.views.push_back(second);
+        manager.getAvailableTopics();
+        manager.keywordSelected("followup_p82 (story 32)", &resumed);
+        require(coordinator.submitted.size() == 2 && manager.isInChoice() && manager.getChoices().front().second == 9
+            && std::ranges::none_of(resumed.responses, [](const auto& response) {
+                return response.find("Already seen response") != std::string::npos;
+            }), "Recovered second-story choices sent another topic or replayed response");
+        manager.questionAnswered(9, &resumed);
+        require(coordinator.submitted.back().story == 32 && coordinator.submitted.back().topic == "followup_p82",
+            "Recovered second-story choice used first story");
         manager.goodbyeSelected();
         manager.clear();
         std::cout
@@ -487,7 +650,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
@@ -497,6 +660,8 @@ int main(int argc, char** argv)
             intents(*crypto);
         else if (filter == "client")
             client(*crypto);
+        else if (filter == "player-stats")
+            playerStats(*crypto);
         else if (filter == "stock") stock(*crypto);
         else throw std::invalid_argument("Unknown dialogue filter");
         std::cout << "PASS dialogue " << filter << '\n'; return 0;
