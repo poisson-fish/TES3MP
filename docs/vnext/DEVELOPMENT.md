@@ -64,20 +64,15 @@ online established characters once/tick without catch-up. V83 uses
 `story ID scripts COUNT script "RECORD" running 0|1 ... globals COUNT GLOBAL...`:
 1–4 ordered members/story, ≤16 mirrored scripts; locals/flags/ordinals/markers recover with gameplay.
 V84 adds `dialogues COUNT "RECORD"...` per story (1–16 DIAL, 64 INFO, 16 conditions/INFO).
-V85 requires fresh campaigns/capability 40: ≤14 mirrored scripts reserve two dialogue calls/tick,
-one/character; first topic seeds menus. Living unscripted speakers validate reach/sight/life.
-Private responses use bounded stock substitutions with authenticated character/speaker,
-staged ranks/bounty, owned globals and authoritative cell names before results;
-action bindings reject. Literal messages, choices and progression follow durability;
-reconnect is silent. Filters read staged modified attributes/skills, current resources
-and health percentage. Thresholds 0–100 share stock disposition with authenticated
-character/speaker snapshots and winning settings. Journal commands freeze stock expanded text and server calendar dates at invocation;
-64 entries/story, 4,096 bytes/entry, 16,384 total text bytes, 32,768-byte private frames.
-Journal update notices follow durability; stock journal installation is silent.
-Source-only stock ModDisposition persists ≤64 placement relationships/character/story;
-record/life validation restores the private base before filtering. Player stat writes,
-V85 scene changes and broader NPC restoration remain closed. Prior images never silently migrate;
-V81–84 personal output stays closed. Bootstrap emits V80.
+V85: fresh campaigns/capability 40; ≤14 mirrored scripts reserve two dialogue calls/tick,
+one/character. First topic seeds menus; living unscripted speakers validate reach/sight/life.
+Stock filters read staged attributes/skills/resources/health%; disposition thresholds 0–100.
+Authenticated stock substitutions use staged social state/globals/cell names; action bindings reject.
+Journal freezes text/calendar at invocation: 64 entries/story, 4,096 bytes/entry,
+16,384 total text bytes, 32,768-byte frames. Notices follow durability; installation
+is silent. Source-only ModDisposition persists ≤64 placement relationships/character/story,
+validated by record/life. Stat writes, V85 scene changes and broader restoration reject.
+Prior images never silently migrate; V81–84 output stays closed. Bootstrap emits V80.
 V86–88: fresh descriptor/images, capability 41; one dry interior, one living
 unscripted NPC, static geometry. Source-only Disable/GetDisabled; ≤12 mirrored
 scripts reserve four discovery/retry calls. Terminal scopes suspend banks/new
@@ -94,6 +89,13 @@ One inert destination pose, no new NPC simulation/life/loot; relocated scopes
 remain occupied. No relocation return, cross-cell movement, escorts or mixed
 Disable/Position results. Scoped wire permits one suppressed source or one
 zero-velocity source pose; advertise ≤37 optional capabilities. Recovery is silent.
+V90: fresh images/capability 42; grounded online living bodies clear quiescent
+original/destination NPC hulls (≥256) and shared peers (≥128), enlarged by radii
+plus 32. Require living original source life. Occupancy commits with gameplay;
+destination/origin/banks/progression/receipts stay dormant without Enable/public
+move, renewed loot/life or completed-story reopening.
+`relocation-return` and `story-relocation-return` are focused state/host filters;
+desktop fixture/capture uses `--relocate-source --return-path`. Escorts/mutable AI stay closed.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.

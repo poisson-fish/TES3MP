@@ -1436,7 +1436,7 @@ namespace
             "A removes privately, B completes independently; late failure/waits, bound receipts and silent exact restart\n";
     }
 
-    void relocation(CredentialCrypto& crypto)
+    void relocation(CredentialCrypto& crypto, bool returning = false)
     {
         Fixture fixture(crypto, {}, true);
         for (auto& definition : fixture.definitions)
@@ -1447,7 +1447,7 @@ namespace
                 "set personal_counter to speaker_r29->GetPos x\n"
                 "if GetAngle z != 90\nGoodbye\nendif\nMessageBox \"Relocated for this story\"";
         }
-        PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true, false, false, true);
+        PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true, returning, false, true);
         Resolver resolver; resolver.actor = fixture.actor.getPtr();
         MWWorld::ManualRef foreignPlayer(fixture.content, id("speaker_r29")); resolver.player = foreignPlayer.getPtr();
         const auto run = [&](const PersonalScripts& policy, const PersonalScripts::State& input,
@@ -1483,6 +1483,34 @@ namespace
             "Room", fixture.content, resolver);
         require(duplicate.result.outcome == SharedWorldScript::Outcome::Committed && !duplicate.result.executed
             && duplicate.result.presentation.empty() && duplicate.response.empty(), "Recovery replayed relocation/output");
+        if (returning)
+        {
+            rejects([&] { runtime.prepareReturn(restored, 11, &fixture.content, 4); },
+                "Relocation return accepted a replacement source life");
+            const auto returned = runtime.prepareReturn(restored, 11, &fixture.content, 3);
+            auto expected = restored; expected[0].encounterReturned = true;
+            require(returned.result.executed && !returned.invocations && returned.result.trace.executed == 0
+                && returned.result.presentation.empty() && returned.response.empty()
+                && returned.image == runtime.encode(expected) && returned.state[0].relocation == restored[0].relocation
+                && !returned.state[0].encounterEnabled && PersonalScripts::physicalScope(returned.state, 11) == 1
+                && !PersonalScripts::relocation(returned.state, 11),
+                "Return changed the private destination/origin/bank/receipts or left an active private hull");
+            require(runtime.encode(runtime.restore(returned.image)) == returned.image
+                && !runtime.prepareReturn(returned.state, 11).result.executed
+                && run(runtime, returned.state, 11).result.outcome == SharedWorldScript::Outcome::Rejected
+                && run(runtime, returned.state, 22).result.executed,
+                "Return recovery replayed work, reopened A or consumed B's opportunity");
+            const auto quiet = runtime.prepareIntent(returned.state, 11, 101, {31, 41, 3, 0, "passage_k61", -1},
+                "Room", fixture.content, resolver);
+            require(!quiet.result.executed && quiet.result.outcome == SharedWorldScript::Outcome::Committed
+                && quiet.result.presentation.empty() && quiet.response.empty(), "Dormant recovery replayed output");
+            PersonalScripts v89(7, fixture.definitions, crypto, true, true, true, false, false, true);
+            rejects([&] { runtime.restore(v89.encode(v89.initial())); }, "V90 silently migrated V89");
+            rejects([&] { v89.restore(returned.image); }, "V89 accepted dormant relocated state");
+            for (size_t size = 0; size < returned.image.size(); ++size)
+                rejects([&] { runtime.restore(std::span(returned.image).first(size)); },
+                    "Truncated dormant destination image accepted");
+        }
         for (const std::string suffix : {"\nGoodbye", "\nDisable", "\nChoice \"Pending\" 7"})
         {
             auto definitions = fixture.definitions;
@@ -1545,6 +1573,8 @@ namespace
             "Previous encounter admitted Position");
         std::cout << "relocation: stock implicit/named Position/PositionCell/GetPos/GetAngle; source/cell/pose bounds; "
             "discovery retry, late rollback, private destination and B's original opportunity; exact silent recovery\n";
+        if (returning) std::cout << "relocation return: immutable dormant destination/origin/bank/receipts; shared occupancy; "
+            "stale-life/version/truncation rejection; silent duplicate/restart and B's independent completion\n";
     }
 
     void stock(CredentialCrypto& crypto)
@@ -1621,6 +1651,7 @@ int main(int argc, char** argv)
         else if (filter == "encounter") encounter(*crypto);
         else if (filter == "enable") encounter(*crypto, true);
         else if (filter == "relocation") relocation(*crypto);
+        else if (filter == "relocation-return") relocation(*crypto, true);
         else if (filter == "substitutions")
             substitutions(*crypto);
         else if (filter == "journal") journal(*crypto);

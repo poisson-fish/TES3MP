@@ -35,6 +35,7 @@ namespace TES3MP::Native
         constexpr uint64_t EncounterReturnMagic = 0x3954535054335354;
         constexpr uint64_t EncounterEnableMagic = 0x4154535054335354;
         constexpr uint64_t EncounterRelocationMagic = 0x4254535054335354;
+        constexpr uint64_t EncounterRelocationReturnMagic = 0x4354535054335354;
         constexpr uint64_t IntentMagic = 0x3754535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
@@ -326,7 +327,7 @@ namespace TES3MP::Native
         require(!mEncounters || mIntents);
         require(!mReturns || mEncounters);
         require(!mEnables || mReturns);
-        require(!mRelocations || (mEncounters && !mReturns && !mEnables));
+        require(!mRelocations || (mEncounters && !mEnables));
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
@@ -417,6 +418,11 @@ namespace TES3MP::Native
             constexpr std::string_view limits = "terminal-source-position-1;inert;one-interior;4096-displacement;1000000-coordinates;frozen-scope";
             binding.insert(binding.end(), limits.begin(), limits.end());
         }
+        if (mRelocations && mReturns)
+        {
+            constexpr std::string_view limits = "safe-relocation-return-1;origin-and-destination-hulls;living-origin-life;retain-dormant-pose";
+            binding.insert(binding.end(), limits.begin(), limits.end());
+        }
         if (mDialogues)
         {
             constexpr std::string_view limits = "scoped-dialogue-results-1;16;64;16;8192;4096;64;128;1048576";
@@ -492,7 +498,7 @@ namespace TES3MP::Native
         require(!state.encounterReturned || (mReturns && state.encounterLife));
         require(!state.encounterEnabled || (mEnables && state.encounterLife && state.encounterReturned));
         require(!mEnables || state.encounterEnabled == state.encounterReturned);
-        require(!state.relocation || (mRelocations && state.encounterLife && !state.encounterReturned && !state.encounterEnabled));
+        require(!state.relocation || (mRelocations && state.encounterLife && !state.encounterEnabled));
         if (state.relocation) state.relocation->validate();
         if (state.encounterLife)
             require(std::ranges::any_of(state.npcs, [&](const auto& npc) {
@@ -589,7 +595,7 @@ namespace TES3MP::Native
             }));
         std::vector<char> bytes;
         word(bytes,
-            mRelocations     ? EncounterRelocationMagic
+            mRelocations     ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables   ? EncounterEnableMagic
                 : mReturns   ? EncounterReturnMagic
                 : mEncounters ? EncounterMagic
@@ -646,7 +652,7 @@ namespace TES3MP::Native
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
         require(input.word()
-            == (mRelocations     ? EncounterRelocationMagic
+            == (mRelocations     ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables      ? EncounterEnableMagic
                 : mReturns      ? EncounterReturnMagic
                 : mEncounters    ? EncounterMagic
@@ -875,6 +881,7 @@ namespace TES3MP::Native
         prepared.result.outcome = SharedWorldScript::Outcome::Committed;
         if (found->encounterReturned) return prepared;
         const auto index = size_t(found - before.begin());
+        if (found->relocation) require(sourceLife == found->encounterLife);
         if (mEnables)
         {
             require(content && sourceLife == found->encounterLife);

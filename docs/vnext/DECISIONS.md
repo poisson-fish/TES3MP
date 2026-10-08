@@ -241,44 +241,45 @@ after focused evidence.
 
 ## Integrity and migration
 
-**Scoped dialogue (V84).** Stock filters/result bytecode use explicit content and staged
-Quest/Topic progression. Journal/topic identities, bank writes and contextual receipts
-commit with gameplay; uncommitted Lua/UI callbacks stay closed. Bind bounded winning DIAL/INFO policy;
-revalidate speaker scope/life/script. Unstaged filters and physical results reject.
+**Scoped dialogue (V84).** Explicit content and staged stock filters/results commit
+Quest/Topic, banks and contextual receipts with gameplay. Bind bounded winning
+DIAL/INFO; revalidate speaker scope/life/script. Unstaged services and Lua/UI callbacks reject.
 
-**Authenticated dialogue (V85).** Owned lexical banks/revisions/choices bind living
-unscripted source/life; two intents within sixteen invocations. Stock filters read
-detached character stats/resources; stat writes reject. Stock substitutions use
-authenticated speakers/characters, staged social state/globals and authoritative
-cell names; errors/waits discard output. Stock disposition thresholds 0–100 and
-source-only ModDisposition own ≤64 private placement bases. Recovery validates
-records/lives; NPC/bank/progression/receipt/gameplay failures discard everything.
-Journal text freezes result-time substitutions/globals and calendar dates; notices
-share durability. Payload v2 rejects prior frames/images. Clients preserve early
-baselines, silently install stock entries and reopen other-story choices without
-expansion, restamping or replay. V85 scene edits remain closed.
+**Authenticated dialogue (V85).** Banks/revisions/choices bind living unscripted
+source/life; two intents within sixteen invocations. Detached stock stats/resources
+feed filters; stat writes reject. Substitutions use authenticated characters/speakers,
+staged social state/globals and authoritative cells. Disposition thresholds 0–100;
+source-only ModDisposition owns ≤64 private placement bases. Records/lives validate;
+NPC/banks/progression/receipts/gameplay fail together. Journal text/calendar freezes
+at invocation; notices share durability. Payload v2 rejects prior frames/images.
+Early baselines and other-story choices install silently, without expansion/restamping/replay.
+V85 scene edits stay closed.
 
-**Terminal encounters (V86–88).** One dry interior/living unscripted NPC and
-static geometry bound dependencies. Source-only stock Disable rolls back discovery
-and retries a detached reference with the same occurrence; charge every bounded
-attempt. Persist character/story scope and placement/record/life origins with
-gameplay, without new loot/lives. Lookup, presentation, Bullet hulls and combat
-share scope; failed collision queries restore masks. Terminal banks/interactions
-suspend; receipts recover silently. V87 permits grounded online living bodies to
-rejoin at a quiescent NPC/peer hull boundary, retaining dormant outcomes. V88
-runs fixed stock Enable there against the original life, ≤16 instructions/one
-call; restoration/occupancy commit together. Fresh images/capability 41; stories,
-origins and receipts stay frozen, other banks resume. General restoration stays closed.
+**Terminal encounters (V86–88).** One dry interior, living unscripted NPC and static
+geometry. Source-only stock Disable discovery rolls back/retries the same occurrence;
+charge every attempt. Scope/origins commit with gameplay without new loot/lives.
+Lookup/presentation/Bullet/combat agree; failed queries restore masks. Terminal
+banks/interactions freeze; recovery is silent. V87 returns grounded online living
+bodies beyond quiescent NPC/peer hull boundaries, retaining dormant outcomes.
+V88 runs fixed original-life stock Enable (≤16 instructions/one call); restoration/
+occupancy commit together. Fresh images/capability 41; other banks resume.
+General restoration stays closed.
 
-**Source relocation (V89).** Stock source-only Position/PositionCell and position
-reads use the same staged reference. Same interior; coordinates ≤1,000,000,
-displacement ≤4,096, rotation ≤360°; existing instruction/call limits. Persist
-original provenance and inert destination pose with banks/progression/receipts;
-validate scoped overlap before durability and geometry before recovery. Borrowed
-Bullet transforms restore on failure. No separate AI/combat/inventory/life writer.
-Relocated scopes remain occupied; return, escorts/cross-cell movement and mixed
-removal/relocation await admission. Capability 42 gates the bounded visible-pose
-wire form; ≤37 optional capabilities. Fresh images; silent recovery.
+**Source relocation (V89).** Stock source-only Position/PositionCell/GetPos/GetAngle
+share a staged reference. Same interior; coordinates ≤1,000,000, displacement
+≤4,096, rotation ≤360°; existing instruction/call limits. Inert destination/origin/
+banks/progression/receipts commit together. Validate scoped overlap before durability,
+geometry before recovery; borrowed Bullet transforms restore on failure.
+V89 remains occupied. Fresh images/capability 42; ≤37 optional capabilities; silent
+recovery. No new AI/combat/inventory/life writer or mixed removal/relocation.
+
+**Relocated return (V90).** Grounded online living bodies clear quiescent original/
+destination NPC and shared peer hull boundaries; require living original source life.
+Occupancy commits with gameplay while destination/origin/completed banks/receipts
+stay dormant. Shared physics/presentation resume the public source without Enable,
+teleport home, renewed inventory/life or merging. Rejection installs nothing;
+uncertainty closes authority; exact recovery is silent. Fresh images/capability 42.
+Escorts/mutable AI remain later; M5 stays open.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

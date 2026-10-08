@@ -5595,8 +5595,9 @@ namespace TES3MP::Native::Testing
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
         const bool storyEnable = effectFamily == "story-enable";
-        const bool storyRelocation = effectFamily == "story-relocation";
-        const bool storyReturn = storyEnable || effectFamily == "story-return";
+        const bool storyRelocationReturn = effectFamily == "story-relocation-return";
+        const bool storyRelocation = storyRelocationReturn || effectFamily == "story-relocation";
+        const bool storyReturn = storyRelocationReturn || storyEnable || effectFamily == "story-return";
         const bool storyEncounter = storyReturn || storyRelocation || effectFamily == "story-encounter";
         const bool dialogueNpc = effectFamily == "dialogue-npc-state";
         const bool personalIntents = storyEncounter || dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
@@ -9299,7 +9300,8 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (storyRelocation                              ? "native-inventory-89\nmanifest "
+            out << (storyRelocationReturn                        ? "native-inventory-90\nmanifest "
+                : storyRelocation                               ? "native-inventory-89\nmanifest "
                 : storyEnable                                   ? "native-inventory-88\nmanifest "
                 : storyReturn                                   ? "native-inventory-87\nmanifest "
                 : storyEncounter                                ? "native-inventory-86\nmanifest "
@@ -9727,8 +9729,8 @@ namespace TES3MP::Native::Testing
                         if (storyRelocation)
                             require(policy->relocations() && scopes[0].relocation
                                 && scopes[0].runtime.runtime.globals.front().mValue.getInteger() == 200
-                                && !scopes[1].relocation && !policy->returns(),
-                                "Relocation lost the staged source lookup or enabled unproven return");
+                                && !scopes[1].relocation && policy->returns() == storyRelocationReturn,
+                                "Relocation lost staged source lookup or descriptor return policy");
                         // Collision and projectile queries share actual stock Bullet bodies.
                         auto& room = *native.characterBinding().mNavigatingActor;
                         const auto npc = room.snapshot();
@@ -9868,27 +9870,39 @@ namespace TES3MP::Native::Testing
                                             PlayerMovementControls{})))};
                                 return owner.prepareNativePlayerTick(authority, id<ServerTick>(7), 1.f / 30, {}, &world, {}, controls);
                             };
-                            const auto moveAlice = [&](double x, uint64_t epoch) {
+                            const auto moveAlice = [&](double x, uint64_t epoch, double yOffset = 0, double zOffset = 0) {
                                 auto values = std::vector(authority.players().begin(), authority.players().end());
                                 const auto& p = values[0];
                                 values[0] = CanonicalPlayerEntityState(p.playerId(), p.entityId(), p.appearanceId(),
                                     Transform(p.transform().cell(), Position3(int64_t(x * 1024),
-                                        int64_t(scene.mPosition[1] * 1024), int64_t(scene.mPosition[2] * 1024)),
+                                        int64_t((scene.mPosition[1] + yOffset) * 1024), int64_t((scene.mPosition[2] + zOffset) * 1024)),
                                         p.transform().orientation()), LinearVelocity3(0, 0, 0), p.entityRevision(),
                                     id<AuthorityEpoch>(epoch), id<ServerTick>(6));
                                 authority = std::get<CanonicalServerState>(createCanonicalServerState(values, authority.activeSessions()));
                             };
-                            moveAlice(scene.mPosition[0] + 180, 2);
+                            moveAlice(scene.mPosition[0] + (storyRelocation ? -180 : 180), 2);
                             auto near = returnTick(restored);
                             require(near && restored.physicalScope(id<PlayerId>(1), near.get()) != 1,
                                 "Return occurred inside the NPC separation boundary");
-                            moveAlice(scene.mPosition[0] + 400, 3);
+                            if (storyRelocation)
+                            {
+                                moveAlice(scopes[0].relocation->position[0] + 180, 3);
+                                auto destinationNear = returnTick(restored);
+                                require(destinationNear && restored.physicalScope(id<PlayerId>(1), destinationNear.get()) != 1,
+                                    "Return occurred clear of origin but inside private destination hull boundary");
+                            }
+                            const double returnYOffset = storyRelocation ? 200 : 0;
+                            moveAlice(scene.mPosition[0] + 400, 4, returnYOffset, 128);
+                            auto airborneReturn = returnTick(restored);
+                            require(airborneReturn && restored.physicalScope(id<PlayerId>(1), airborneReturn.get()) != 1,
+                                "Airborne character returned before grounding");
+                            moveAlice(scene.mPosition[0] + 400, 4, returnYOffset);
                             const auto separatedPlayers = authority;
                             auto adjacentPlayers = std::vector(authority.players().begin(), authority.players().end());
                             const auto& peer = adjacentPlayers[1];
                             adjacentPlayers[1] = CanonicalPlayerEntityState(peer.playerId(), peer.entityId(), peer.appearanceId(),
                                 Transform(peer.transform().cell(), Position3(int64_t((scene.mPosition[0] + 336) * 1024),
-                                    int64_t(scene.mPosition[1] * 1024), int64_t(scene.mPosition[2] * 1024)),
+                                    int64_t((scene.mPosition[1] + returnYOffset) * 1024), int64_t(scene.mPosition[2] * 1024)),
                                     peer.transform().orientation()), LinearVelocity3(0, 0, 0), peer.entityRevision(),
                                 id<AuthorityEpoch>(2), id<ServerTick>(6));
                             authority = std::get<CanonicalServerState>(createCanonicalServerState(adjacentPlayers, authority.activeSessions()));
@@ -9896,6 +9910,11 @@ namespace TES3MP::Native::Testing
                             require(adjacent && restored.physicalScope(id<PlayerId>(1), adjacent.get()) != 1,
                                 "Return overlapped a previously hidden shared peer hull");
                             authority = separatedPlayers;
+                            const auto offlinePlayers = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), {}));
+                            auto offlineReturn = restored.prepareNativePlayerTick(offlinePlayers, id<ServerTick>(7),
+                                1.f / 30, {}, &world, {}, {});
+                            require(offlineReturn && restored.physicalScope(id<PlayerId>(1), offlineReturn.get()) != 1,
+                                "Offline character returned without an authenticated body");
                             auto release = [&] { return returnTick(restored); };
                             auto rejectedReturn = release();
                             if (rejectedReturn && restored.physicalScope(id<PlayerId>(1), rejectedReturn.get()) != 1)
@@ -9923,6 +9942,24 @@ namespace TES3MP::Native::Testing
                             require(policy->encode(returnedStories) == policy->encode(expected)
                                 && returnedStories[1].dialogueRevision == 0 && !returnedStories[1].encounterLife,
                                 "Return changed the completed story or unfinished opportunity");
+                            if (storyRelocation)
+                            {
+                                require(returnedStories[0].relocation == scopes[0].relocation
+                                    && !returnedStories[0].encounterEnabled
+                                    && !PersonalScripts::relocation(returnedStories, 1),
+                                    "Return moved the private destination home or left its hull active");
+                                const auto returnedCampaign = readActorCampaign(
+                                    {reinterpret_cast<const char*>(returnImage.data()), returnImage.size()});
+                                auto& returnedRoom = *restored.characterBinding().mNavigatingActor;
+                                const auto destinationHit = returnedRoom.projectileContact({155, -32, 65}, {245, -32, 65});
+                                require(std::ranges::equal(afterCampaign.inventory, returnedCampaign.inventory)
+                                    && returnedCampaign.life->generation == afterCampaign.life->generation
+                                    && returnedCampaign.combat->actors[2] == afterCampaign.combat->actors[2]
+                                    && returnedRoom.snapshot().mPosition == npc.mPosition
+                                    && returnedRoom.projectileContact(from, to)->actor == request.speaker
+                                    && (!destinationHit || destinationHit->actor != request.speaker),
+                                    "Return changed B's public source/inventory/resources/life/collision");
+                            }
                             verifyView(restored, nullptr, 7, false, false);
                             if (storyEnable)
                             {

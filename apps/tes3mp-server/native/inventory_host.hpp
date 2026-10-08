@@ -8,6 +8,10 @@
 
 namespace TES3MP::Native
 {
+    // V90 returns relocated scopes at a grounded quiescent boundary clear of
+    // original/destination NPC and shared peer hulls. Occupancy commits with
+    // gameplay; the private inert pose/origin/bank/receipts remain dormant.
+    // Fresh images, unchanged capability 42; escorts/mutable AI stay closed.
     // V89 admits source-only stock Position/PositionCell within the admitted
     // interior. Durable terminal poses own inert visibility/collision; no new
     // AI/combat/loot writer. Relocated scopes stay occupied until return is proven.

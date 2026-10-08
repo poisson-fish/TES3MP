@@ -27,8 +27,9 @@ def read_json(path, limit):
 
 
 def capture(args):
-    if args.relocate_source and not (args.runtime / "native.txt").read_text().startswith("native-inventory-89\n"):
-        raise ValueError("Relocation proof requires a fresh V89 campaign")
+    relocation_version = 90 if args.return_path else 89
+    if args.relocate_source and not (args.runtime / "native.txt").read_text().startswith(f"native-inventory-{relocation_version}\n"):
+        raise ValueError(f"Relocation proof requires a fresh V{relocation_version} campaign")
     if args.enable_source and not (args.runtime / "native.txt").read_text().startswith("native-inventory-88\n"):
         raise ValueError("Source Enable proof requires a fresh V88 campaign")
     args.output.mkdir(parents=True, exist_ok=False)
@@ -293,8 +294,8 @@ if __name__ == "__main__":
     parser.add_argument("--no-screenshots", action="store_true",
                         help="Validate semantic evidence without native-window capture; this remains synthetic")
     args = parser.parse_args()
-    if args.relocate_source and (args.return_path or args.enable_source):
-        parser.error("Relocation return/restoration is not admitted")
+    if args.relocate_source and args.enable_source:
+        parser.error("Relocation with source Enable is not admitted")
     args.return_path |= args.enable_source
     args.encounter |= args.return_path or args.relocate_source
     capture(args)

@@ -90,9 +90,11 @@
         "tes3mp_native_dialogue_tests enable",
         "tes3mp_native_loadout_tests story-enable NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
         "tes3mp_native_dialogue_tests relocation",
-        "tes3mp_native_loadout_tests story-relocation NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
+        "tes3mp_native_loadout_tests story-relocation NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
+        "tes3mp_native_dialogue_tests relocation-return",
+        "tes3mp_native_loadout_tests story-relocation-return NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
       ],
-      "disposition": "Explicit scoped context/banks plus V86 terminal source-only Disable/GetDisabled; coherent native lookup, visibility, collision, combat and durable origins. Broader NPC restoration remains closed. V88 additionally admits stock source Enable at safe return; general scene restoration remains closed. V89 admits terminal inert source relocation within the already admitted interior; return, escorts and mutable NPC simulation remain closed.",
+      "disposition": "Explicit scoped context/banks plus V86 terminal source-only Disable/GetDisabled; coherent native lookup, visibility, collision, combat and durable origins. Broader NPC restoration remains closed. V88 additionally admits stock source Enable at safe return; general scene restoration remains closed. V89 admits terminal inert source relocation within the already admitted interior and stays occupied. Fresh V90 images admit grounded quiescent return clear of original/destination NPC and shared peer hulls, requiring living original source life; occupancy commits with gameplay while destination/origin/banks/progression/receipts stay dormant. No Enable, public source move or renewed inventory/life. Rejected and uncertain writes preserve atomicity; reconnect/restart is silent. Escorts and mutable NPC simulation remain closed; M5 stays open.",
       "removal_condition": "OpenMW supplies equivalent explicit transactional script context and scoped reference resolution"
     },
     {

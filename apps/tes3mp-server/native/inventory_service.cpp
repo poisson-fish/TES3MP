@@ -6243,9 +6243,11 @@ namespace TES3MP::Native
         // V87 returns a dormant terminal encounter to shared exploration only
         // from a grounded, living, authenticated body clear of every shared hull.
         // V88 additionally stages stock source Enable against the living original
-        // life. The completed bank/origin/receipts remain untouched and suspended.
+        // life. V90 also clears the private destination hull and retains its pose
+        // dormant, without Enable or a source move. Completed banks stay frozen.
         if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->returns() && native->combat
-            && (!mBinding.mPersonalScripts->enables() || (native->life && native->combat->actors[2][8][2] > 0))
+            && (!(mBinding.mPersonalScripts->enables() || mBinding.mPersonalScripts->relocations())
+                || (native->life && native->combat->actors[2][8][2] > 0))
             && !native->casting && native->projectiles.empty() && !native->target && native->relocations.empty()
             && std::ranges::none_of(native->timedEffects, [](const auto& effect) { return effect.sourceKind != 3 && effect.sourceKind != 5; })
             && std::ranges::none_of(native->combat->swings, [](const auto& swing) { return swing && swing->pending(); })
@@ -6267,6 +6269,9 @@ namespace TES3MP::Native
                 const double selfRadius = transaction->scene->forPlayer(PlayerHullBase + i).selectedActorHorizontalRadius();
                 const double npcDistance = std::max(256., selfRadius + transaction->scene->selectedActorHorizontalRadius() + 32.);
                 if (std::hypot(x - source.mPosition[0], y - source.mPosition[1]) < npcDistance) continue;
+                const auto* stories = personalState(transaction.get());
+                const auto* pose = PersonalScripts::relocation(*stories, player.value());
+                if (pose && std::hypot(x - pose->position[0], y - pose->position[1]) < npcDistance) continue;
                 const auto& peer = transaction->states[1 - i];
                 if (peer.root && peer.root->cell() == body.root->cell()
                     && physicalScope(mBinding.mPlayers[1 - i], transaction.get()) == 1)
@@ -6276,11 +6281,10 @@ namespace TES3MP::Native
                         + transaction->scene->forPlayer(PlayerHullBase + 1 - i).selectedActorHorizontalRadius() + 32.);
                     if (std::hypot(x - double(q.x()) / 1024, y - double(q.y()) / 1024) < peerDistance) continue;
                 }
-                const auto* stories = personalState(transaction.get());
                 const auto invocations = native->personalScripts ? native->personalScripts->invocations : 0;
                 if (mBinding.mPersonalScripts->enables()
                     && invocations >= PersonalScripts::MaximumInvocationsPerTransaction) continue;
-                if (mBinding.mPersonalScripts->enables() && std::ranges::any_of(*stories, [&](const auto& story) {
+                if ((mBinding.mPersonalScripts->enables() || pose) && std::ranges::any_of(*stories, [&](const auto& story) {
                     return story.last.character == player.value() && story.encounterLife
                         && story.encounterLife != native->life->generation;
                 })) continue;

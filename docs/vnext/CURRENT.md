@@ -37,18 +37,20 @@ Rendered: `build/m5-encounter-{desktop-05,restart-01}/result.json`,
 `build/m5-enable-{desktop-02,restart-01}/result.json`.
 Recovery is silent; the stock GUI lifetime guard closes removed replicas.
 
-**V89 relocation:** fresh images/capability 42; stock source-only
-Position/PositionCell/GetPos/GetAngle within the same admitted interior. Discovery
-rolls back/retries; finite coordinates ≤1,000,000, displacement ≤4,096,
-rotation ≤360 degrees, existing instruction/call budgets. Terminal inert destination
-visibility/collision persists with origin/banks/progression/receipts; B keeps the
-original opportunity. Overlap checks precede commit/recovery; rejected writes
-install nothing and uncertain writes close authority. No public inventory/life copies.
-Relocated scopes stay occupied; AI/combat, new interactions and return remain closed.
-Native: `build/logs/m5-relocation-{state,host-03,wire}.log`;
-V88 regression: `build/logs/m5-relocation-enable-regression.log`.
-Rendered: `build/m5-relocation-{desktop-04,restart-01}/result.json`; A retains destination, B unfinished; recovery silent.
+**V89–90 relocation/return:** fresh images/capability 42. Stock source-only
+Position/PositionCell/GetPos/GetAngle retain [bounded admission](DEVELOPMENT.md).
+V89 stays occupied. V90 returns grounded online living bodies beyond quiescent
+original/destination NPC and shared peer hulls, against the living original source life.
+Destination/origin/banks/progression/receipts stay dormant; B retains the original
+opportunity. Rejected writes install nothing; uncertain writes close authority.
+No Enable, teleport home or public inventory/life copies; recovery is silent.
+Native: `build/logs/m5-relocation-return-{state,host-02}.log`;
+V89/V88 regressions: `build/logs/m5-relocation-return-{v89-state,enable-regression}.log`.
+Rendered: `build/m5-relocation-return-{desktop,restart}-01/result.json`.
 
-**Next:** prove relocated-scope return while retaining the destination outcome under
-the [M5 contract](DECISIONS.md#m5-implementation-contract). Escorts/mutable scenes,
-broader restoration and unchanged Seyda Neen/TR proofs remain open. M5 stays open.
+**Next:** bounded durable source waits under the
+[contract](DECISIONS.md#m5-implementation-contract): foreign NPC death suspends
+B's dependent invocation/clock; persist reference/life/wake reason, resume against
+the correct respawned life, and prove failed-write rollback plus silent recovery
+without false quest credit. Escorts/mutable AI, broader restoration and unchanged
+Seyda Neen/TR proofs remain later work. M5 stays open.

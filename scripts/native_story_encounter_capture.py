@@ -1,4 +1,4 @@
-"""Rendered bounded source Disable/return/Enable and silent recovery checks."""
+"""Rendered bounded source Disable/relocation/return/Enable and silent recovery checks."""
 import math
 import time
 
@@ -145,7 +145,14 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
     if return_path and not previous:
         completed = view("Alice", 91)
         p = position("Alice")
-        face("Alice", (p[0] + 10 * (p[0]-x), p[1] + 10 * (p[1]-y)))
+        if relocation:
+            # Leave perpendicular to the two hulls, on A's existing side, so the
+            # route can clear both without walking back through the destination.
+            dx, dy = 200 - x, -32 - y
+            sign = 1 if -dy * (p[0]-x) + dx * (p[1]-y) >= 0 else -1
+            face("Alice", (p[0] - sign * dy * 10, p[1] + sign * dx * 10))
+        else:
+            face("Alice", (p[0] + 10 * (p[0]-x), p[1] + 10 * (p[1]-y)))
         command("Alice", "autowalk")
         wait(lambda: all(len(latest(r, "native_player_sample")["players"]) == 2 for r in roles),
              "A crossed safe boundary and rejoined B", 15)
@@ -162,6 +169,9 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
             probe(role, False, "shared-return")
         result["checks"].append(dict(returned=True, shared_peers=True, A_completed=True, B_unfinished=True,
                                      A_position=position("Alice"), NPC_position=[x, y, z]))
+        if relocation:
+            result["checks"][-1]["private_destination"] = [200, -32, 1]
+            result["checks"][-1]["destination_dormant"] = True
         for role in roles:
             recover(role)
     for role in roles:
