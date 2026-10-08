@@ -5,11 +5,18 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 
-#include <tes3mp/character_profile.hpp>
 #include <tes3mp/character_creation_protocol.hpp>
+#include <tes3mp/character_profile.hpp>
 #include <tes3mp/dialogue_choice_protocol.hpp>
+#include <tes3mp/personal_dialogue.hpp>
 #include <tes3mp/wait_rest.hpp>
+
+namespace MWWorld
+{
+    class Ptr;
+}
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -45,6 +52,16 @@ namespace TES3MP::OpenMWAdapter
         virtual void frame(float frameDurationSeconds) noexcept = 0;
 
         virtual MultiplayerState multiplayerState() const noexcept { return MultiplayerState::Ready; }
+        virtual bool ownsPersonalDialogue() const noexcept { return false; }
+        virtual std::span<const ReliablePersonalDialogue> personalDialogue() const noexcept { return {}; }
+        virtual std::optional<std::pair<uint64_t, uint64_t>> dialogueSpeaker(const MWWorld::Ptr&) const noexcept
+        {
+            return {};
+        }
+        virtual bool submitPersonalDialogue(uint64_t, std::pair<uint64_t, uint64_t>, std::string_view, int) noexcept
+        {
+            return false;
+        }
         virtual bool ownsPlayerLives() const noexcept { return false; }
         virtual bool ownsPlayerMovement() const noexcept { return false; }
         virtual bool canRespawn() const noexcept { return false; }

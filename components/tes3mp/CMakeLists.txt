@@ -99,6 +99,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/wait_rest.hpp
     include/tes3mp/world_time_replication.hpp
     include/tes3mp/ambient_replication.hpp
+    include/tes3mp/personal_dialogue.hpp
     protocol/generated/authentication_accepted_generated.h
     protocol/generated/authentication_rejected_generated.h
     protocol/generated/authentication_request_generated.h
@@ -153,6 +154,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/weather_replication.cpp
     protocol/world_time_replication.cpp
     protocol/ambient_replication.cpp
+    protocol/personal_dialogue.cpp
 )
 target_include_directories(tes3mp_protocol PRIVATE
     "${tes3mp_flatbuffers_SOURCE_DIR}/include"

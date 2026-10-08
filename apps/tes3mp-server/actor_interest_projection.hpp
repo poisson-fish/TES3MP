@@ -1,17 +1,18 @@
 #ifndef TES3MP_SERVER_ACTOR_INTEREST_PROJECTION_HPP
 #define TES3MP_SERVER_ACTOR_INTEREST_PROJECTION_HPP
 
+#include "combat_interest_projection.hpp"
 #include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
-#include "combat_interest_projection.hpp"
 #include "weather_projection.hpp"
 #include "world_time_projection.hpp"
 #include <tes3mp/actor_replication.hpp>
-#include <tes3mp/ambient_replication.hpp>
 #include <tes3mp/actor_simulation.hpp>
+#include <tes3mp/ambient_replication.hpp>
 #include <tes3mp/canonical_state.hpp>
 #include <tes3mp/dialogue_choice_protocol.hpp>
+#include <tes3mp/personal_dialogue.hpp>
 #include <tes3mp/transport.hpp>
 
 #include <optional>
@@ -47,8 +48,8 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>>& dialogueResults = {},
         const std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>>& weatherUpdates = {},
         const std::vector<std::pair<TransportConnectionId, ReliableWorldTimeState>>& worldTimeUpdates = {},
-        const std::vector<std::pair<TransportConnectionId, ReliableAmbientBatch>>& ambient = {});
-
+        const std::vector<std::pair<TransportConnectionId, ReliableAmbientBatch>>& ambient = {},
+        const std::vector<std::pair<TransportConnectionId, ReliablePersonalDialogue>>& personal = {});
 }
 
 #endif

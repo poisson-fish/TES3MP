@@ -242,6 +242,52 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "personal-dialogue")
+    {
+        const auto a = TransportConnectionId::initial(), b = *TransportConnectionId::fromValue(2);
+        auto queues = *OutboundQueueSet::create(*OutboundQueuePolicy::create(1, 4096, 1, 1, 1, 1, 1, 1, 8, 250), 2);
+        if (queues.attach(a) != TransportResult::Accepted || queues.attach(b) != TransportResult::Accepted)
+            return 1;
+        ReliablePersonalDialogue alice{ id<SessionId>(1), SessionGeneration::initial(), id<ServerTick>(7),
+            id<CanonicalRevision>(8) };
+        alice.story = 71;
+        alice.revision = 1;
+        alice.command = 3;
+        alice.speaker = 41;
+        alice.life = 3;
+        alice.topic = "passage";
+        alice.response = "Alice only";
+        auto bob = alice;
+        bob.targetSessionId = id<SessionId>(2);
+        bob.response = "Bob only";
+        const std::vector<std::pair<TransportConnectionId, ReliablePersonalDialogue>> both{ { a, alice }, { b, bob } };
+        const auto admit = [&] {
+            return ServerApp::admitCombinedInterestTickAtomically(
+                queues, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, both);
+        };
+        const std::array occupied{ std::byte{ 1 } };
+        if (queues.enqueue(b, TransportChannel::ReliableOrdered, occupied) != TransportResult::Accepted || admit()
+            || queues.hasPending(a) != std::optional(false))
+            return 1;
+        RecordingTransport transport;
+        queues.pump(transport, b, 0);
+        transport.sent.clear();
+        if (!admit())
+            return 1;
+        queues.pump(transport, a, 1);
+        queues.pump(transport, b, 1);
+        if (transport.sent.size() != 2)
+            return 1;
+        for (size_t i = 0; i < 2; ++i)
+        {
+            const auto frame = decodeProtocolFrame(transport.sent[i].bytes);
+            const auto* value = std::get_if<DecodedFrame>(&frame);
+            if (!value || decodeReliablePersonalDialogue(value->payload()) != (i ? bob : alice))
+                return 1;
+        }
+        std::cout << "PASS personal dialogue: private two-recipient reliable admission and atomic backpressure\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "ambient")
     {
         const auto a = TransportConnectionId::initial(), b = *TransportConnectionId::fromValue(2);

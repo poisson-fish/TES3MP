@@ -164,8 +164,9 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime, unsigned int arg0) override
             {
-                requireStockDialogue(runtime);
-                MWBase::DialogueManager* dialogue = MWBase::Environment::get().getDialogueManager();
+                auto* staged = static_cast<InterpreterContext&>(runtime.getContext()).getDialogueState();
+                if (!staged)
+                    requireStockDialogue(runtime);
                 while (arg0 > 0)
                 {
                     std::string_view question = runtime.getStringLiteral(runtime[0].mInteger);
@@ -178,7 +179,10 @@ namespace MWScript
                         runtime.pop();
                         arg0 = arg0 - 1;
                     }
-                    dialogue->addChoice(question, choice);
+                    if (staged)
+                        staged->addChoice(question, choice);
+                    else
+                        MWBase::Environment::get().getDialogueManager()->addChoice(question, choice);
                 }
             }
         };
@@ -358,13 +362,13 @@ namespace MWScript
             interpreter.installSegment5<OpSetJournalIndex>(Compiler::Dialogue::opcodeSetJournalIndex);
             interpreter.installSegment5<OpGetJournalIndex>(Compiler::Dialogue::opcodeGetJournalIndex);
             interpreter.installSegment5<OpAddTopic>(Compiler::Dialogue::opcodeAddTopic);
+            interpreter.installSegment3<OpChoice>(Compiler::Dialogue::opcodeChoice);
         }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)
         {
             installJournalOpcodes(interpreter);
             interpreter.installSegment5<OpFillJournal>(Compiler::Dialogue::opcodeFillJournal);
-            interpreter.installSegment3<OpChoice>(Compiler::Dialogue::opcodeChoice);
             interpreter.installSegment5<OpForceGreeting<ImplicitRef>>(Compiler::Dialogue::opcodeForceGreeting);
             interpreter.installSegment5<OpForceGreeting<ExplicitRef>>(Compiler::Dialogue::opcodeForceGreetingExplicit);
             interpreter.installSegment5<OpGoodbye>(Compiler::Dialogue::opcodeGoodbye);

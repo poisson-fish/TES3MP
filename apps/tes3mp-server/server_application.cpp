@@ -1688,9 +1688,55 @@ namespace TES3MP::ServerApp
                         batch.scheduledTick().value(), prepared.candidateRevision(), prepared.candidateNativeInventory());
                     if (output) ambient.emplace_back(*connection, std::move(*output));
                 }
+            auto personalViewsCandidate = mPersonalDialogueViews;
+            std::erase_if(personalViewsCandidate, [&](const auto& entry) {
+                const auto id = SessionId::fromValue(entry.first.first);
+                const auto* session = id ? prepared.candidateState().findActiveSession(*id) : nullptr;
+                return !session || session->sessionGeneration() != entry.second.targetSessionGeneration;
+            });
+            std::vector<SessionId> dialogueFeedback;
+            for (size_t i = 0; i < dispositions.size(); ++i)
+                if (dispositions[i].acknowledgementAdvanced()
+                    && std::holds_alternative<DialogueIntentCommandProposal>(commands[i].proposal().payload()))
+                    dialogueFeedback.push_back(commands[i].proposal().sessionId());
+            std::vector<std::pair<TransportConnectionId, ReliablePersonalDialogue>> personal;
+            if (mWiring->nativeInventory && mWiring->nativeInventory->hasPersonalDialogue())
+                for (const auto& target : prepared.candidateState().activeSessions())
+                {
+                    const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                    const auto* session = connection ? mWiring->sessions.session(*connection) : nullptr;
+                    if (!session || !session->negotiatedHello()
+                        || !std::ranges::binary_search(
+                            session->negotiatedHello()->negotiatedCapabilities(), personalDialogueCapability()))
+                        continue;
+                    for (auto& view : mWiring->nativeInventory->projectPersonalDialogue(prepared.candidateState(),
+                             target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision(),
+                             prepared.candidateNativeInventory()))
+                    {
+                        const auto key = std::pair{ target.sessionId().value(), view.story };
+                        const auto found = personalViewsCandidate.find(key);
+                        auto stable = view;
+                        stable.response.clear();
+                        stable.messages.clear();
+                        auto comparison = stable;
+                        if (found != personalViewsCandidate.end())
+                        {
+                            comparison.serverTick = found->second.serverTick;
+                            comparison.canonicalRevision = found->second.canonicalRevision;
+                        }
+                        const bool feedback
+                            = std::ranges::find(dialogueFeedback, target.sessionId()) != dialogueFeedback.end();
+                        if (found == personalViewsCandidate.end() || comparison != found->second
+                            || !view.response.empty() || !view.messages.empty() || feedback)
+                        {
+                            personalViewsCandidate.insert_or_assign(key, std::move(stable));
+                            personal.emplace_back(*connection, std::move(view));
+                        }
+                    }
+                }
             if (!admitCombinedInterestTickAtomically(mWiring->queues, routed, routedViews, actorBaselines, actorViews,
                     objectBaselines, inventoryBaselines, combatViews, combatEvents, dialogueChoiceResults,
-                    weatherUpdates, worldTimeUpdates, ambient))
+                    weatherUpdates, worldTimeUpdates, ambient, personal))
             {
                 mFailure = changedObjectCells.empty() ? "tick output admission failed"
                                                       : "interactive object output admission failed";
@@ -1704,6 +1750,7 @@ namespace TES3MP::ServerApp
                 return false;
             }
             mDialogueChoiceResults = std::move(dialogueChoiceResultsCandidate);
+            mPersonalDialogueViews = std::move(personalViewsCandidate);
             for (auto& [session, retained] : mLatestControls) retained.pending = false;
             if (mWiring->nativeInventory) mWiring->nativeInventory->synchronizeCells(mWiring->reducer.state());
             if (waitRestApplied)

@@ -1,4 +1,5 @@
 #include "dialoguemanagerimp.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
 
 #include <algorithm>
 #include <list>
@@ -72,6 +73,10 @@ namespace MWDialogue
 
     void DialogueManager::clear()
     {
+        mPersonalCallback = nullptr;
+        mPersonalTopics.clear();
+        mPersonalStory = 0;
+        mPersonalRevision = UINT64_MAX;
         mKnownTopics.clear();
         mTalkedTo = false;
         mOriginalDisposition = 0;
@@ -139,8 +144,54 @@ namespace MWDialogue
         }
     }
 
+    void DialogueManager::presentPersonalDialogue(const TES3MP::ReliablePersonalDialogue& view)
+    {
+        auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (!multiplayer || !multiplayer->ownsPersonalDialogue() || mActor.isEmpty() || view.story != mPersonalStory)
+            return;
+        const auto speaker = multiplayer->dialogueSpeaker(mActor);
+        if (!speaker || view.speaker != speaker->first || view.life != speaker->second)
+            return;
+        mLastTopic = ESM::RefId::stringRefId(view.topic);
+        mChoices.clear();
+        for (const auto& choice : view.choices)
+            mChoices.emplace_back(choice.text, choice.id);
+        mIsInChoice = !mChoices.empty();
+        if (mPersonalCallback && !view.response.empty())
+            mPersonalCallback->addResponse(view.topic, view.response);
+        if (mPersonalCallback && mPersonalRevision != view.revision && !view.quests.empty())
+        {
+            std::string progress;
+            for (const auto& quest : view.quests)
+                progress
+                    += quest.topic + ": " + std::to_string(quest.index) + (quest.finished ? " (finished)" : "") + "\n";
+            mPersonalCallback->addResponse("Journal", progress);
+        }
+        mPersonalRevision = view.revision;
+    }
+
     bool DialogueManager::startDialogue(const MWWorld::Ptr& actor, ResponseCallback* callback)
     {
+        auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+        {
+            if (!multiplayer->dialogueSpeaker(actor))
+                return false;
+            mActor = actor;
+            mPersonalCallback = callback;
+            mPersonalStory = 0;
+            mPersonalRevision = UINT64_MAX;
+            mLastTopic = {};
+            mChoices.clear();
+            mIsInChoice = false;
+            mGoodbye = false;
+            const auto views = multiplayer->personalDialogue();
+            if (views.empty())
+                return false;
+            mPersonalStory = views.front().story;
+            presentPersonalDialogue(views.front());
+            return true;
+        }
         updateGlobals();
 
         // Dialogue with dead actor (e.g. through script) should not be allowed.
@@ -252,6 +303,9 @@ namespace MWDialogue
 
     void DialogueManager::executeScript(const std::string& script, const MWWorld::Ptr& actor)
     {
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+            return;
         if (const std::optional<Interpreter::Program> program = compile(script, actor))
         {
             try
@@ -397,6 +451,22 @@ namespace MWDialogue
 
     std::list<std::string> DialogueManager::getAvailableTopics()
     {
+        auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+        {
+            std::list<std::string> topics;
+            mPersonalTopics.clear();
+            for (const auto& view : multiplayer->personalDialogue())
+                for (const auto& topic : view.topics)
+                {
+                    const auto label = multiplayer->personalDialogue().size() > 1
+                        ? topic + " (story " + std::to_string(view.story) + ")"
+                        : topic;
+                    mPersonalTopics.emplace(Misc::StringUtils::lowerCase(label), std::pair{ view.story, topic });
+                    topics.push_back(label);
+                }
+            return topics;
+        }
         updateActorKnownTopics();
 
         std::list<std::string> keywordList;
@@ -423,6 +493,22 @@ namespace MWDialogue
 
     void DialogueManager::keywordSelected(std::string_view keyword, ResponseCallback* callback)
     {
+        auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+        {
+            if (mIsInChoice)
+                return;
+            const auto found = mPersonalTopics.find(Misc::StringUtils::lowerCase(keyword));
+            const auto story = found == mPersonalTopics.end() ? mPersonalStory : found->second.first;
+            const auto topic = found == mPersonalTopics.end() ? std::string(keyword) : found->second.second;
+            const auto speaker = multiplayer->dialogueSpeaker(mActor);
+            if (speaker && multiplayer->submitPersonalDialogue(story, *speaker, topic, -1))
+            {
+                mPersonalStory = story;
+                mPersonalCallback = callback;
+            }
+            return;
+        }
         if (!mIsInChoice)
         {
             const ESM::Dialogue* dialogue = searchDialogue(ESM::RefId::stringRefId(keyword));
@@ -440,6 +526,12 @@ namespace MWDialogue
 
     void DialogueManager::goodbyeSelected()
     {
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+        {
+            mPersonalCallback = nullptr;
+            return;
+        }
         // Apply disposition change to NPC's base disposition if we **think** we need to change something
         if ((mPermanentDispositionChange || mOriginalDisposition != mCurrentDisposition) && mActor.getClass().isNpc())
         {
@@ -463,6 +555,15 @@ namespace MWDialogue
 
     void DialogueManager::questionAnswered(int answer, ResponseCallback* callback)
     {
+        auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+        {
+            const auto speaker = multiplayer->dialogueSpeaker(mActor);
+            if (mIsInChoice && speaker
+                && multiplayer->submitPersonalDialogue(mPersonalStory, *speaker, mLastTopic.toString(), answer))
+                mPersonalCallback = callback;
+            return;
+        }
         mChoice = answer;
 
         const ESM::Dialogue* dialogue = searchDialogue(mLastTopic);
@@ -532,6 +633,9 @@ namespace MWDialogue
 
     void DialogueManager::persuade(int type, ResponseCallback* callback)
     {
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+            return;
         bool success;
         int temp, perm;
         MWBase::Environment::get().getMechanicsManager()->getPersuasionDispositionChange(
@@ -582,6 +686,9 @@ namespace MWDialogue
 
     void DialogueManager::applyBarterDispositionChange(int delta)
     {
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+            return;
         if (!mActor.isEmpty() && mActor.getClass().isNpc())
         {
             updateOriginalDisposition();
@@ -594,6 +701,9 @@ namespace MWDialogue
 
     bool DialogueManager::checkServiceRefused(ResponseCallback* callback, ServiceType service)
     {
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+            return true;
         Filter filter(mActor, service, mTalkedTo);
 
         const MWWorld::Store<ESM::Dialogue>& dialogues = MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>();

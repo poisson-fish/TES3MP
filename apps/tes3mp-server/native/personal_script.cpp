@@ -1,14 +1,15 @@
 #include "personal_script.hpp"
-#include <apps/openmw/mwscript/scriptstate.hpp>
-#include <apps/openmw/mwscript/interpretercontext.hpp>
+#include <algorithm>
 #include <apps/openmw/mwdialogue/filter.hpp>
+#include <apps/openmw/mwscript/interpretercontext.hpp>
+#include <apps/openmw/mwscript/scriptstate.hpp>
 #include <apps/openmw/mwworld/class.hpp>
-#include <components/esm3/esmwriter.hpp>
-#include <sstream>
 #include <bit>
 #include <cmath>
-#include <algorithm>
+#include <components/esm3/esmwriter.hpp>
 #include <limits>
+#include <source_location>
+#include <sstream>
 
 namespace TES3MP::Native
 {
@@ -18,8 +19,13 @@ namespace TES3MP::Native
         constexpr uint64_t ScheduledMagic = 0x3254535054335354;
         constexpr uint64_t BankMagic = 0x3354535054335354;
         constexpr uint64_t DialogueMagic = 0x3454535054335354;
-        void require(bool value)
-        { if (!value) throw std::invalid_argument("Invalid or incompatible personal script state"); }
+        constexpr uint64_t IntentMagic = 0x3554535054335354;
+        void require(bool value, std::source_location location = std::source_location::current())
+        {
+            if (!value)
+                throw std::invalid_argument(
+                    "Invalid or incompatible personal script state at line " + std::to_string(location.line()));
+        }
         void word(std::vector<char>& bytes, uint64_t value)
         { for (size_t i = 0; i < 8; ++i) bytes.push_back(static_cast<char>(value >> (8 * i))); }
         struct Cursor
@@ -74,6 +80,63 @@ namespace TES3MP::Native
             { auto id = ref(cursor), entry = ref(cursor); if (state) state->dialogue.entries.push_back({id, entry}); }
             count = cursor.word(); require(count <= MWScript::DialogueState::MaximumRecords);
             for (size_t i = 0; i < count; ++i) { auto id = ref(cursor); if (state) state->dialogue.topics.push_back(id); }
+        }
+        void conversation(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        {
+            word(bytes, state.dialogueRevision);
+            word(bytes, state.dialogueCommand);
+            const auto& request = state.dialogueRequest;
+            for (auto value : { request.story, request.speaker, request.life, request.revision })
+                word(bytes, value);
+            ref(bytes, ESM::RefId::stringRefId(request.topic));
+            word(bytes, std::bit_cast<uint32_t>(request.choice));
+            word(bytes, state.choices.size());
+            for (const auto& choice : state.choices)
+            {
+                word(bytes, choice.text.size());
+                bytes.insert(bytes.end(), choice.text.begin(), choice.text.end());
+                word(bytes, std::bit_cast<uint32_t>(choice.id));
+            }
+            word(bytes, state.talkedSpeakers.size());
+            for (auto speaker : state.talkedSpeakers)
+                word(bytes, speaker);
+        }
+        void conversation(Cursor& cursor, PersonalScripts::Instance* state)
+        {
+            const auto revision = cursor.word(), command = cursor.word();
+            DialogueIntent request{ cursor.word(), cursor.word(), cursor.word(), cursor.word(), ref(cursor).toString(),
+                -1 };
+            const auto choice = cursor.word();
+            require(choice <= UINT32_MAX);
+            request.choice = std::bit_cast<int32_t>(uint32_t(choice));
+            if (state)
+            {
+                state->dialogueRevision = revision;
+                state->dialogueCommand = command;
+                state->dialogueRequest = request;
+            }
+            auto count = cursor.word();
+            require(count <= 8);
+            for (size_t i = 0; i < count; ++i)
+            {
+                const auto size = cursor.word();
+                require(size && size <= 256);
+                const auto text = cursor.take(size);
+                require(std::ranges::find(text, '\0') == text.end());
+                const auto id = cursor.word();
+                require(id <= INT32_MAX);
+                if (state)
+                    state->choices.push_back({ std::string(text.data(), text.size()), int(id) });
+            }
+            count = cursor.word();
+            require(count <= 64);
+            for (size_t i = 0; i < count; ++i)
+            {
+                const auto id = cursor.word();
+                require(id);
+                if (state)
+                    state->talkedSpeakers.push_back(id);
+            }
         }
         struct Bank final : MWScript::ScriptState
         {
@@ -148,14 +211,19 @@ namespace TES3MP::Native
     }
 
     PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
-        bool scheduled, bool banks)
-        : mCampaign(campaign), mDefinitions(std::move(definitions)), mScheduled(scheduled), mBanks(banks)
+        bool scheduled, bool banks, bool intents)
+        : mCampaign(campaign)
+        , mDefinitions(std::move(definitions))
+        , mScheduled(scheduled)
+        , mBanks(banks)
+        , mIntents(intents)
     {
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         size_t scripts = 0;
         require(!mBanks || mScheduled);
         mDialogues = std::ranges::any_of(mDefinitions, [](const auto& entry) { return !entry.dialogues.empty(); });
         require(!mDialogues || mBanks);
+        require(!mIntents || mDialogues);
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
@@ -192,7 +260,11 @@ namespace TES3MP::Native
                         && info.mId.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
                         && info.mId.getRefIdString().find('\0') == std::string_view::npos
                         && info.mQuestStatus >= ESM::DialInfo::QS_None && info.mQuestStatus <= ESM::DialInfo::QS_Restart
-                        && info.mResponse.size() <= 4096 && info.mResultScript.size() <= MWScript::WorldScript::MaximumSourceBytes
+                        && (!mIntents
+                            || ((dialogue.mType != ESM::Dialogue::Topic || info.mData.mDisposition == 0)
+                                && info.mResponse.find('%') == std::string::npos))
+                        && info.mResponse.size() <= 4096
+                        && info.mResultScript.size() <= MWScript::WorldScript::MaximumSourceBytes
                         && info.mSelects.size() <= 16 && std::ranges::find(identities, info.mId) == identities.end());
                     for (const auto& name : {info.mActor, info.mRace, info.mClass, info.mFaction, info.mPcFaction, info.mCell})
                         require(name.empty() || (name.is<ESM::StringRefId>()
@@ -210,6 +282,8 @@ namespace TES3MP::Native
                 }
             }
         }
+        require(
+            !mIntents || scripts <= MaximumInstances - 2); // Reserve two authenticated dialogue calls per host tick.
         // Includes every script's content/source/defaults/limits digest and the
         // complete ordered ownership policy. No session identities or pointers.
         auto binding = encode(initial());
@@ -217,6 +291,13 @@ namespace TES3MP::Native
         {
             constexpr std::string_view limits = "scoped-dialogue-results-1;16;64;16;8192;4096;64;128;1048576";
             binding.insert(binding.end(), limits.begin(), limits.end());
+            if (mIntents)
+            {
+                constexpr std::string_view intentLimits
+                    = "authenticated-dialogue-1;14;2;8;256;4096;32768;64;root-first;literal;zero-threshold;unscripted-"
+                      "speaker;primary-bank";
+                binding.insert(binding.end(), intentLimits.begin(), intentLimits.end());
+            }
             std::ostringstream output(std::ios::binary); ESM::ESMWriter writer;
             writer.setVersion(ESM::VER_130); writer.setFormatVersion(ESM::CurrentSaveGameFormatVersion); writer.save(output);
             for (const auto& entry : mDefinitions)
@@ -239,6 +320,13 @@ namespace TES3MP::Native
             state.push_back({{MWScript::ExecutionContext::Ownership::Character, mCampaign, entry.story, 1,
                 entry.character, 0, 0, 0, 0}, 0, entry.script->initial()});
             auto& instance = state.back(); instance.runtime.runtime.script.mRunning = entry.running;
+            if (mIntents)
+                for (const auto& dialogue : entry.dialogues)
+                    if (dialogue.mType == ESM::Dialogue::Topic)
+                    {
+                        instance.dialogue.topics.push_back(dialogue.mId);
+                        break;
+                    }
             for (const auto& member : entry.members)
             {
                 auto value = member.script->initial(); value.runtime.script.mRunning = member.running;
@@ -260,6 +348,43 @@ namespace TES3MP::Native
             && (!last.causalEvent || last.causalEvent == state.eventCursor)
             && (last.invocation || (!last.causalEvent && !state.eventCursor && !state.scheduledTick))
             && (mScheduled || !state.scheduledTick));
+        if (mIntents)
+        {
+            require(bool(state.dialogueRevision) == bool(state.dialogueCommand) && state.choices.size() <= 8
+                && state.talkedSpeakers.size() <= 64);
+            if (state.dialogueRevision)
+            {
+                const auto& request = state.dialogueRequest;
+                require(validDialogueIntent(request) && request.story == expected.story
+                    && request.revision + 1 == state.dialogueRevision);
+                auto execution = last;
+                if (!execution.invocation)
+                    execution.invocation = 1;
+                auto copy = state.dialogue;
+                MWScript::DialogueState dialogue(execution, copy, expected.dialogues);
+                (void)dialogue.record(ESM::RefId::stringRefId(request.topic), ESM::Dialogue::Topic);
+                require(std::ranges::find(state.talkedSpeakers, request.speaker) != state.talkedSpeakers.end());
+            }
+            else
+                require(
+                    state.dialogueRequest == DialogueIntent{} && state.choices.empty() && state.talkedSpeakers.empty());
+            for (size_t i = 0; i < state.choices.size(); ++i)
+            {
+                const auto& choice = state.choices[i];
+                require(choice.id >= 0 && !choice.text.empty() && choice.text.size() <= 256
+                    && choice.text.find('\0') == choice.text.npos
+                    && std::ranges::none_of(
+                        std::span(state.choices).first(i), [&](const auto& c) { return c.id == choice.id; }));
+            }
+            for (size_t i = 0; i < state.talkedSpeakers.size(); ++i)
+                require(state.talkedSpeakers[i]
+                    && std::find(
+                           state.talkedSpeakers.begin(), state.talkedSpeakers.begin() + i, state.talkedSpeakers[i])
+                        == state.talkedSpeakers.begin() + i);
+        }
+        else
+            require(!state.dialogueRevision && !state.dialogueCommand && state.dialogueRequest == DialogueIntent{}
+                && state.choices.empty() && state.talkedSpeakers.empty());
         require(state.members.size() == expected.members.size());
         for (const auto& member : state.members)
             require(member.tick <= last.invocation && member.runtime.globals.empty());
@@ -286,7 +411,12 @@ namespace TES3MP::Native
     {
         require(state.size() == mDefinitions.size());
         std::vector<char> bytes;
-        word(bytes, mDialogues ? DialogueMagic : mBanks ? BankMagic : mScheduled ? ScheduledMagic : Magic);
+        word(bytes,
+            mIntents         ? IntentMagic
+                : mDialogues ? DialogueMagic
+                : mBanks     ? BankMagic
+                : mScheduled ? ScheduledMagic
+                             : Magic);
         for (auto value : mIdentity.bytes) bytes.push_back(static_cast<char>(std::to_integer<unsigned char>(value)));
         word(bytes, state.size());
         for (size_t i = 0; i < state.size(); ++i)
@@ -307,6 +437,8 @@ namespace TES3MP::Native
                 }
             }
             if (mDialogues) progression(bytes, state[i]);
+            if (mIntents)
+                conversation(bytes, state[i]);
         }
         require(bytes.size() <= MaximumImageBytes);
         return bytes;
@@ -316,7 +448,12 @@ namespace TES3MP::Native
     {
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
-        require(input.word() == (mDialogues ? DialogueMagic : mBanks ? BankMagic : mScheduled ? ScheduledMagic : Magic));
+        require(input.word()
+            == (mIntents         ? IntentMagic
+                    : mDialogues ? DialogueMagic
+                    : mBanks     ? BankMagic
+                    : mScheduled ? ScheduledMagic
+                                 : Magic));
         const auto identity = input.take(32);
         require(std::equal(identity.begin(), identity.end(), reinterpret_cast<const char*>(mIdentity.bytes.data())));
         const auto count = input.word(); require(count == mDefinitions.size());
@@ -338,6 +475,8 @@ namespace TES3MP::Native
                 }
             }
             if (mDialogues) progression(preflight, nullptr);
+            if (mIntents)
+                conversation(preflight, nullptr);
         }
         require(preflight.bytes.empty());
         State state;
@@ -358,6 +497,8 @@ namespace TES3MP::Native
                 }
             }
             if (mDialogues) progression(input, &entry);
+            if (mIntents)
+                conversation(input, &entry);
             validate(entry, i); state.push_back(std::move(entry));
         }
         require(encode(state) == std::vector<char>(bytes.begin(), bytes.end()));
@@ -485,13 +626,16 @@ namespace TES3MP::Native
                 && current.last.invocation != UINT64_MAX && execution.invocation == current.last.invocation + 1
                 && execution.causalEvent > current.eventCursor && current.runtime.tick != UINT64_MAX);
             prepared.state = before; auto& state = prepared.state[index];
-            MWScript::DialogueState dialogue(execution, state.dialogue, found->dialogues);
+            MWScript::DialogueState dialogue(execution, state.dialogue, found->dialogues, mIntents);
             const auto& record = dialogue.record(topic, ESM::Dialogue::Topic);
             Bank bank(execution, *found, state);
             FilterContext script(execution, content, resolver, bank, dialogue, state.runtime.runtime.globals);
             const auto actor = script.resolveReference({});
-            require(actor.hasLiveReference() && actor.getClass().getScript(actor) == result.script);
-            MWDialogue::Filter::Scoped scoped{script, dialogue, disposition, cellName};
+            require(actor.hasLiveReference()
+                && (mIntents ? actor.getClass().getScript(actor).empty()
+                             : actor.getClass().getScript(actor) == result.script));
+            MWDialogue::Filter::Scoped scoped{ script, dialogue, disposition, cellName,
+                mIntents ? result.script : ESM::RefId{} };
             MWDialogue::Filter filter(actor, choice, talkedToPlayer, scoped);
             const auto response = filter.search(record, false);
             require(response.second != nullptr);
@@ -501,11 +645,19 @@ namespace TES3MP::Native
             auto invocation = found->script->executeResult(state.runtime, execution, content, resolver,
                 bank, bank.instances.front(), dialogue, program->program, result.trace);
             state.runtime.runtime.globals = std::move(invocation.state.globals);
+            if (mIntents)
+            {
+                state.choices = std::move(dialogue.choices);
+                prepared.response = response.second->mResponse;
+                result.presentation = std::move(invocation.presentation);
+            }
             ++state.runtime.tick;
             bank.write(state);
             state.last = execution; state.eventCursor = execution.causalEvent;
             state.lastTopic = topic; state.lastInfo = response.second->mId; state.lastChoice = choice;
-            prepared.image = encode(prepared.state); prepared.invocations = 1;
+            if (!mIntents)
+                prepared.image = encode(prepared.state);
+            prepared.invocations = 1;
             result.outcome = SharedWorldScript::Outcome::Committed; result.executed = true;
         }
         catch (const MWScript::ScriptContextUnavailable& error)
@@ -520,6 +672,70 @@ namespace TES3MP::Native
             result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
         }
         return prepared;
+    }
+
+    PersonalScripts::Prepared PersonalScripts::prepareIntent(const State& before, uint64_t character, uint64_t command,
+        const DialogueIntent& request, int disposition, std::string_view cellName, const MWWorld::ESMStore& content,
+        const MWScript::ReferenceResolver& resolver, size_t budget) const
+    {
+        Prepared rejected;
+        try
+        {
+            require(mIntents && character && command && validDialogueIntent(request));
+            (void)encode(before);
+            const auto found = std::ranges::find_if(before, [&](const auto& state) {
+                return state.last.character == character && state.last.story == request.story;
+            });
+            require(found != before.end());
+            if (command == found->dialogueCommand)
+            {
+                require(request == found->dialogueRequest);
+                rejected.result.outcome = SharedWorldScript::Outcome::Committed;
+                return rejected;
+            }
+            require(request.revision == found->dialogueRevision && found->last.invocation != UINT64_MAX
+                && found->eventCursor != UINT64_MAX);
+            if (request.choice >= 0)
+                require(request.speaker == found->dialogueRequest.speaker && request.life == found->dialogueRequest.life
+                    && request.topic == found->dialogueRequest.topic
+                    && std::ranges::any_of(
+                        found->choices, [&](const auto& choice) { return choice.id == request.choice; }));
+            else
+            {
+                require(found->choices.empty() || request.speaker != found->dialogueRequest.speaker
+                    || request.life != found->dialogueRequest.life);
+                require(std::ranges::find(found->dialogue.topics, ESM::RefId::stringRefId(request.topic))
+                    != found->dialogue.topics.end());
+            }
+            auto execution = found->last;
+            ++execution.invocation;
+            execution.causalEvent = found->eventCursor + 1;
+            execution.sourceReference = request.speaker;
+            execution.sourceLife = request.life;
+            const bool talked
+                = std::ranges::find(found->talkedSpeakers, request.speaker) != found->talkedSpeakers.end();
+            auto prepared = prepareDialogue(before, execution, ESM::RefId::stringRefId(request.topic), request.choice,
+                disposition, talked, cellName, content, resolver, budget);
+            if (prepared.result.outcome != SharedWorldScript::Outcome::Committed || !prepared.result.executed)
+                return prepared;
+            auto& state = prepared.state[size_t(found - before.begin())];
+            state.dialogueRevision = request.revision + 1;
+            state.dialogueCommand = command;
+            state.dialogueRequest = request;
+            if (!talked)
+            {
+                require(state.talkedSpeakers.size() < 64);
+                state.talkedSpeakers.push_back(request.speaker);
+            }
+            prepared.image = encode(prepared.state);
+            return prepared;
+        }
+        catch (const std::exception& error)
+        {
+            rejected.result.diagnostic
+                = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+            return rejected;
+        }
     }
 
     PersonalScripts::Prepared PersonalScripts::prepareScheduled(const State& before, uint64_t worldTick,

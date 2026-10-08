@@ -80,17 +80,11 @@ campaign/story/physical/character/source/life/invocation/event identities. Unsta
 reject; waits differ from absence. Personal text: staged stats.
 Synthetic `build/logs/m5-context-{lookup,rollback,stock}.log`: isolation, stale/bounds
 rejection, stock callers, rollback/retry and named-locals recovery.
-**V81 personal state:** 1–8 stories/two characters own stock globals/locals/invocations/causal cursors.
-≤16 scoped source-free calls join gameplay commits; replay is silent, rejection atomic.
-Synthetic `build/logs/m5-personal-{state,host,shared}.log`: isolation, rollback/retry/stale/bounds,
-content/ownership-bound exact/uncertain recovery, upgrade/downgrade rejection; V80 preserved.
-
-**V82 personal scheduling:** established online characters/stories execute once/host tick;
-offline/skipped ticks never catch up. Durable markers; silent installation/output. V81 retains trusted calls.
-Synthetic
-`build/logs/m5-personal-scheduling-{state,host,legacy-state,legacy-host}.log`:
-isolation, late-failure rollback/retry/stale, exact/uncertain physics recovery,
-future-marker and V81 upgrade/downgrade rejection.
+**V81/V82 personal state/scheduling:** isolated characters/stories own globals/locals,
+invocations/cursors; online established characters execute once/tick without offline catch-up.
+Gameplay-coherent markers, silent replay and exact/uncertain recovery; legacy policies retained.
+Synthetic `build/logs/m5-personal-{state,host,shared}.log`,
+`build/logs/m5-personal-scheduling-{state,host,legacy-state,legacy-host}.log`.
 
 **M5 cross-script seam:** staged owned banks route stock typed members,
 StartScript/StopScript/ScriptRunning; ≤64 locals/128-byte names. Targets reject.
@@ -98,22 +92,28 @@ Synthetic `build/logs/m5-cross-script-{context,rollback,stock,lookup-regression}
 character/story isolation, identity/bounds/waits, late-failure/durability rollback/retry,
 stock GSCR locals/running recovery and stock callers. V81/V82 retain single-script admission.
 
-**V83 native banks:** 1–4 scripts/story, ≤16 mirrored instances. Admission order;
-StartScript enables later members, StopScript retains locals. Character/story globals,
-typed/self locals, running flags and member ordinals commit with gameplay/markers.
+**V83 native banks:** 1–4 scripts/story, ≤16 mirrored instances. Ordered locals/flags/
+ordinals/markers and character/story globals commit with gameplay; StartScript/StopScript
+preserve ownership and stopped locals.
 Synthetic `build/logs/m5-script-banks-{state,host-05,legacy-state,legacy-host,trusted-host,shared}.log`:
 late rejection/defer/rollback/retry/stale, offline/skipped ticks, stopped-state and
 exact/uncertain recovery; V81/V82 preserved; incompatible policies reject.
 
-**V84 scoped dialogue:** stock INFO ordering/comparisons, Journal/owned globals/typed locals,
-Choice/TalkedToPC; stock results stage bank writes, journal indices/finished flags/entry IDs,
-known topics and contextual receipts with gameplay. ≤16 DIAL/64 INFO/16 conditions;
-64 journal entries/story; 1 MiB image. Synthetic
-`build/logs/m5-dialogue-{isolation,rollback,recovery,stock,host-05,bank-regression,shared-regression}.log`:
-two-character/story isolation, late rejection/defer, rollback/retry/stale, exact/uncertain
-old/new restart, silent replay; content/policy and upgrade/downgrade rejection.
-Trusted scoped speaker fixture; unprovided services reject. Journal text/timestamps,
-client dialogue intents/menus, personal output and physical results remain closed.
+**V84 scoped dialogue:** stock filters/results, journals/topics and bank receipts join gameplay.
+Trusted-source isolation/rollback/recovery/stock/host remain synthetic:
+`build/logs/m5-dialogue-{isolation,rollback,recovery,stock,host-05}.log`.
 
-**Next:** dialogue intent/personal presentation and further staged filter/result services
-([M5 contract](DECISIONS.md#m5-implementation-contract)); NPC restoration remains closed.
+**V85 authenticated dialogue:** capability 40 binds character/story, living unscripted speaker,
+reach/sight/life, revision and offered choice. ≤14 mirrored scripts reserve two intents/tick;
+one/character. Banks/progression/choices/receipts commit with gameplay. Private literal
+responses/messages and journal indices/finished flags present after durability; client results,
+greetings, services and restock writes suppress. First topic seeds story knowledge.
+Reconnect restores choices/progression silently. Synthetic
+`build/logs/m5-dialogue-intents-{state,host,client,adapter,ingress,delivery}.log`:
+two-client/story isolation, duplicates/conflicts, defer/rollback/retry/stale,
+exact/uncertain restart and stock client presentation without Journal/World/Lua services.
+Desktop acceptance, text substitutions, disposition thresholds, journal text/timestamps,
+physical results and broader NPC restoration remain closed.
+
+**Next:** further staged dialogue filter/result services
+([M5 contract](DECISIONS.md#m5-implementation-contract)); physical results/NPC restoration remain later slices.

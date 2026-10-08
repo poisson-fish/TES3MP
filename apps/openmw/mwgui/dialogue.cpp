@@ -416,6 +416,15 @@ namespace MWGui
         if (mGoodbye || dialogueManager->isInChoice())
             return;
 
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+        {
+            onTopicActivated(topic);
+            if (mGoodbyeButton->getEnabled())
+                MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mGoodbyeButton);
+            return;
+        }
+
         const MWWorld::Store<ESM::GameSetting>& gmst
             = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
 
@@ -525,6 +534,9 @@ namespace MWGui
 
     void DialogueWindow::restock()
     {
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+            return;
         MWMechanics::CreatureStats& sellerStats = mPtr.getClass().getCreatureStats(mPtr);
         float delay = MWBase::Environment::get()
                           .getESMStore()
@@ -584,16 +596,19 @@ namespace MWGui
         mTopicLinks.clear();
         mKeywordSearch.clear();
 
-        int services = mPtr.getClass().getServices(mPtr);
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        const bool personal = multiplayer && multiplayer->ownsPersonalDialogue();
+        int services = personal ? 0 : mPtr.getClass().getServices(mPtr);
 
-        bool travel = (mPtr.getType() == ESM::NPC::sRecordId && !mPtr.get<ESM::NPC>()->mBase->getTransport().empty())
-            || (mPtr.getType() == ESM::Creature::sRecordId
-                && !mPtr.get<ESM::Creature>()->mBase->getTransport().empty());
+        bool travel = !personal
+            && ((mPtr.getType() == ESM::NPC::sRecordId && !mPtr.get<ESM::NPC>()->mBase->getTransport().empty())
+                || (mPtr.getType() == ESM::Creature::sRecordId
+                    && !mPtr.get<ESM::Creature>()->mBase->getTransport().empty()));
 
         const MWWorld::Store<ESM::GameSetting>& gmst
             = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
 
-        if (mPtr.getType() == ESM::NPC::sRecordId)
+        if (!personal && mPtr.getType() == ESM::NPC::sRecordId)
             mTopicsList->addItem(gmst.find("sPersuasion")->mValue.getString());
 
         if (services & ESM::NPC::AllItems)
@@ -764,6 +779,12 @@ namespace MWGui
             return;
         }
         auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer && multiplayer->ownsPersonalDialogue())
+        {
+            MWBase::Environment::get().getDialogueManager()->questionAnswered(id, mCallback.get());
+            updateTopics();
+            return;
+        }
         if (multiplayer)
         {
             if (mPendingMultiplayerChoice)
@@ -817,7 +838,8 @@ namespace MWGui
     void DialogueWindow::updateDisposition()
     {
         bool dispositionVisible = false;
-        if (!mPtr.isEmpty() && mPtr.getClass().isNpc())
+        const auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (!(multiplayer && multiplayer->ownsPersonalDialogue()) && !mPtr.isEmpty() && mPtr.getClass().isNpc())
         {
             // If actor was a witness to a crime which was payed off,
             // restore original disposition immediately.
@@ -854,6 +876,9 @@ namespace MWGui
     void DialogueWindow::onFrame(float dt)
     {
         checkReferenceAvailable();
+        const auto* native = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (native && native->ownsPersonalDialogue() && !mPtr.isEmpty())
+            updateTopics();
 
         if (mPendingMultiplayerChoice)
         {

@@ -103,6 +103,7 @@ namespace TES3MP::ServerApp
         std::map<SessionId, RetainedControls> mLatestControls;
         std::map<std::pair<SessionId, CommandId>, RetainedDialogueChoiceResult> mDialogueChoiceResults;
         std::map<SessionId, RetainedWaitRestConsent> mWaitRestConsents;
+        std::map<std::pair<uint64_t, uint64_t>, ReliablePersonalDialogue> mPersonalDialogueViews;
         std::map<TransportConnectionId, MonotonicInstant> mRejectedCloseDeadlines;
         // Chargen may commit during a transport pump before a simulation tick is
         // due. Retain its pre-change interest until the next tick publishes it.

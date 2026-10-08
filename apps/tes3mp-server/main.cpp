@@ -685,6 +685,8 @@ int main(int argc, char** argv)
             optionalCapabilities.push_back(TES3MP::authoritativeSecurityCapability());
     }
     std::vector<TES3MP::CapabilityId> requiredCapabilities;
+    if (nativeInventory && nativeInventory->hasPersonalDialogue())
+        requiredCapabilities.push_back(TES3MP::personalDialogueCapability());
     if (nativeInventory && nativeInventory->hasSharedScript())
         requiredCapabilities.push_back(TES3MP::ambientPresentationCapability());
     if (nativeInventory && nativeInventory->ownsPlayerPhysics())

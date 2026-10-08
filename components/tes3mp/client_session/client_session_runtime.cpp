@@ -522,6 +522,40 @@ namespace TES3MP
                 if (mResyncPending)
                     mResyncCombatObserved = true;
             }
+            else if (auto* personal = std::get_if<ReliablePersonalDialogue>(&message))
+            {
+                const auto session = mSession->stateMachine().sessionId();
+                if (!session || !negotiated(mSession->stateMachine(), personalDialogueCapability())
+                    || personal->targetSessionId != *session
+                    || personal->targetSessionGeneration != mSession->stateMachine().generation()
+                    || !validPersonalDialogue(*personal))
+                    return reject();
+                auto found = std::ranges::find(mPersonalDialogue, personal->story, &ReliablePersonalDialogue::story);
+                if (found != mPersonalDialogue.end())
+                {
+                    if (personal->serverTick < found->serverTick || personal->revision < found->revision)
+                        continue;
+                    if (personal->serverTick == found->serverTick)
+                    {
+                        if (*personal != *found)
+                            return reject();
+                        continue;
+                    }
+                    if (personal->revision == found->revision)
+                    {
+                        personal->response.clear();
+                        personal->messages.clear();
+                    }
+                    *found = *personal;
+                }
+                else
+                {
+                    if (mPersonalDialogue.size() >= 8)
+                        return reject();
+                    mPersonalDialogue.push_back(*personal);
+                }
+                result.personalDialogue.push_back(std::move(*personal));
+            }
             else if (auto* ambient = std::get_if<ReliableAmbientBatch>(&message))
             {
                 const auto sessionId = mSession->stateMachine().sessionId();
@@ -857,6 +891,33 @@ namespace TES3MP
             mLastQueuedSequence = *sequence;
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt,
             queued == ClientRuntimeResult::Accepted ? commandId : std::nullopt };
+    }
+
+    ClientRuntimeQueueResult ClientSessionRuntime::queueDialogueIntent(
+        DialogueIntent intent, std::optional<CommandId> retained)
+    {
+        const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
+        const auto session = mSession->stateMachine().sessionId();
+        if (!snapshot || !session || !mSession->stateMachine().interestBaselineComplete()
+            || !negotiated(mSession->stateMachine(), personalDialogueCapability()))
+            return { ClientRuntimeResult::NotConnected, {}, {} };
+        const auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
+            : snapshot->header().acknowledgedCommandSequence()
+            ? snapshot->header().acknowledgedCommandSequence()->next()
+            : std::optional(CommandSequence::initial());
+        const auto command = retained ? retained : sequence ? CommandId::fromValue(sequence->value()) : std::nullopt;
+        if (!sequence || !command)
+            return { ClientRuntimeResult::EncodeRejected, {}, {} };
+        ClientDialogueIntent value{ *session, snapshot->header().targetSessionGeneration(), *sequence, *command,
+            snapshot->header().canonicalRevision(), std::move(intent) };
+        const auto bytes = encodeClientDialogueIntent(value);
+        if (bytes.empty())
+            return { ClientRuntimeResult::EncodeRejected, {}, {} };
+        const auto result = queue(MessageClass::ReliableOperation, MessageKind::ClientDialogueIntent, bytes);
+        if (result == ClientRuntimeResult::Accepted)
+            mLastQueuedSequence = *sequence;
+        return { result, result == ClientRuntimeResult::Accepted ? sequence : std::nullopt,
+            result == ClientRuntimeResult::Accepted ? command : std::nullopt };
     }
 
     ClientRuntimeQueueResult ClientSessionRuntime::queuePlayerRespawn()
@@ -1197,6 +1258,17 @@ namespace TES3MP
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliablePersonalDialogue:
+                {
+                    auto value = decodeReliablePersonalDialogue(frame->payload());
+                    if (!value)
+                    {
+                        result.result = ClientRuntimeResult::ProtocolRejected;
+                        return result;
+                    }
+                    result.messages.emplace_back(std::move(*value));
                     break;
                 }
                 case MessageKind::ReliableAmbientBatch:

@@ -1,15 +1,18 @@
 #include "personal_script.hpp"
+#include <apps/openmw/mwbase/environment.hpp>
 #include <apps/openmw/mwclass/classes.hpp>
+#include <apps/openmw/mwdialogue/dialoguemanagerimp.hpp>
+#include <apps/openmw/mwdialogue/journalimp.hpp>
+#include <apps/openmw/mwscript/dialogueextensions.hpp>
+#include <apps/openmw/mwscript/interpretercontext.hpp>
+#include <apps/openmw/mwscript/locals.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
-#include <apps/openmw/mwbase/environment.hpp>
-#include <apps/openmw/mwdialogue/journalimp.hpp>
-#include <apps/openmw/mwscript/interpretercontext.hpp>
-#include <apps/openmw/mwscript/dialogueextensions.hpp>
-#include <apps/openmw/mwscript/locals.hpp>
-#include <components/interpreter/installopcodes.hpp>
+#include <apps/openmw/tes3mp/engine_coordinator.hpp>
+#include <components/compiler/extensions.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadscpt.hpp>
+#include <components/interpreter/installopcodes.hpp>
 #include <iostream>
 
 namespace
@@ -73,12 +76,17 @@ namespace
         MWWorld::ESMStore content;
         std::vector<PersonalScripts::Definition> definitions;
         MWWorld::ManualRef actor;
-        static MWWorld::ESMStore& populate(MWWorld::ESMStore& content)
+        static MWWorld::ESMStore& populate(MWWorld::ESMStore& content, bool intents)
         {
-            ESM::NPC npc; npc.blank(); npc.mId = id("speaker_r29"); npc.mScript = id("ledger_v63");
+            ESM::NPC npc;
+            npc.blank();
+            npc.mId = id("speaker_r29");
+            if (!intents)
+                npc.mScript = id("ledger_v63");
             content.insertStatic(npc); return content;
         }
-        Fixture(CredentialCrypto& crypto, std::string late = {}) : actor(populate(content), id("speaker_r29"))
+        Fixture(CredentialCrypto& crypto, std::string late = {}, bool intents = false)
+            : actor(populate(content, intents), id("speaker_r29"))
         {
             ESM::Global global; global.blank(); global.mId = id("personal_counter");
             global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
@@ -93,6 +101,16 @@ namespace
             auto second = std::make_shared<SharedWorldScript>(bank[1], std::vector{global}, "dialogue-content-1", crypto, bank);
             for (const auto [character, story] : {std::pair{11u, 31u}, {22u, 31u}, {11u, 32u}})
                 definitions.push_back({character, story, first, {{second, false}}, false, records(late)});
+            if (intents)
+                for (auto& definition : definitions)
+                {
+                    auto& topic = definition.dialogues[1];
+                    topic.mInfo.front().mResponse = "Your passage awaits.";
+                    topic.mInfo.front().mResultScript
+                        = "MessageBox \"Private notice\"\n" + topic.mInfo.front().mResultScript;
+                    topic.mInfo.front().mResultScript += "\nChoice \"Proceed\" 7 \"Wait\" 9";
+                    topic.mInfo.back().mResponse = "Your journey is complete.";
+                }
         }
     };
     struct Resolver final : MWScript::ReferenceResolver
@@ -104,7 +122,8 @@ namespace
         {
             require(execution == expected, "Dialogue lookup lost invocation identity");
             require(execution.sourceReference == 41 && execution.sourceLife == 3, "Stale source/life accepted");
-            if (reference == id("ledger_v63") && wait) throw MWScript::ScriptContextUnavailable();
+            if ((reference.empty() || reference == id("ledger_v63")) && wait)
+                throw MWScript::ScriptContextUnavailable();
             if (reference.empty() || reference == id("ledger_v63")) return actor;
             throw std::invalid_argument("Unowned reference");
         }
@@ -233,6 +252,202 @@ namespace
         rejects([&] { runtime.restore(legacy.encode(legacy.initial())); }, "Dialogue silent upgrade accepted");
         std::cout << "dialogue recovery: content/source/policy bound progress and silent replay; malformed/unowned/duplicate and upgrade/downgrade reject\n";
     }
+    void intents(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true);
+        auto state = runtime.initial();
+        const auto original = runtime.encode(state);
+        Resolver resolver;
+        resolver.actor = fixture.actor.getPtr();
+        const auto run = [&](uint64_t character, uint64_t command, DialogueIntent request) {
+            const auto found = std::ranges::find_if(
+                state, [&](const auto& s) { return s.last.character == character && s.last.story == request.story; });
+            auto execution = found->last;
+            ++execution.invocation;
+            execution.causalEvent = found->eventCursor + 1;
+            execution.sourceReference = 41;
+            execution.sourceLife = 3;
+            resolver.expected = execution;
+            return runtime.prepareIntent(state, character, command, request, 0, "", fixture.content, resolver);
+        };
+        DialogueIntent request{ 31, 41, 3, 0, "passage_k61", -1 };
+        auto prepared = run(11, 101, request);
+        require(prepared.result.executed && prepared.response == "Your passage awaits."
+                && prepared.state[0].choices.size() == 2
+                && prepared.result.presentation == std::vector<std::string>{ "Private notice" }
+                && prepared.state[0].dialogueRevision == 1 && prepared.state[1].dialogueRevision == 0
+                && prepared.state[2].dialogueRevision == 0,
+            "Intent routing/presentation leaked between characters/stories");
+        require(runtime.encode(state) == original, "Undurable intent mutated installed state");
+        auto retry = run(11, 101, request);
+        require(prepared.image == retry.image, "Rollback retry changed progression");
+        resolver.wait = true;
+        const auto deferred = run(11, 101, request);
+        require(deferred.result.outcome == SharedWorldScript::Outcome::Deferred && deferred.image.empty()
+                && deferred.response.empty() && runtime.encode(state) == original,
+            "Unavailable dialogue source leaked state/output");
+        resolver.wait = false;
+        require(run(11, 101, request).image == prepared.image, "Deferred intent could not retry unchanged");
+        state = std::move(prepared.state);
+        const auto committed = runtime.encode(state);
+        auto duplicate = run(11, 101, request);
+        require(!duplicate.result.executed && duplicate.result.outcome == SharedWorldScript::Outcome::Committed
+                && duplicate.response.empty() && duplicate.result.presentation.empty(),
+            "Duplicate replayed response/result");
+        auto forged = request;
+        forged.topic = "followup_p82";
+        require(run(11, 101, forged).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Conflicting receipt accepted");
+        request.revision = 1;
+        request.choice = 9;
+        require(run(11, 102, request).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Unmatched choice mutated state");
+        request.choice = 7;
+        request.life = 2;
+        require(run(11, 102, request).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Stale speaker life accepted");
+        request.life = 3;
+        auto choice = run(11, 102, request);
+        require(choice.result.executed && choice.state[0].choices.empty()
+                && choice.state[0].dialogue.quests[0].mFinished && choice.response == "Your journey is complete.",
+            "Committed choice failed stock progression");
+        auto recovered = runtime.restore(committed);
+        state = recovered;
+        require(
+            state[0].choices.size() == 2 && state[1].choices.empty(), "Reconnect/restart lost isolated pending choice");
+        auto restarted = run(11, 102, request);
+        require(restarted.image == choice.image, "Restart changed retry outcome");
+        state = runtime.restore(choice.image);
+        require(!run(11, 102, request).result.executed, "Restart repeated committed choice");
+        request = { 31, 41, 3, 0, "passage_k61", -1 };
+        auto other = run(22, 101, request);
+        require(other.result.executed && other.state[1].dialogueRevision == 1 && other.state[0].dialogueRevision == 2,
+            "Second client inherited first client's receipt/progression");
+        Fixture bad(crypto, "Goodbye", true);
+        PersonalScripts badRuntime(7, bad.definitions, crypto, true, true, true);
+        auto badState = badRuntime.initial();
+        resolver.expected = badState[0].last;
+        ++resolver.expected.invocation;
+        resolver.expected.causalEvent = 1;
+        resolver.expected.sourceReference = 41;
+        resolver.expected.sourceLife = 3;
+        resolver.actor = bad.actor.getPtr();
+        auto failed = badRuntime.prepareIntent(badState, 11, 101, request, 0, "", bad.content, resolver);
+        require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.image.empty()
+                && failed.response.empty() && failed.result.presentation.empty(),
+            "Late rejected result leaked presentation/progression");
+        PersonalScripts old(7, fixture.definitions, crypto, true, true);
+        rejects([&] { old.restore(committed); }, "V85 downgrade accepted");
+        rejects([&] { runtime.restore(old.encode(old.initial())); }, "V84 silent upgrade accepted");
+        std::cout << "dialogue intents: two characters/stories; offered Choice bound to source life/revision; atomic "
+                     "rollback/retry; durable receipt and silent reconnect/restart\n";
+    }
+
+    void client(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        struct Coordinator final : TES3MP::OpenMWAdapter::EngineCoordinator
+        {
+            MWWorld::Ptr actor;
+            std::vector<ReliablePersonalDialogue> views;
+            std::vector<DialogueIntent> submitted;
+            void frame(float) noexcept override {}
+            bool ownsPersonalDialogue() const noexcept override { return true; }
+            std::span<const ReliablePersonalDialogue> personalDialogue() const noexcept override { return views; }
+            std::optional<std::pair<uint64_t, uint64_t>> dialogueSpeaker(
+                const MWWorld::Ptr& value) const noexcept override
+            {
+                return value == actor ? std::optional(std::pair{ uint64_t(41), uint64_t(3) }) : std::nullopt;
+            }
+            bool submitPersonalDialogue(uint64_t story, std::pair<uint64_t, uint64_t> speaker, std::string_view topic,
+                int choice) noexcept override
+            {
+                if (speaker != std::pair{ uint64_t(41), uint64_t(3) })
+                    return false;
+                submitted.push_back({ story, 41, 3, views.front().revision, std::string(topic), choice });
+                return true;
+            }
+        } coordinator;
+        coordinator.actor = fixture.actor.getPtr();
+        ReliablePersonalDialogue view{ *SessionId::fromValue(1), SessionGeneration::initial(), ServerTick::initial(),
+            CanonicalRevision::initial() };
+        view.story = 31;
+        view.topics = { "passage_k61" };
+        coordinator.views.push_back(view);
+        struct Callback final : MWBase::DialogueManager::ResponseCallback
+        {
+            std::vector<std::string> responses;
+            void addResponse(std::string_view title, std::string_view text) override
+            {
+                responses.push_back(std::string(title) + ":" + std::string(text));
+            }
+        } callback;
+        MWBase::Environment environment;
+        environment.setMultiplayerCoordinator(&coordinator);
+        Compiler::Extensions extensions;
+        Translation::Storage translation;
+        MWDialogue::DialogueManager manager(extensions, translation);
+        require(manager.startDialogue(fixture.actor.getPtr(), &callback) && callback.responses.empty(),
+            "Native start ran local greeting/result");
+        manager.persuade(0, &callback);
+        manager.applyBarterDispositionChange(20);
+        require(manager.checkServiceRefused(&callback) && callback.responses.empty(),
+            "Native dialogue executed an unadmitted physical service");
+        require(manager.getAvailableTopics() == std::list<std::string>{ "passage_k61" },
+            "Client did not install owned root topic");
+        manager.keywordSelected("passage_k61", &callback);
+        require(coordinator.submitted.size() == 1 && coordinator.submitted.back().story == 31
+                && coordinator.submitted.back().choice == -1 && callback.responses.empty(),
+            "Topic intent executed local result or displayed an undurable response");
+        view.revision = 1;
+        view.command = 101;
+        view.speaker = 41;
+        view.life = 3;
+        view.topic = "passage_k61";
+        view.response = "Committed passage.";
+        view.choices = { { "Proceed", 7 } };
+        view.quests = { { "journey_t37", 10, false } };
+        coordinator.views.front() = view;
+        auto foreign = view;
+        foreign.story = 32;
+        manager.presentPersonalDialogue(foreign);
+        require(callback.responses.empty(), "Foreign story presented in current dialogue");
+        foreign = view;
+        foreign.life = 2;
+        manager.presentPersonalDialogue(foreign);
+        require(callback.responses.empty(), "Old speaker life presented");
+        manager.presentPersonalDialogue(view);
+        require(callback.responses.size() == 2 && manager.isInChoice() && manager.getChoices().front().second == 7,
+            "Committed response/choice/progression not presented");
+        manager.questionAnswered(7, &callback);
+        require(coordinator.submitted.size() == 2 && coordinator.submitted.back().topic == "passage_k61"
+                && coordinator.submitted.back().choice == 7 && callback.responses.size() == 2,
+            "Choice intent ran client result code");
+        view.revision = 2;
+        view.command = 102;
+        view.choices.clear();
+        view.quests.front().index = 20;
+        view.quests.front().finished = true;
+        view.response = "Committed finish.";
+        coordinator.views.front() = view;
+        manager.presentPersonalDialogue(view);
+        require(callback.responses.size() == 4 && !manager.isInChoice(), "Committed choice/progression missing");
+        // Opening a recovered menu receives persistent data without transient response.
+        view.response.clear();
+        view.messages.clear();
+        coordinator.views.front() = view;
+        Callback resumed;
+        require(manager.startDialogue(fixture.actor.getPtr(), &resumed) && resumed.responses.size() == 1
+                && resumed.responses.front().find("finished") != std::string::npos,
+            "Reconnect replayed response or lost progression");
+        manager.goodbyeSelected();
+        manager.clear();
+        std::cout
+            << "dialogue client: stock manager consumes committed owned views; topic/choice only submit; "
+               "source-life/story isolation; progression and silent reentry; no Journal/World/Lua services installed\n";
+    }
+
     void stock(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto);
@@ -272,12 +487,16 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
         else if (filter == "rollback") rollback(*crypto);
         else if (filter == "recovery") recovery(*crypto);
+        else if (filter == "intents")
+            intents(*crypto);
+        else if (filter == "client")
+            client(*crypto);
         else if (filter == "stock") stock(*crypto);
         else throw std::invalid_argument("Unknown dialogue filter");
         std::cout << "PASS dialogue " << filter << '\n'; return 0;

@@ -1334,6 +1334,12 @@ namespace TES3MP::OpenMWAdapter
         return ProviderResult::Accepted;
     }
 
+    ProviderResult DesktopAutomation::applyPersonalDialogue(
+        const ReliablePersonalDialogue& view, MonotonicInstant now) noexcept
+    {
+        return mPresentation.applyPersonalDialogue(view, now);
+    }
+
     ProviderResult DesktopAutomation::applyAmbient(const ReliableAmbientBatch& batch, MonotonicInstant now) noexcept
     {
         const auto result = mPresentation.applyAmbient(batch, now);

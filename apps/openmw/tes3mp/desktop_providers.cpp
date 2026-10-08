@@ -11,6 +11,7 @@
 #include "../mwclass/npcmovement.hpp"
 #include <components/settings/values.hpp>
 
+#include "../mwbase/dialoguemanager.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwbase/inputmanager.hpp"
 #include "../mwbase/journal.hpp"
@@ -31,25 +32,25 @@
 #include "../mwmechanics/playerconstruction.hpp"
 #include "../mwmechanics/security.hpp"
 #include "../mwmechanics/spellcasting.hpp"
-#include "../mwrender/replicatedactor.hpp"
-#include "../mwrender/vismask.hpp"
 #include "../mwrender/animation.hpp"
 #include "../mwrender/renderingmanager.hpp"
+#include "../mwrender/replicatedactor.hpp"
+#include "../mwrender/vismask.hpp"
 #include "../mwsound/sound.hpp"
+#include "../mwworld/actiontalk.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
-#include "../mwworld/placedrefid.hpp"
 #include "../mwworld/doormotion.hpp"
-#include "../mwworld/inventoryrecordid.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/inventoryrecordid.hpp"
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/manualref.hpp"
+#include "../mwworld/placedrefid.hpp"
 #include "../mwworld/player.hpp"
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/scene.hpp"
-#include "../mwworld/actiontalk.hpp"
 #include "../mwworld/worldmodel.hpp"
 
 #include <components/debug/debuglog.hpp>
@@ -891,6 +892,13 @@ namespace TES3MP::OpenMWAdapter
         auto captured = std::move(mImpl->pendingMagicUse);
         mImpl->pendingMagicUse.reset();
         return captured;
+    }
+
+    std::optional<std::pair<uint64_t, uint64_t>> DesktopSemanticInput::dialogueSpeaker(
+        const MWWorld::Ptr& actor) const noexcept
+    {
+        const auto* presentation = dynamic_cast<const DesktopPresentation*>(mImpl->presentation);
+        return presentation ? presentation->dialogueSpeaker(actor) : std::nullopt;
     }
 
     std::optional<DialogueChoiceId> DesktopSemanticInput::mapDialogueChoice(int localChoice) const noexcept
@@ -4239,6 +4247,39 @@ namespace TES3MP::OpenMWAdapter
             mImpl->clear();
             return ProviderResult::PresentationFailed;
         }
+    }
+
+    std::optional<std::pair<uint64_t, uint64_t>> DesktopPresentation::dialogueSpeaker(
+        const MWWorld::Ptr& actor) const noexcept
+    try
+    {
+        if (!mImpl || !mImpl->combatSnapshot)
+            return {};
+        const auto found = std::ranges::find_if(
+            mImpl->nativeRemotes, [&](const auto& v) { return v.second.actor && v.second.actor->ptr() == actor; });
+        if (found == mImpl->nativeRemotes.end())
+            return {};
+        for (const auto& body : mImpl->combatSnapshot->presentation())
+            if (body.kind == 2 && body.id == found->first && !body.dead)
+                return std::pair{ body.id, body.life };
+        return {};
+    }
+    catch (...)
+    {
+        return {};
+    }
+    ProviderResult DesktopPresentation::applyPersonalDialogue(
+        const ReliablePersonalDialogue& view, MonotonicInstant) noexcept
+    try
+    {
+        MWBase::Environment::get().getDialogueManager()->presentPersonalDialogue(view);
+        for (const auto& message : view.messages)
+            MWBase::Environment::get().getWindowManager()->messageBox(message);
+        return ProviderResult::Accepted;
+    }
+    catch (...)
+    {
+        return ProviderResult::PresentationFailed;
     }
 
     ProviderResult DesktopPresentation::applyAmbient(const ReliableAmbientBatch& batch, MonotonicInstant) noexcept

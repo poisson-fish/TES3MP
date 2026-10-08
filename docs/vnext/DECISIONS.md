@@ -246,8 +246,13 @@ after focused evidence.
 
 **Scoped dialogue (V84).** Stock filters/result bytecode use explicit content and staged
 Quest/Topic progression. Journal/topic identities, bank writes and contextual receipts
-commit with gameplay; Lua/UI callbacks stay closed. Bind bounded winning DIAL/INFO policy;
+commit with gameplay; uncommitted Lua/UI callbacks stay closed. Bind bounded winning DIAL/INFO policy;
 revalidate speaker scope/life/script. Unstaged filters and physical results reject.
+
+**Authenticated dialogue (V85).** Owned banks supply lexical locals against validated
+living unscripted speakers. First topic seeds knowledge; durable revisions/receipts/choices
+bind source/life. Reserve two intents within sixteen invocations. Clients present literal
+responses/progression without result execution or transient replay.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

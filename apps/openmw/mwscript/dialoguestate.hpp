@@ -5,6 +5,7 @@
 #include <components/esm3/loaddial.hpp>
 #include <components/esm3/queststate.hpp>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace MWScript
@@ -23,7 +24,15 @@ namespace MWScript
             std::vector<Entry> entries;
             std::vector<ESM::RefId> topics;
         };
-        DialogueState(const ExecutionContext&, State&, std::span<const ESM::Dialogue>);
+        struct Choice
+        {
+            std::string text;
+            int id;
+            bool operator==(const Choice&) const = default;
+        };
+        std::vector<Choice> choices;
+        void addChoice(std::string_view, int);
+        DialogueState(const ExecutionContext&, State&, std::span<const ESM::Dialogue>, bool choicesAllowed = false);
         const ESM::Dialogue& record(const ESM::RefId&, ESM::Dialogue::Type) const;
         int journalIndex(const ESM::RefId&) const;
         void setJournalIndex(const ESM::RefId&, int);
@@ -35,6 +44,7 @@ namespace MWScript
         ExecutionContext mExecution;
         State& mState;
         std::span<const ESM::Dialogue> mRecords;
+        bool mChoicesAllowed;
         ESM::QuestState& quest(const ESM::RefId&);
     };
 }

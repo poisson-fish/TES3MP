@@ -235,7 +235,8 @@ bool MWDialogue::Filter::testDisposition(const ESM::DialInfo& info, bool invert)
 
 bool MWDialogue::Filter::testFunctionLocal(const MWDialogue::SelectWrapper& select) const
 {
-    const ESM::RefId& scriptName = mActor.getClass().getScript(mActor);
+    const ESM::RefId& scriptName
+        = mScoped && !mScoped->localScript.empty() ? mScoped->localScript : mActor.getClass().getScript(mActor);
 
     if (scriptName.empty())
         return false; // no script

@@ -51,6 +51,9 @@ namespace MWDialogue
 
         MWWorld::Ptr mActor;
         bool mTalkedTo;
+        uint64_t mPersonalStory = 0, mPersonalRevision = UINT64_MAX;
+        ResponseCallback* mPersonalCallback = nullptr;
+        std::map<std::string, std::pair<uint64_t, std::string>> mPersonalTopics;
 
         int mChoice;
         ESM::RefId mLastTopic; // last topic ID, lowercase
@@ -87,6 +90,7 @@ namespace MWDialogue
 
         bool isInChoice() const override;
 
+        void presentPersonalDialogue(const TES3MP::ReliablePersonalDialogue&) override;
         bool startDialogue(const MWWorld::Ptr& actor, ResponseCallback* callback) override;
 
         std::list<std::string> getAvailableTopics() override;

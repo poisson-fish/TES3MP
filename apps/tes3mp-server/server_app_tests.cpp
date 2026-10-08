@@ -831,6 +831,85 @@ namespace
             << (reverse ? " reverse" : "") << ": two staggered completions publish safe-point views and peer leave/enter\n";
     }
 }
+namespace
+{
+    void personalDialogueIngress()
+    {
+        using namespace TES3MP::ServerApp;
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        JoinFixture fixture;
+        auto queues = *OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
+        const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
+        const auto offer = std::get<CapabilityOffer>(
+            CapabilityOffer::create(versions, std::array{ personalDialogueCapability() }, {}));
+        ConnectionSessionCoordinator sessions(clock, observability,
+            *SessionTimeoutPolicy::create(1000000, 1000000, 1000000), offer, authentication, queues, 2);
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        const auto dispatch = [&](uint64_t connection, MessageKind kind, std::vector<std::byte> payload) {
+            const auto messageClass = messageDescriptor(kind)->messageClass;
+            const auto bytes = std::get<std::vector<std::byte>>(encodeProtocolFrame(messageClass, kind, payload));
+            return sessions.dispatch(id<TransportConnectionId>(connection),
+                { TransportChannel::ReliableOrdered, bytes }, fixture.joins, crypto, intake, ServerTick::initial());
+        };
+        ClientDialogueIntent command{ id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+            id<CommandId>(101), CanonicalRevision::initial(), { 71, 41, 3, 0, "arbitrary passage", -1 } };
+        assert(
+            sessions.accept(id<TransportConnectionId>(1), scope(std::byte{ 4 })) == ConnectionSessionResult::Accepted);
+        assert(dispatch(1, MessageKind::ClientDialogueIntent, encodeClientDialogueIntent(command))
+                == ConnectionSessionResult::ProtocolRejected
+            && intake.pendingCount() == 0);
+        const auto join = [&](uint64_t connection) {
+            assert(dispatch(connection, MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(offer)))
+                == ConnectionSessionResult::Accepted);
+            auto material = AuthenticationMaterial::create({});
+            assert(dispatch(connection, MessageKind::AuthenticationRequest,
+                       encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))
+                == ConnectionSessionResult::Joined);
+        };
+        join(1);
+        assert(dispatch(1, MessageKind::ClientDialogueIntent, encodeClientDialogueIntent(command))
+            == ConnectionSessionResult::CommandSubmitted);
+        assert(intake.pendingCount() == 1);
+        command.sessionId = id<SessionId>(2);
+        assert(dispatch(1, MessageKind::ClientDialogueIntent, encodeClientDialogueIntent(command))
+            == ConnectionSessionResult::ProtocolRejected);
+        command.sessionId = id<SessionId>(1);
+        command.sessionGeneration = id<SessionGeneration>(2);
+        assert(dispatch(1, MessageKind::ClientDialogueIntent, encodeClientDialogueIntent(command))
+            == ConnectionSessionResult::ProtocolRejected);
+        assert(
+            sessions.accept(id<TransportConnectionId>(2), scope(std::byte{ 5 })) == ConnectionSessionResult::Accepted);
+        join(2);
+        command.sessionId = id<SessionId>(2);
+        command.sessionGeneration = SessionGeneration::initial();
+        assert(dispatch(2, MessageKind::ClientDialogueIntent, encodeClientDialogueIntent(command))
+            == ConnectionSessionResult::CommandSubmitted);
+        assert(intake.pendingCount() == 2);
+        clock.nanoseconds = 33333334;
+        const auto pumped = intake.pump();
+        assert(pumped);
+        size_t admitted = 0;
+        for (const auto& batch : pumped.batches())
+            for (const auto& stamped : batch.commands())
+            {
+                const auto* value = std::get_if<DialogueIntentCommandProposal>(&stamped.proposal().payload());
+                const auto* owner = fixture.joins.state().findActiveSession(stamped.proposal().sessionId());
+                assert(value && owner && owner->playerId().value() == stamped.proposal().sessionId().value()
+                    && stamped.proposal().entityPrecondition().entityId() == owner->entityId()
+                    && value->command.intent.story == 71);
+                ++admitted;
+            }
+        assert(admitted == 2);
+        std::cout << "PASS personal dialogue ingress: authentication/capability/session generation and two "
+                     "server-bound characters\n";
+    }
+}
 #ifdef TES3MP_NATIVE_INVENTORY_SCENARIO
 namespace TES3MP::ServerApp::Testing
 {
@@ -1194,6 +1273,11 @@ namespace TES3MP::ServerApp::Testing
 int main(int argc, char** argv)
 {
     using namespace TES3MP::ServerApp;
+    if (argc == 2 && std::string_view(argv[1]) == "personal-dialogue-ingress")
+    {
+        personalDialogueIngress();
+        return 0;
+    }
     if (argc > 1)
     {
         assert(argc == 2 && (std::string_view(argv[1]) == "chargen-visibility"

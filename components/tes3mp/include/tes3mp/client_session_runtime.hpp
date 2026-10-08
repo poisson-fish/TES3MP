@@ -12,6 +12,7 @@
 #include "interactive_object_replication.hpp"
 #include "inventory_replication.hpp"
 #include "magic_use.hpp"
+#include "personal_dialogue.hpp"
 #include "protocol_handshake.hpp"
 #include "protocol_pose.hpp"
 #include "weather_replication.hpp"
@@ -29,7 +30,8 @@ namespace TES3MP
         LatestWinsActorSnapshot, ReliableActorInterestBaseline, ReliableInteractiveObjectInterestBaseline,
         ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
         LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ReliableCharacterProfile,
-        ReliableDialogueChoiceResult, ReliableWeatherState, ReliableWorldTimeState, ServerVrPoseSnapshot, ReliableAmbientBatch>;
+        ReliableDialogueChoiceResult, ReliableWeatherState, ReliableWorldTimeState, ServerVrPoseSnapshot,
+        ReliableAmbientBatch, ReliablePersonalDialogue>;
     // Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
 
     enum class ClientRuntimeResult : std::uint8_t
@@ -80,6 +82,7 @@ namespace TES3MP
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
         std::vector<ReliableCombatEventBatch> combatEvents;
         std::vector<ReliableAmbientBatch> ambient;
+        std::vector<ReliablePersonalDialogue> personalDialogue;
         std::vector<ReliableDialogueChoiceResult> dialogueChoiceResults;
     };
 
@@ -132,6 +135,7 @@ namespace TES3MP
             CharacterCreationChoice choice, CharacterProfileRevision expectedRevision);
         ClientRuntimeQueueResult queueDialogueChoice(
             DialogueChoiceId choice, std::optional<CommandId> retainedCommandId = std::nullopt);
+        ClientRuntimeQueueResult queueDialogueIntent(DialogueIntent, std::optional<CommandId> = std::nullopt);
         ClientRuntimeQueueResult queueWaitRest(std::uint8_t hours, WaitRestMode mode);
         ClientRuntimeQueueResult queuePlayerRespawn();
         std::optional<LocalLocomotionReconciliation> reconcileLocalPresentation(
@@ -204,6 +208,7 @@ namespace TES3MP
         std::optional<LocomotionInputSequence> mLastLocomotionInputSequence;
         std::optional<LatestWinsCombatSnapshot> mCombatSnapshot;
         std::optional<ReliableAmbientBatch> mLastAmbient;
+        std::vector<ReliablePersonalDialogue> mPersonalDialogue;
         std::optional<AuthenticationRejectionReason> mAuthenticationRejection;
         std::optional<SessionRejected> mProtocolRejection;
     };

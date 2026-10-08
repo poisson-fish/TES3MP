@@ -9,6 +9,7 @@
 #include "magic_use.hpp"
 #include "movement_policy.hpp"
 #include "observability.hpp"
+#include "personal_dialogue.hpp"
 #include "protocol_exchange.hpp"
 
 #include <cstddef>
@@ -214,14 +215,33 @@ namespace TES3MP
         friend constexpr bool operator==(PlayerRespawnCommandProposal, PlayerRespawnCommandProposal) noexcept = default;
     };
 
+    struct DialogueIntentCommandProposal
+    {
+        ClientDialogueIntent command;
+        bool operator==(const DialogueIntentCommandProposal&) const = default;
+    };
+
     using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
         PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal, InventoryCommandProposal,
         MeleeAttackCommandProposal, MagicUseCommandProposal, DialogueChoiceCommandProposal, WaitRestCommandProposal,
-        PlayerRespawnCommandProposal>;
+        PlayerRespawnCommandProposal, DialogueIntentCommandProposal>;
 
     class ServerCommandProposal
     {
     public:
+        ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration, CommandSequence commandSequence,
+            CommandId commandId, CanonicalRevision observedCanonicalRevision, EntityPrecondition entityPrecondition,
+            DialogueIntentCommandProposal dialogue) noexcept
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(std::move(dialogue))
+        {
+        }
+
         constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
             CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
             EntityPrecondition entityPrecondition, PlayerRespawnCommandProposal respawn) noexcept

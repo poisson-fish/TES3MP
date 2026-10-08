@@ -60,6 +60,11 @@ namespace TES3MP
             const CanonicalServerState&, const ServerCommandProposal&, ServerTick) { return {}; }
         // Append a bounded independent caster to an existing detached candidate.
         // False leaves the candidate unchanged; neither result publishes state.
+        virtual bool appendDialogueIntent(
+            const CanonicalServerState&, const ServerCommandProposal&, std::unique_ptr<PreparedNativeInventory>&)
+        {
+            return false;
+        }
         virtual bool appendMagicUse(const CanonicalServerState&, const ServerCommandProposal&,
             ServerTick, PreparedNativeInventory&) { return false; }
         virtual std::span<const std::byte> inventoryImage() const noexcept = 0;

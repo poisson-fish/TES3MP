@@ -570,6 +570,30 @@ namespace TES3MP::ServerApp
                 : ConnectionSessionResult::QueueRejected;
         }
 
+        if (frame->messageKind() == MessageKind::ClientDialogueIntent)
+        {
+            if (frame->messageClass() != MessageClass::ReliableOperation
+                || state->state() != ServerSessionState::Established || !state->sessionId() || !state->negotiatedHello()
+                || !std::ranges::binary_search(
+                    state->negotiatedHello()->negotiatedCapabilities(), personalDialogueCapability()))
+                return ConnectionSessionResult::ProtocolRejected;
+            auto command = decodeClientDialogueIntent(frame->payload());
+            if (!command || command->sessionId != *state->sessionId()
+                || command->sessionGeneration != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto* progress = joins.state().findActiveSession(*state->sessionId());
+            const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
+            if (!progress || !player)
+                return ConnectionSessionResult::ProtocolRejected;
+            ServerCommandProposal proposal(command->sessionId, command->sessionGeneration, command->commandSequence,
+                command->commandId, command->observedCanonicalRevision,
+                EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
+                DialogueIntentCommandProposal{ *command });
+            return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                ? ConnectionSessionResult::CommandSubmitted
+                : ConnectionSessionResult::QueueRejected;
+        }
+
         if (frame->messageKind() == MessageKind::ClientDialogueChoiceCommand)
         {
             if (frame->messageClass() != MessageClass::ReliableOperation

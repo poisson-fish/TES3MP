@@ -52,11 +52,13 @@ namespace
     TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
         bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false,
         bool weather = false, bool worldTime = false, bool waitRest = false, bool instantMagic = false,
-        bool playerAppearances = false, bool respawn = false, bool ambient = false)
+        bool playerAppearances = false, bool respawn = false, bool ambient = false, bool personal = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
         if (ambient) capabilities.push_back(TES3MP::ambientPresentationCapability());
+        if (personal)
+            capabilities.push_back(TES3MP::personalDialogueCapability());
         if (pose)
             capabilities.push_back(TES3MP::vrPoseCapability());
         if (actors)
@@ -533,6 +535,13 @@ namespace
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
     {
     public:
+        std::vector<TES3MP::ReliablePersonalDialogue> personal;
+        TES3MP::OpenMWAdapter::ProviderResult applyPersonalDialogue(
+            const TES3MP::ReliablePersonalDialogue& view, TES3MP::MonotonicInstant) noexcept override
+        {
+            personal.push_back(view);
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         std::vector<TES3MP::ReliableAmbientBatch> ambient;
         TES3MP::OpenMWAdapter::ProviderResult applyAmbient(const TES3MP::ReliableAmbientBatch& batch,
             TES3MP::MonotonicInstant) noexcept override
@@ -779,7 +788,8 @@ namespace
 #define require(value) require(static_cast<bool>(value), __LINE__)
 
 void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false, bool delayedSnapshot = false,
-    bool bodyProgress = false, bool respawnProgress = false, bool staleInventory = false, int ambientProgress = 0)
+    bool bodyProgress = false, bool respawnProgress = false, bool staleInventory = false, int ambientProgress = 0,
+    int personalProgress = 0)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
@@ -797,6 +807,8 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
     auto* runtimeObserver = runtime.get();
     std::vector capabilities{inventoryReplicationCapability()};
     if (ambientProgress && ambientProgress != 4) capabilities.push_back(ambientPresentationCapability());
+    if (personalProgress && personalProgress != 4)
+        capabilities.push_back(personalDialogueCapability());
     if (bodyProgress) capabilities.push_back(playerAppearanceCapability());
     if (respawnProgress)
         for (const auto cap : {combatReplicationCapability(), playerLifeReplicationCapability(), playerRespawnCapability()})
@@ -810,7 +822,10 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
         reconnect, input, presentation, status);
     coordinator->frame(.01f);
     wire->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
-        encodeServerHello(serverHello(false,false,false,true,respawnProgress,2,false,false,false,false,false,bodyProgress,respawnProgress,ambientProgress && ambientProgress != 4)), TransportChannel::ReliableOrdered);
+        encodeServerHello(
+            serverHello(false, false, false, true, respawnProgress, 2, false, false, false, false, false, bodyProgress,
+                respawnProgress, ambientProgress && ambientProgress != 4, personalProgress && personalProgress != 4)),
+        TransportChannel::ReliableOrdered);
     coordinator->frame(.01f);
     wire->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         encodeAuthenticationAccepted(accepted(std::byte{7})), TransportChannel::ReliableOrdered);
@@ -848,6 +863,125 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
     };
     sendSpatial(1, first); sendInventory(1, first); coordinator->frame(.01f);
     require(presentation.inventories == 1 && presentation.lastGroundCell == first);
+    if (personalProgress)
+    {
+        ReliablePersonalDialogue view{ value<SessionId>(1), generation, value<ServerTick>(2),
+            value<CanonicalRevision>(2) };
+        view.story = 71;
+        view.topics = { "arbitrary topic" };
+        const auto send = [&] {
+            wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePersonalDialogue,
+                encodeReliablePersonalDialogue(view), TransportChannel::ReliableOrdered);
+            coordinator->frame(.01f);
+        };
+        if (personalProgress == 4)
+        {
+            const auto clears = presentation.clears;
+            send();
+            require(presentation.personal.empty() && presentation.clears > clears);
+            return;
+        }
+        send();
+        require(presentation.personal.size() == 1 && coordinator->ownsPersonalDialogue());
+        send();
+        require(presentation.personal.size() == 1);
+        view.revision = 1;
+        view.command = 8;
+        view.speaker = 41;
+        view.life = 3;
+        view.topic = "arbitrary topic";
+        view.response = "Committed passage.";
+        view.choices = { { "Proceed", 7 } };
+        view.quests = { { "quest", 10, false } };
+        view.entries = { { "quest", "info" } };
+        view.serverTick = value<ServerTick>(3);
+        view.canonicalRevision = value<CanonicalRevision>(3);
+        send();
+        require(presentation.personal.size() == 2 && presentation.personal.back().response == "Committed passage.");
+        require(coordinator->personalDialogue().front().response.empty()
+            && coordinator->personalDialogue().front().choices.size() == 1);
+        send();
+        require(presentation.personal.size() == 2);
+        view.serverTick = value<ServerTick>(4);
+        view.canonicalRevision = value<CanonicalRevision>(4);
+        send();
+        require(presentation.personal.size() == 3 && presentation.personal.back().response.empty());
+        if (personalProgress == 5)
+        {
+            const auto speaker = std::pair{ uint64_t(41), uint64_t(3) };
+            const auto submit = [&] { return coordinator->submitPersonalDialogue(71, speaker, "arbitrary topic", 7); };
+            const auto lastRequest = [&] {
+                std::optional<ClientDialogueIntent> request;
+                for (const auto& bytes : wire->sentFrames)
+                {
+                    const auto frame = decodeProtocolFrame(bytes);
+                    const auto* decoded = std::get_if<DecodedFrame>(&frame);
+                    if (decoded && decoded->messageKind() == MessageKind::ClientDialogueIntent)
+                        request = decodeClientDialogueIntent(decoded->payload());
+                }
+                require(request.has_value());
+                return *request;
+            };
+            require(submit());
+            coordinator->frame(.01f);
+            const auto firstRequest = lastRequest();
+            const auto own = view;
+            view.story = 72;
+            view.revision = 9;
+            view.command = 999;
+            view.serverTick = value<ServerTick>(5);
+            view.canonicalRevision = value<CanonicalRevision>(5);
+            send();
+            require(!submit()); // Another story's progression cannot release this request.
+            view = own;
+            view.revision = 2;
+            view.command = firstRequest.commandId.value();
+            view.serverTick = value<ServerTick>(5);
+            view.canonicalRevision = value<CanonicalRevision>(5);
+            view.response.clear();
+            send();
+            require(submit());
+            coordinator->frame(.01f);
+            const auto retried = lastRequest();
+            require(retried.intent.revision == 2 && retried.commandId != firstRequest.commandId);
+            // Rejected commands finalize via acknowledgement plus a matching owned view.
+            wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+                encodeLatestWinsSnapshot(selfSnapshot(generation, false, 6, 6, retried.commandSequence.value())),
+                TransportChannel::LatestWins);
+            const auto receipt = view;
+            view.story = 72;
+            view.revision = 10;
+            view.command = 1000;
+            view.serverTick = value<ServerTick>(6);
+            view.canonicalRevision = value<CanonicalRevision>(6);
+            send();
+            require(!submit());
+            view = receipt;
+            view.serverTick = value<ServerTick>(6);
+            view.canonicalRevision = value<CanonicalRevision>(6);
+            send();
+            require(submit());
+            return;
+        }
+        const auto queued = runtimeObserver->queueDialogueIntent({ 71, 41, 3, 1, "arbitrary topic", 7 });
+        require(queued.result == ClientRuntimeResult::Accepted
+            && runtimeObserver->flushOutbound() == ClientRuntimeResult::Accepted);
+        auto frame = decodeProtocolFrame(wire->sentFrames.back());
+        const auto* decoded = std::get_if<DecodedFrame>(&frame);
+        require(decoded && decoded->messageKind() == MessageKind::ClientDialogueIntent);
+        const auto request = decodeClientDialogueIntent(decoded->payload());
+        require(request && request->intent.story == 71 && request->intent.choice == 7);
+        const auto clears = presentation.clears;
+        if (personalProgress == 2)
+            view.targetSessionId = value<SessionId>(2);
+        else if (personalProgress == 3)
+            view.targetSessionGeneration = value<SessionGeneration>(2);
+        else
+            view.response = "Conflicting same-tick response.";
+        send();
+        require(presentation.personal.size() == 3 && presentation.clears > clears);
+        return;
+    }
     if (ambientProgress)
     {
         ReliableAmbientBatch batch{value<SessionId>(1), generation, value<ServerTick>(2),
@@ -1326,6 +1460,55 @@ int main(int argc, char** argv)
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+    if (argc == 2 && std::string_view(argv[1]) == "personal-dialogue")
+    {
+        using namespace TES3MP;
+        ClientDialogueIntent command{ value<SessionId>(1), SessionGeneration::initial(), value<CommandSequence>(2),
+            value<CommandId>(3), value<CanonicalRevision>(4), { 71, 41, 3, 0, "arbitrary topic", -1 } };
+        const auto bytes = encodeClientDialogueIntent(command);
+        require(decodeClientDialogueIntent(bytes) == command);
+        for (size_t n = 0; n < bytes.size(); ++n)
+            require(!decodeClientDialogueIntent(std::span(bytes).first(n)));
+        auto malformed = bytes;
+        malformed.push_back(std::byte{ 0 });
+        require(!decodeClientDialogueIntent(malformed));
+        std::fill(malformed.begin() + 41, malformed.begin() + 49, std::byte{ 0 });
+        require(!decodeClientDialogueIntent(malformed));
+        command.intent.topic = std::string(129, 'x');
+        require(encodeClientDialogueIntent(command).empty());
+        ReliablePersonalDialogue view{ value<SessionId>(1), SessionGeneration::initial(), value<ServerTick>(1),
+            value<CanonicalRevision>(1) };
+        view.story = 71;
+        view.revision = 1;
+        view.command = 3;
+        view.speaker = 41;
+        view.life = 3;
+        view.topic = "arbitrary topic";
+        view.response = "Committed response";
+        view.choices = { { "Proceed", 7 } };
+        view.quests = { { "quest", -2, false } };
+        view.entries = { { "quest", "info" } };
+        view.topics = { "topic" };
+        view.messages = { "Private message" };
+        const auto encoded = encodeReliablePersonalDialogue(view);
+        require(decodeReliablePersonalDialogue(encoded) == view);
+        for (size_t n = 0; n < encoded.size(); ++n)
+            require(!decodeReliablePersonalDialogue(std::span(encoded).first(n)));
+        malformed = encoded;
+        malformed.push_back(std::byte{ 0 });
+        require(!decodeReliablePersonalDialogue(malformed));
+        view.choices.push_back({ "duplicate", 7 });
+        require(encodeReliablePersonalDialogue(view).empty());
+        view.choices.resize(1);
+        view.response = std::string(4097, 'x');
+        require(encodeReliablePersonalDialogue(view).empty());
+        for (int scenario = 1; scenario <= 5; ++scenario)
+            teleportPresentation(false, false, false, false, false, false, 0, scenario);
+        std::cout << "PASS personal dialogue: bounded decode; capability/session/generation; scoped committed "
+                     "presentation; duplicate/stale/conflict suppression; silent installed state; owned pending "
+                     "receipt/rejection retry and intent wire\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "ambient")
     {
         ReliableAmbientBatch batch{value<SessionId>(1), SessionGeneration::initial(), value<ServerTick>(2),

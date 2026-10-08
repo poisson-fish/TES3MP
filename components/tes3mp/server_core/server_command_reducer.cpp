@@ -1285,6 +1285,15 @@ namespace TES3MP
                                                 disposition = CommandDisposition::CombatRejected;
                                         }
                                     }
+                                    else if (std::holds_alternative<DialogueIntentCommandProposal>(proposal.payload()))
+                                    {
+                                        requiresSpatialAdvance = false;
+                                        disposition = mNativeInventory
+                                                && mNativeInventory->appendDialogueIntent(
+                                                    *prepared.mState, proposal, prepared.mNativeInventory)
+                                            ? CommandDisposition::Applied
+                                            : CommandDisposition::DialogueChoiceRejected;
+                                    }
                                     else if (const auto* dialogue
                                         = std::get_if<DialogueChoiceCommandProposal>(&proposal.payload()))
                                     {

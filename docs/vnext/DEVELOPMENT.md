@@ -61,18 +61,18 @@ Optional trailing `starting_items COUNT`: quoted-record/quantity/slot triples
 Policy changes require fresh campaigns; scripted rewards await M5.
 Fresh V80 bootstrap: append `shared_script RECORD globals COUNT GLOBAL...` after `player-physics`
 (0–16 globals); validate winning content/ownership before publication. Omission retains V79.
-V81/V82 require `personal_scripts COUNT story ID script "RECORD" globals COUNT GLOBAL...`
-(1–8 stories mirrored/character). Trusted source-free calls stage in host ticks.
-V82 schedules online established characters/stories once/tick, without catch-up;
-markers recover with gameplay. V81 stays trusted-only. V83 uses `story ID scripts COUNT script "RECORD" running 0|1 ... globals COUNT GLOBAL...`:
-1–4 members/story, ≤16 mirrored instances total. Admission order governs one visit/member/tick;
-StartScript enables later members, StopScript retains locals. One global writer/story;
-bank locals/flags/ordinals/markers join gameplay recovery. Fresh campaigns only.
-V84 appends `dialogues COUNT "RECORD"...` per story (1–16 records, ≤64 INFO,
-16 conditions/INFO). Trusted scoped speaker calls use its primary bank script;
-results/journal indices/finished flags/entry IDs/known topics/receipts commit with gameplay.
-No physical results, journal text/timestamps or client dialogue admission/presentation.
-V83/V84 images never silently migrate. Personal output stays closed; bootstrap emits V80.
+V81/V82: `personal_scripts COUNT story ID script "RECORD" globals COUNT GLOBAL...`
+(1–8 stories mirrored/character). V81 admits trusted source-free calls; V82 schedules
+online established characters once/tick without catch-up. V83 uses
+`story ID scripts COUNT script "RECORD" running 0|1 ... globals COUNT GLOBAL...`:
+1–4 ordered members/story, ≤16 mirrored scripts; locals/flags/ordinals/markers recover with gameplay.
+V84 adds `dialogues COUNT "RECORD"...` per story (1–16 DIAL, 64 INFO, 16 conditions/INFO).
+V85 requires fresh campaigns/capability 40: ≤14 mirrored scripts reserve two dialogue calls/tick,
+one/character; first topic seeds menus. Living unscripted speakers validate reach/sight/life.
+Private literal responses/messages, choices and progression metadata follow durability;
+reconnect is silent. Journal text/timestamps, substitutions, nonzero disposition thresholds,
+physical results and NPC restoration remain closed. Prior images never silently migrate;
+V81–84 personal output stays closed. Bootstrap emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.

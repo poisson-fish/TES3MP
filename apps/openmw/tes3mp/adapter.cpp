@@ -32,15 +32,18 @@ namespace TES3MP::OpenMWAdapter
     {
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
         std::vector optional{ vrPoseCapability(), actorReplicationCapability(),
-            interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
-            combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
-            weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
-            authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),
-            authoritativeTimedAreaMagicCapability(), nativeDoorCapability(), nativeTeleportCapability(),
-            nativeEnvironmentCapability(), nativeStreamingCapability(), nativeLeveledActorsCapability(),
-            nativeActorMotionCapability(), actorCastReplicationCapability(), actorCastLifecycleCapability(),
-            playerSwingPresentationCapability(), knockoutPresentationCapability(), expandedCombatEffectsCapability(), actorPresentationCapability(),
-            magicVisualReplicationCapability(), magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(), committedDeathPresentationCapability(), spellApplicationPresentationCapability(), extendedSpellSourcesCapability(), playerAppearanceCapability(), playerRespawnCapability(), playerPhysicsCapability(), ambientPresentationCapability() };
+            interactiveObjectReplicationCapability(), inventoryReplicationCapability(), combatReplicationCapability(),
+            characterCreationCapability(), dialogueChoiceCapability(), weatherReplicationCapability(),
+            worldTimeReplicationCapability(), authoritativeWaitRestCapability(), authoritativeSecurityCapability(),
+            authoritativeInstantMagicCapability(), authoritativeTimedAreaMagicCapability(), nativeDoorCapability(),
+            nativeTeleportCapability(), nativeEnvironmentCapability(), nativeStreamingCapability(),
+            nativeLeveledActorsCapability(), nativeActorMotionCapability(), actorCastReplicationCapability(),
+            actorCastLifecycleCapability(), playerSwingPresentationCapability(), knockoutPresentationCapability(),
+            expandedCombatEffectsCapability(), actorPresentationCapability(), magicVisualReplicationCapability(),
+            magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(),
+            committedDeathPresentationCapability(), spellApplicationPresentationCapability(),
+            extendedSpellSourcesCapability(), playerAppearanceCapability(), playerRespawnCapability(),
+            playerPhysicsCapability(), ambientPresentationCapability(), personalDialogueCapability() };
         std::ranges::sort(optional);
         optional.erase(std::unique(optional.begin(), optional.end()), optional.end());
         auto offer = std::get<CapabilityOffer>(
@@ -237,6 +240,7 @@ namespace TES3MP::OpenMWAdapter
             {
                 mInput.clearSessionState();
                 mPresentation.clear();
+                mPersonalDialogue.clear();
                 if (mRuntime)
                     mRuntime->close();
             }
@@ -411,6 +415,17 @@ namespace TES3MP::OpenMWAdapter
                     const auto& hello = mRuntime->session().stateMachine().negotiatedHello();
                     mOwnsPlayerLives = hello && std::ranges::binary_search(
                         hello->negotiatedCapabilities(), playerLifeReplicationCapability());
+                    if (mPendingPersonal)
+                    {
+                        const auto queued
+                            = mRuntime->queueDialogueIntent(mPendingPersonal->intent, mPendingPersonal->commandId);
+                        if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
+                        {
+                            closeForProviderFailure(ProviderResult::PresentationFailed);
+                            return;
+                        }
+                        mPendingPersonal->sequence = *queued.sequence;
+                    }
                     if (!retryDialogueChoice())
                     {
                         closeTerminal(ConnectionStatus::TransportFailed);
@@ -772,6 +787,37 @@ namespace TES3MP::OpenMWAdapter
                         }
                     }
                 }
+                for (const auto& view : advanced.personalDialogue)
+                {
+                    auto found = std::ranges::find(mPersonalDialogue, view.story, &ReliablePersonalDialogue::story);
+                    auto persistent = view;
+                    persistent.response.clear();
+                    persistent.messages.clear();
+                    if (found == mPersonalDialogue.end())
+                        mPersonalDialogue.push_back(std::move(persistent));
+                    else
+                        *found = std::move(persistent);
+                    if (mPendingPersonal && view.story == mPendingPersonal->intent.story
+                        && (view.command == mPendingPersonal->commandId.value()
+                            || view.revision > mPendingPersonal->intent.revision))
+                        mPendingPersonal.reset();
+                    if (mPresentation.applyPersonalDialogue(view, now) != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(ProviderResult::PresentationFailed);
+                        return;
+                    }
+                }
+                if (mPendingPersonal && mRuntime->session().stateMachine().confirmedSnapshot())
+                {
+                    const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                    const auto ack = snapshot->header().acknowledgedCommandSequence();
+                    if (ack && *ack >= mPendingPersonal->sequence
+                        && std::ranges::any_of(advanced.personalDialogue, [&](const auto& view) {
+                               return view.story == mPendingPersonal->intent.story
+                                   && view.canonicalRevision >= snapshot->header().canonicalRevision();
+                           }))
+                        mPendingPersonal.reset();
+                }
                 for (const auto& output : advanced.ambient)
                     if (mPresentation.applyAmbient(output, now) != ProviderResult::Accepted)
                     {
@@ -1088,6 +1134,45 @@ namespace TES3MP::OpenMWAdapter
                 return false;
             }
 
+            bool ownsPersonalDialogue() const noexcept override
+            {
+                return mRuntime && mRuntime->session().stateMachine().negotiatedHello()
+                    && std::ranges::binary_search(
+                        mRuntime->session().stateMachine().negotiatedHello()->negotiatedCapabilities(),
+                        personalDialogueCapability());
+            }
+            std::span<const ReliablePersonalDialogue> personalDialogue() const noexcept override
+            {
+                return mPersonalDialogue;
+            }
+            std::optional<std::pair<uint64_t, uint64_t>> dialogueSpeaker(
+                const MWWorld::Ptr& actor) const noexcept override
+            {
+                return mInput.dialogueSpeaker(actor);
+            }
+            bool submitPersonalDialogue(uint64_t story, std::pair<uint64_t, uint64_t> speaker, std::string_view topic,
+                int choice) noexcept override
+            try
+            {
+                if (!mRuntime || !mReady || mResuming || mPendingPersonal || !ownsPersonalDialogue())
+                    return false;
+                const auto found = std::ranges::find(mPersonalDialogue, story, &ReliablePersonalDialogue::story);
+                if (found == mPersonalDialogue.end()
+                    || found->targetSessionGeneration != mRuntime->session().stateMachine().generation())
+                    return false;
+                DialogueIntent intent{ story, speaker.first, speaker.second, found->revision, std::string(topic),
+                    choice };
+                const auto queued = mRuntime->queueDialogueIntent(intent);
+                if (queued.result != ClientRuntimeResult::Accepted || !queued.commandId || !queued.sequence)
+                    return false;
+                mPendingPersonal = PendingPersonal{ std::move(intent), *queued.commandId, *queued.sequence };
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+
             DialogueChoiceSubmissionResult submitDialogueChoice(int localChoice) noexcept override
             try
             {
@@ -1191,6 +1276,7 @@ namespace TES3MP::OpenMWAdapter
                 }
                 mInput.clearSessionState();
                 mPresentation.clear();
+                mPersonalDialogue.clear();
                 mMotion = MotionIntentTracker(mMovementMetrics);
                 mPoseEvidence.clear();
                 mPoseSequence.reset();
@@ -1269,6 +1355,7 @@ namespace TES3MP::OpenMWAdapter
 
                 mInput.clearSessionState();
                 mPresentation.clear();
+                mPersonalDialogue.clear();
                 if (mRuntime)
                     mRuntime->close();
                 if (action == ClientSessionAction::SessionRejected || authentication || protocol)
@@ -1365,6 +1452,7 @@ namespace TES3MP::OpenMWAdapter
                     unsigned(status), location.line());
                 mInput.clearSessionState();
                 mPresentation.clear();
+                mPersonalDialogue.clear();
                 if (mRuntime)
                     mRuntime->close();
                 mRuntime.reset();
@@ -1403,6 +1491,14 @@ namespace TES3MP::OpenMWAdapter
             std::optional<MonotonicInstant> mCharacterInstallationDeadline;
             std::optional<CharacterProfileRevision> mInstalledCharacterProfileRevision;
             std::optional<CanonicalRevision> mPendingCharacterCompletionRevision;
+            struct PendingPersonal
+            {
+                DialogueIntent intent;
+                CommandId commandId;
+                CommandSequence sequence;
+            };
+            std::optional<PendingPersonal> mPendingPersonal;
+            std::vector<ReliablePersonalDialogue> mPersonalDialogue;
             std::optional<PendingDialogueChoice> mPendingDialogueChoice;
             std::optional<DialogueChoiceResolution> mDialogueChoiceResolution;
             bool mReady = false;

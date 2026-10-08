@@ -5210,6 +5210,147 @@ namespace TES3MP::Native
         return true;
     }
 
+    class InventoryService::DialogueTransaction final : public PreparedNativeInventory
+    {
+    public:
+        InventoryService& service;
+        EquipmentBytes before;
+        PersonalScripts::State state;
+        std::vector<ReliablePersonalDialogue> outputs;
+        size_t invocations = 0;
+        DialogueTransaction(InventoryService& owner)
+            : service(owner)
+            , before(owner.mActorImage)
+            , state(*owner.mPersonalScriptState)
+        {
+        }
+        bool changesInventory() const noexcept override { return false; }
+        CanonicalDurabilityResult commit(const NativeInventoryCommit&) noexcept override
+        {
+            return CanonicalDurabilityResult::Rejected;
+        }
+    };
+
+    bool InventoryService::appendDialogueIntent(const CanonicalServerState& players,
+        const ServerCommandProposal& proposal, std::unique_ptr<PreparedNativeInventory>& candidate)
+    {
+        const auto reject = [&](const char* reason) {
+            std::fprintf(stderr, "native dialogue rejected: command=%llu reason=%.256s\n",
+                static_cast<unsigned long long>(proposal.commandId().value()), reason);
+            return false;
+        };
+        if (!hasPersonalDialogue() || inventoryImage().empty())
+            return reject("authority unavailable");
+        auto* prior = dynamic_cast<DialogueTransaction*>(candidate.get());
+        if (candidate && (!prior || &prior->service != this || prior->before != mActorImage))
+            return reject("transaction unavailable");
+        const auto* payload = std::get_if<DialogueIntentCommandProposal>(&proposal.payload());
+        const auto* session = players.findActiveSession(proposal.sessionId());
+        if (!payload || !session || session->sessionGeneration() != proposal.sessionGeneration())
+            return reject("authentication");
+        const auto& request = payload->command.intent;
+        if (!validDialogueIntent(request) || !mCombat || !mLife || !mBinding.mNavigatingActor)
+            return reject("request or physics unavailable");
+        const size_t self = actor(session->playerId());
+        if (!mBinding.mCharacters[self] || mCombat->actors[self][8][2] <= 0)
+            return reject("character unavailable");
+        const auto placement = std::ranges::find(mCombat->npcPlacements, request.speaker);
+        if (placement == mCombat->npcPlacements.end())
+            return reject("speaker placement");
+        const size_t npc = 2 + size_t(placement - mCombat->npcPlacements.begin());
+        const auto& life = npc == 2 ? *mLife : mNeighborLives.at(npc - 3);
+        if (life.generation != request.life || life.respawnTick || mCombat->actors[npc][8][2] <= 0)
+            return reject("speaker life");
+        const auto owner
+            = std::ranges::find(mBinding.mContainers, request.speaker, [](const auto& v) { return v.mId.value(); });
+        if (owner == mBinding.mContainers.end())
+            return reject("speaker inventory");
+        const auto* player = players.findPlayer(session->playerId());
+        const auto frame = npc == 2 ? mBinding.mNavigatingActor->snapshot()
+                                    : mBinding.mNavigatingActor->neighborSnapshots().at(npc - 3);
+        if (!player || player->transform().cell() != actorCell(frame))
+            return reject("speaker cell");
+        const auto position = player->transform().position();
+        const double dx = double(position.x()) / 1024 - frame.mPosition[0],
+                     dy = double(position.y()) / 1024 - frame.mPosition[1],
+                     dz = double(position.z()) / 1024 - frame.mPosition[2];
+        // Stock activation distance is content-owned; client coordinates never authorize access.
+        const double reach = double(interactionReach(session->playerId(), false)) / 1024;
+        if (dx * dx + dy * dy + dz * dz > reach * reach
+            || !collisionScene(player->transform().cell())
+                .lineOfSight({ float(double(position.x()) / 1024), float(double(position.y()) / 1024),
+                                 float(double(position.z()) / 1024) + 64.f },
+                    { frame.mPosition[0], frame.mPosition[1], frame.mPosition[2] + 64.f }))
+            return reject("speaker reach or sight");
+        const auto ptr = mRuntime.mContainers.at(size_t(owner - mBinding.mContainers.begin()))->mReference->getPtr();
+        if (!ptr.hasLiveReference() || ptr.getType() != ESM::NPC::sRecordId || !ptr.getClass().getScript(ptr).empty())
+            return reject("speaker content");
+        struct Resolver final : MWScript::ReferenceResolver
+        {
+            MWScript::ExecutionContext expected;
+            MWWorld::Ptr ptr;
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool) const override
+            {
+                if (execution != expected || !id.empty())
+                    throw std::invalid_argument("Unadmitted dialogue reference");
+                return ptr;
+            }
+        } resolver;
+        resolver.ptr = ptr;
+        const auto& current = prior ? prior->state : *mPersonalScriptState;
+        const auto owned = std::ranges::find_if(current, [&](const auto& state) {
+            return state.last.character == session->playerId().value() && state.last.story == request.story;
+        });
+        if (owned == current.end())
+            return reject("unowned story");
+        std::unique_ptr<DialogueTransaction> fresh;
+        if (!prior)
+        {
+            fresh = std::make_unique<DialogueTransaction>(*this);
+            prior = fresh.get();
+        }
+        const bool replay = std::ranges::any_of(prior->state, [&](const auto& state) {
+            return state.last.character == session->playerId().value() && state.last.story == request.story
+                && state.dialogueCommand == proposal.commandId().value();
+        });
+        if (!replay && (prior->invocations >= 2 || std::ranges::any_of(prior->outputs, [&](const auto& output) {
+                return output.targetSessionId == proposal.sessionId();
+            })))
+            return reject("transaction budget");
+        const auto instance = std::ranges::find_if(prior->state, [&](const auto& state) {
+            return state.last.character == session->playerId().value() && state.last.story == request.story;
+        });
+        if (instance == prior->state.end())
+            return reject("unowned story");
+        if (instance->last.invocation == UINT64_MAX || instance->eventCursor == UINT64_MAX)
+            return reject("invocation capacity");
+        resolver.expected = instance->last;
+        ++resolver.expected.invocation;
+        resolver.expected.causalEvent = instance->eventCursor + 1;
+        resolver.expected.sourceReference = request.speaker;
+        resolver.expected.sourceLife = request.life;
+        auto prepared = mBinding.mPersonalScripts->prepareIntent(prior->state, session->playerId().value(),
+            proposal.commandId().value(), request, 0, "", mRuntime.mStore, resolver,
+            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations);
+        if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
+            return reject(prepared.result.diagnostic.c_str());
+        if (prepared.result.executed)
+        {
+            prior->state = std::move(prepared.state);
+            prior->invocations += prepared.invocations;
+            ReliablePersonalDialogue output{ proposal.sessionId(), proposal.sessionGeneration(), ServerTick::initial(),
+                CanonicalRevision::initial() };
+            output.story = request.story;
+            output.revision = request.revision + 1;
+            output.response = std::move(prepared.response);
+            output.messages = std::move(prepared.result.presentation);
+            prior->outputs.push_back(std::move(output));
+        }
+        if (fresh)
+            candidate = std::move(fresh);
+        return true;
+    }
+
     class InventoryService::ActorTransaction final : public PreparedNativeInventory
     {
     public:
@@ -5240,6 +5381,7 @@ namespace TES3MP::Native
         std::optional<PersonalScripts::Prepared> personalScripts;
         size_t personalInvocations = 0;
         bool personalInvalid = false;
+        std::vector<ReliablePersonalDialogue> dialogueOutputs;
         uint64_t target;
         bool contact;
         EquipmentBytes before;
@@ -5516,7 +5658,8 @@ namespace TES3MP::Native
         rejected.diagnostic = "Personal invocation lacks a current admitted host transaction";
         if (!transaction || &transaction->service != this) return rejected;
         if (transaction->consumed || transaction->personalInvalid || transaction->before != mActorImage
-            || inventoryImage().empty() || !mBinding.mPersonalScripts)
+            || inventoryImage().empty() || !mBinding.mPersonalScripts
+            || (dialogue && mBinding.mPersonalScripts->intents()))
         { transaction->personalInvalid = true; return rejected; }
         const auto& binding = transaction->membership ? *transaction->membership : mBinding;
         const auto player = std::ranges::find_if(binding.mPlayers,
@@ -5576,6 +5719,54 @@ namespace TES3MP::Native
         return batch;
     }
 
+    std::vector<ReliablePersonalDialogue> InventoryService::projectPersonalDialogue(const CanonicalServerState& players,
+        SessionId target, ServerTick tick, CanonicalRevision revision, const PreparedNativeInventory* candidate) const
+    {
+        std::vector<ReliablePersonalDialogue> result;
+        if (!hasPersonalDialogue())
+            return result;
+        const auto* session = players.findActiveSession(target);
+        if (!session)
+            return result;
+        const auto* staged = dynamic_cast<const ActorTransaction*>(unwrapPlayerPhysics(candidate));
+        if (candidate
+            && (!staged || &staged->service != this || staged->consumed || staged->personalInvalid
+                || staged->before != mActorImage))
+            return result;
+        const auto& state = staged && staged->personalScripts ? staged->personalScripts->state : *mPersonalScriptState;
+        for (const auto& instance : state)
+            if (instance.last.character == session->playerId().value())
+            {
+                ReliablePersonalDialogue view{ target, session->sessionGeneration(), tick, revision };
+                view.story = instance.last.story;
+                view.revision = instance.dialogueRevision;
+                view.command = instance.dialogueCommand;
+                view.speaker = instance.dialogueRequest.speaker;
+                view.life = instance.dialogueRequest.life;
+                view.topic = instance.dialogueRequest.topic;
+                for (const auto& c : instance.choices)
+                    view.choices.push_back({ c.text, c.id });
+                for (const auto& q : instance.dialogue.quests)
+                    view.quests.push_back({ q.mTopic.toString(), q.mState, bool(q.mFinished) });
+                for (const auto& e : instance.dialogue.entries)
+                    view.entries.push_back({ e.topic.toString(), e.info.toString() });
+                for (const auto& t : instance.dialogue.topics)
+                    view.topics.push_back(t.toString());
+                if (staged)
+                    for (const auto& output : staged->dialogueOutputs)
+                        if (output.targetSessionId == target && output.story == view.story
+                            && output.revision == view.revision)
+                        {
+                            view.response = output.response;
+                            view.messages = output.messages;
+                        }
+                if (!validPersonalDialogue(view))
+                    throw std::invalid_argument("Invalid personal dialogue projection");
+                result.push_back(std::move(view));
+            }
+        return result;
+    }
+
     std::optional<PlayerPhysicsBaseline> InventoryService::projectPlayerPhysics(
         const CanonicalServerState& players, PlayerId player, const PreparedNativeInventory* candidate) const
     {
@@ -5622,6 +5813,12 @@ namespace TES3MP::Native
     {
         if (!mBinding.mPlayerPhysics)
             return prepareNativeScheduledTick(inputPlayers, tick, seconds, std::move(command), world, waitRest);
+        std::unique_ptr<DialogueTransaction> dialogue;
+        if (auto* value = dynamic_cast<DialogueTransaction*>(command.get()))
+        {
+            command.release();
+            dialogue.reset(value);
+        }
         if (!mBinding.mNavigatingActor || !mCombat || controls.size() > MaximumServerCommandsPerTick
             || !std::isfinite(seconds) || std::abs(seconds - 1.f / 30.f) > 1e-6f)
             throw std::invalid_argument("Player physics authority unavailable");
@@ -5775,6 +5972,12 @@ namespace TES3MP::Native
             auto& body = scene->forPlayer(PlayerHullBase + i);
             const auto previous = body.snapshot();
             std::unique_ptr<InteriorActorScene::Prepared> step;
+            if (dialogue)
+            {
+                if (command)
+                    throw std::invalid_argument("Dialogue command composition");
+                command = std::move(dialogue);
+            }
             scene->withPlayerHulls(hulls, [&] {
                 step = body.prepareControlled(movement,
                     {float(state.controls.right) / 1024, float(state.controls.forward) / 1024, float(state.controls.vertical) / 1024},
@@ -5815,6 +6018,12 @@ namespace TES3MP::Native
         mPlayerFrames = transaction->states;
         const auto staged = createCanonicalServerState(players, inputPlayers.activeSessions());
         if (!std::holds_alternative<CanonicalServerState>(staged)) throw std::invalid_argument("Player motion state invalid");
+        if (dialogue)
+        {
+            if (command)
+                throw std::invalid_argument("Dialogue command composition");
+            command = std::move(dialogue);
+        }
         scene->withPlayerHulls(hulls, [&] {
             transaction->native = prepareNativeTick(std::get<CanonicalServerState>(staged), tick, seconds,
                 std::move(command), {}, world, {}, {}, {}, {}, waitRest, controlledFrames);
@@ -6012,6 +6221,14 @@ namespace TES3MP::Native
         std::span<const std::pair<size_t, ActorSceneSnapshot>> controlledPlayers)
     try
     {
+        std::unique_ptr<DialogueTransaction> dialogue;
+        if (auto* value = dynamic_cast<DialogueTransaction*>(command.get()))
+        {
+            command.release();
+            dialogue.reset(value);
+            if (&value->service != this || value->before != mActorImage)
+                return {};
+        }
         std::optional<CanonicalServerState> establishedPlayers;
         if (mBinding.mCharacterCreation)
         {
@@ -11980,8 +12197,9 @@ namespace TES3MP::Native
                         [&](const auto& session) { return session.playerId() == player; }))
                     active[count++] = player.value();
             PersonalReferenceResolver resolver;
-            auto scripts = mBinding.mPersonalScripts->prepareScheduled(*mPersonalScriptState, tick.value(),
-                std::span(active).first(count), mRuntime.mStore, resolver);
+            auto scripts
+                = mBinding.mPersonalScripts->prepareScheduled(dialogue ? dialogue->state : *mPersonalScriptState,
+                    tick.value(), std::span(active).first(count), mRuntime.mStore, resolver);
             if (scripts.result.outcome != SharedWorldScript::Outcome::Committed)
             {
                 const auto& result = scripts.result;
@@ -11995,6 +12213,36 @@ namespace TES3MP::Native
             {
                 transaction->personalInvocations = scripts.invocations;
                 transaction->personalScripts = std::move(scripts);
+            }
+        }
+        if (dialogue)
+        {
+            if (transaction->personalInvocations + dialogue->invocations
+                > PersonalScripts::MaximumInvocationsPerTransaction)
+                throw std::invalid_argument("Dialogue and scheduled invocation budget exceeded");
+            transaction->personalInvocations += dialogue->invocations;
+            if (!transaction->personalScripts)
+            {
+                PersonalScripts::Prepared state;
+                state.state = std::move(dialogue->state);
+                state.image = mBinding.mPersonalScripts->encode(state.state);
+                transaction->personalScripts = std::move(state);
+            }
+            transaction->dialogueOutputs = std::move(dialogue->outputs);
+            for (const auto& output : transaction->dialogueOutputs)
+            {
+                const auto found = std::ranges::find_if(transaction->personalScripts->state, [&](const auto& v) {
+                    return v.last.character == players.findActiveSession(output.targetSessionId)->playerId().value()
+                        && v.last.story == output.story;
+                });
+                const auto& request = found->dialogueRequest;
+                const auto placement = std::ranges::find(transaction->combat->npcPlacements, request.speaker);
+                if (placement == transaction->combat->npcPlacements.end())
+                    throw std::invalid_argument("Dialogue speaker disappeared");
+                const size_t npc = 2 + size_t(placement - transaction->combat->npcPlacements.begin());
+                const auto& life = npc == 2 ? *transaction->life : transaction->neighborLives.at(npc - 3);
+                if (life.generation != request.life || life.respawnTick || transaction->combat->actors[npc][8][2] <= 0)
+                    throw std::invalid_argument("Dialogue speaker life changed during tick");
             }
         }
         return transaction;

@@ -132,6 +132,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept override;
         std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept override;
         std::optional<MagicUseCapture> captureMagicUse() noexcept override;
+        std::optional<std::pair<uint64_t, uint64_t>> dialogueSpeaker(const MWWorld::Ptr&) const noexcept override;
         std::optional<DialogueChoiceId> mapDialogueChoice(int localChoice) const noexcept override;
 
         bool handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept;
@@ -178,6 +179,8 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult applyWorldTime(
             const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept override;
         void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const;
+        ProviderResult applyPersonalDialogue(const ReliablePersonalDialogue&, MonotonicInstant) noexcept override;
+        std::optional<std::pair<uint64_t, uint64_t>> dialogueSpeaker(const MWWorld::Ptr&) const noexcept;
         ProviderResult applyAmbient(const ReliableAmbientBatch&, MonotonicInstant) noexcept override;
         MWWorld::Ptr replicatedCombatTarget(uint8_t kind, uint64_t id) const;
         bool activateReplicatedNpc(const MWWorld::Ptr& target, const MWWorld::Ptr& player) const noexcept;

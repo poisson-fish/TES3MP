@@ -29,6 +29,7 @@ namespace MWDialogue
             MWScript::DialogueState& dialogue;
             int disposition;
             std::string_view cellName;
+            ESM::RefId localScript; // Explicit story bank for a source-free dialogue owner.
         };
     private:
         MWWorld::Ptr mActor;

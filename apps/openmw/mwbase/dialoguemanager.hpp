@@ -9,6 +9,11 @@
 
 #include <cstdint>
 
+namespace TES3MP
+{
+    struct ReliablePersonalDialogue;
+}
+
 namespace Loading
 {
     class Listener;
@@ -47,6 +52,7 @@ namespace MWBase
 
         DialogueManager() {}
 
+        virtual void presentPersonalDialogue(const TES3MP::ReliablePersonalDialogue&) {}
         virtual void clear() = 0;
 
         virtual ~DialogueManager() {}

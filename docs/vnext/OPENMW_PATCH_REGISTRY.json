@@ -4,9 +4,9 @@
   "patches": [
     {
       "id": "M5-003",
-      "slice": "character/story stock dialogue filters and transactional journal/topic results",
+      "slice": "character/story dialogue transactions, authenticated intents and committed presentation",
       "owner": "OpenMW dialogue Filter, Quest/Topic and MWScript stock compiler/opcodes",
-      "purpose": "Scoped stock INFO selection retains ordering and comparisons while sourcing Journal, owned globals/typed locals, Choice and TalkedToPC from one explicit invocation. Speaker scope/life and primary script identity revalidate. Unsupported services reject before singleton access. Stock result bytecode stages banks, journals and known topics together; Quest/Topic accept explicit content and suppress uncommitted Lua/UI callbacks. V84 admits bounded winning DIAL/INFO policy and persists progression and contextual replay receipts with the existing gameplay transaction. Trusted native calls, late rejection/defer, durability rollback/retry, two-character/story isolation and exact/uncertain restart are verified; personal menus/output, physical results and NPC restoration remain closed.",
+      "purpose": "Stock INFO ordering, comparisons and result bytecode use explicit character/story state. V84 retains trusted calls. V85 binds authenticated topics and offered choices to a living placed unscripted NPC and the owned primary bank; current reach, sight, life and complete execution identity validate. Journals, topics, choices, bank writes and revision/command receipts join gameplay durability. Reliable private views carry literal responses, messages and progression metadata; reconnect is silent. The stock client manager submits intents and presents committed views without local filters, results, Journal, World or Lua writes. Bounds and policy/content identities reject incompatible images. Physical results, greetings, journal text/timestamps and unsupported filter services remain closed.",
       "paths": [
         "apps/openmw/mwdialogue/filter.cpp",
         "apps/openmw/mwdialogue/filter.hpp",
@@ -17,16 +17,25 @@
         "apps/openmw/mwscript/dialoguestate.cpp",
         "apps/openmw/mwscript/dialoguestate.hpp",
         "apps/openmw/mwscript/dialogueextensions.cpp",
-        "apps/openmw/mwscript/dialogueextensions.hpp"
+        "apps/openmw/mwscript/dialogueextensions.hpp",
+        "apps/openmw/mwbase/dialoguemanager.hpp",
+        "apps/openmw/mwdialogue/dialoguemanagerimp.cpp",
+        "apps/openmw/mwdialogue/dialoguemanagerimp.hpp"
       ],
       "tests": [
         "tes3mp_native_dialogue_tests isolation",
         "tes3mp_native_dialogue_tests rollback",
         "tes3mp_native_dialogue_tests recovery",
         "tes3mp_native_dialogue_tests stock",
-        "tes3mp_native_loadout_tests dialogue NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
+        "tes3mp_native_loadout_tests dialogue NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
+        "tes3mp_native_dialogue_tests intents",
+        "tes3mp_native_dialogue_tests client",
+        "tes3mp_native_loadout_tests dialogue-intents NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
+        "openmw_tes3mp_adapter_tests personal-dialogue",
+        "tes3mp_server_app_tests personal-dialogue-ingress",
+        "tes3mp_combat_interest_projection_tests personal-dialogue"
       ],
-      "disposition": "Bounded trusted scoped dialogue results and progression, wired to V84 gameplay durability; client dialogue admission and presentation remain closed.",
+      "disposition": "V85 authenticated personal dialogue and presentation through gameplay durability; V84 trusted migration preserved. Physical results and broader NPC restoration remain closed.",
       "removal_condition": "OpenMW supplies equivalent explicit scoped dialogue filtering, result execution and transactional progression interfaces"
     },
     {
@@ -1014,7 +1023,7 @@
       "id": "P19-001",
       "slice": "desktop dialogue choices",
       "owner": "OpenMW adapter",
-      "purpose": "Intercept stock dialogue choices before local result scripts, display pending or rejected state, and apply client-local dialogue consequences only after the authoritative server commits the manifest-bound choice ID.",
+      "purpose": "Intercept stock dialogue choices before local result scripts, display pending or rejected state, and apply client-local dialogue consequences only after the authoritative server commits the manifest-bound choice ID. V85 menus use the authoritative personal dialogue manager; native choices bypass this legacy catalog path and consume committed presentation only. Native services and restock writes remain closed.",
       "paths": [
         "apps/openmw/mwgui/dialogue.cpp",
         "apps/openmw/mwgui/dialogue.hpp"

@@ -12,12 +12,25 @@ namespace MWScript
         void require(bool condition)
         { if (!condition) throw std::invalid_argument("Invalid or unowned scoped dialogue state"); }
     }
-    DialogueState::DialogueState(const ExecutionContext& execution, State& state, std::span<const ESM::Dialogue> records)
-        : mExecution(execution), mState(state), mRecords(records)
+    DialogueState::DialogueState(
+        const ExecutionContext& execution, State& state, std::span<const ESM::Dialogue> records, bool choicesAllowed)
+        : mExecution(execution)
+        , mState(state)
+        , mRecords(records)
+        , mChoicesAllowed(choicesAllowed)
     {
         execution.validate();
         require(execution.ownership == ExecutionContext::Ownership::Character);
         validate();
+    }
+
+    void DialogueState::addChoice(std::string_view text, int id)
+    {
+        if (!mChoicesAllowed || choices.size() >= 8 || id < 0 || text.empty() || text.size() > 256
+            || text.find('\0') != text.npos
+            || std::ranges::any_of(choices, [&](const auto& value) { return value.id == id; }))
+            throw std::invalid_argument("Unadmitted or bounded dialogue choice");
+        choices.push_back({ std::string(text), id });
     }
     void DialogueState::validateExecution(const ExecutionContext& value) const
     { require(value == mExecution); }

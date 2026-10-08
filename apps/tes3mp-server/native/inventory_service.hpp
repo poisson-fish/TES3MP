@@ -240,6 +240,7 @@ namespace TES3MP::Native
         void bindPhysicsPlayers(InteriorActorScene&, const std::array<PlayerPhysicsState, 2>&,
             std::span<const uint64_t> removed = {}) const;
         class PlayerPhysicsTransaction;
+        class DialogueTransaction;
         const PreparedNativeInventory* unwrapPlayerPhysics(const PreparedNativeInventory*) const;
         class Transaction;
         class EquipmentTransaction;
@@ -440,6 +441,14 @@ namespace TES3MP::Native
         // Candidate output for later committed delivery; projection never executes.
         std::optional<SharedWorldScript::Result> projectSharedScript(const PreparedNativeInventory*) const;
         bool hasSharedScript() const override { return bool(mBinding.mSharedScript); }
+        bool hasPersonalDialogue() const override
+        {
+            return mBinding.mPersonalScripts && mBinding.mPersonalScripts->intents();
+        }
+        bool appendDialogueIntent(const CanonicalServerState&, const ServerCommandProposal&,
+            std::unique_ptr<PreparedNativeInventory>&) override;
+        std::vector<ReliablePersonalDialogue> projectPersonalDialogue(const CanonicalServerState&, SessionId,
+            ServerTick, CanonicalRevision, const PreparedNativeInventory* = nullptr) const override;
         std::optional<ReliableAmbientBatch> projectAmbient(const CanonicalServerState&,
             SessionId, ServerTick, CanonicalRevision, const PreparedNativeInventory*) const override;
         const InventoryServiceBinding& characterBinding() const { return mBinding; }

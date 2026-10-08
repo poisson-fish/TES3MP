@@ -63,6 +63,11 @@ namespace TES3MP::OpenMWAdapter
             ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status);
 
         bool valid() const noexcept { return mOutput.is_open(); }
+        ProviderResult applyPersonalDialogue(const ReliablePersonalDialogue&, MonotonicInstant) noexcept override;
+        std::optional<std::pair<uint64_t, uint64_t>> dialogueSpeaker(const MWWorld::Ptr& actor) const noexcept override
+        {
+            return mPresentation.dialogueSpeaker(actor);
+        }
         ProviderResult applyAmbient(const ReliableAmbientBatch&, MonotonicInstant) noexcept override;
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;

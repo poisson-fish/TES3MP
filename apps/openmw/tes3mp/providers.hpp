@@ -3,6 +3,12 @@
 
 #include <tes3mp/actor_replication.hpp>
 #include <tes3mp/ambient_replication.hpp>
+#include <tes3mp/personal_dialogue.hpp>
+
+namespace MWWorld
+{
+    class Ptr;
+}
 #include <tes3mp/client_locomotion.hpp>
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/combat_replication.hpp>
@@ -141,6 +147,10 @@ namespace TES3MP::OpenMWAdapter
         }
         virtual std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept { return std::nullopt; }
         virtual std::optional<MagicUseCapture> captureMagicUse() noexcept { return std::nullopt; }
+        virtual std::optional<std::pair<uint64_t, uint64_t>> dialogueSpeaker(const MWWorld::Ptr&) const noexcept
+        {
+            return {};
+        }
         virtual std::optional<DialogueChoiceId> mapDialogueChoice(int) const noexcept { return std::nullopt; }
         virtual void clearSessionState() noexcept {}
     };
@@ -156,6 +166,10 @@ namespace TES3MP::OpenMWAdapter
     {
     public:
         virtual ~PresentationProvider() = default;
+        virtual ProviderResult applyPersonalDialogue(const ReliablePersonalDialogue&, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
         virtual ProviderResult applyAmbient(const ReliableAmbientBatch&, MonotonicInstant) noexcept
         { return ProviderResult::Accepted; }
         virtual ProviderResult setPlayerAppearances(bool, std::span<const PublicPlayerAppearance>) noexcept

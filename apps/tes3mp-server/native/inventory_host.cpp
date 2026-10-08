@@ -99,7 +99,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 84; ++candidate)
+            for (unsigned candidate = 3; candidate <= 85; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -1186,8 +1186,9 @@ namespace TES3MP::Native
                     for (auto player : start.binding.mPlayers)
                     { definition.character = player.value(); definitions.push_back(definition); }
                 }
-                start.binding.mPersonalScripts = std::make_shared<const PersonalScripts>(campaign,
-                    std::move(definitions), crypto, start.personalScheduling, start.personalBanks);
+                start.binding.mPersonalScripts
+                    = std::make_shared<const PersonalScripts>(campaign, std::move(definitions), crypto,
+                        start.personalScheduling, start.personalBanks, start.text.starts_with("native-inventory-85\n"));
             }
             if (start.binding.mSummons)
             {
