@@ -154,6 +154,9 @@ namespace TES3MP::Native
         // Borrow collision membership for a detached scope query/step. Restore
         // groups/masks even on rejection; no live image or navigator is changed.
         void withHiddenActors(std::span<const uint64_t> actors, const std::function<void()>& operation);
+        void withActorPose(uint64_t actor, const std::array<float, 3>& position, float yaw,
+            const std::function<void()>& operation);
+        bool actorPoseClear(uint64_t actor, const std::array<float, 3>& position, float yaw);
         // Both scenes are detached from the host during preparation. Commit can
         // install the complete collision membership without allocating.
         void installActorSet(InteriorActorScene& candidate) noexcept;

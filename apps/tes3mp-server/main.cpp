@@ -685,6 +685,8 @@ int main(int argc, char** argv)
             optionalCapabilities.push_back(TES3MP::authoritativeSecurityCapability());
     }
     std::vector<TES3MP::CapabilityId> requiredCapabilities;
+    if (nativeInventory && nativeInventory->hasStoryRelocations())
+        requiredCapabilities.push_back(TES3MP::storyRelocationCapability());
     if (nativeInventory && nativeInventory->hasStoryEncounters())
         requiredCapabilities.push_back(TES3MP::storyEncounterCapability());
     if (nativeInventory && nativeInventory->hasPersonalDialogue())

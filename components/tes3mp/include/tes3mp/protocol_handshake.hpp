@@ -14,7 +14,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::size_t MaximumOptionalCapabilityCount = 36;
+    inline constexpr std::size_t MaximumOptionalCapabilityCount = 37;
     inline constexpr std::size_t MaximumRequiredCapabilityCount = 32;
     inline constexpr std::size_t MaximumNegotiatedCapabilityCount
         = MaximumOptionalCapabilityCount + MaximumRequiredCapabilityCount;
@@ -59,6 +59,7 @@ namespace TES3MP
 
     inline constexpr std::uint32_t PersonalDialogueCapabilityValue = 40;
     inline constexpr std::uint32_t StoryEncounterCapabilityValue = 41;
+    inline constexpr std::uint32_t StoryRelocationCapabilityValue = 42;
 
     class CapabilityId
     {
@@ -88,6 +89,8 @@ namespace TES3MP
     { return *CapabilityId::fromValue(ActorCastReplicationCapabilityValue); }
     inline constexpr CapabilityId storyEncounterCapability() noexcept
     { return *CapabilityId::fromValue(StoryEncounterCapabilityValue); }
+    inline constexpr CapabilityId storyRelocationCapability() noexcept
+    { return *CapabilityId::fromValue(StoryRelocationCapabilityValue); }
     inline constexpr CapabilityId personalDialogueCapability() noexcept
     {
         return *CapabilityId::fromValue(PersonalDialogueCapabilityValue);

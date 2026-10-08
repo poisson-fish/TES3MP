@@ -27,6 +27,8 @@ def read_json(path, limit):
 
 
 def capture(args):
+    if args.relocate_source and not (args.runtime / "native.txt").read_text().startswith("native-inventory-89\n"):
+        raise ValueError("Relocation proof requires a fresh V89 campaign")
     if args.enable_source and not (args.runtime / "native.txt").read_text().startswith("native-inventory-88\n"):
         raise ValueError("Source Enable proof requires a fresh V88 campaign")
     args.output.mkdir(parents=True, exist_ok=False)
@@ -47,6 +49,7 @@ def capture(args):
     processes, finished = {}, set()
     result = dict(success=False, checks=[], synthetic=True, impairment="100ms +/-25ms, 10% loss/reorder")
     result["source_enable"] = args.enable_source
+    result["source_relocation"] = args.relocate_source
     if args.encounter:
         result["impairment"] = "direct"
     save = args.runtime / (settings["player_identity_file"] + ".world-v2")
@@ -174,7 +177,7 @@ def capture(args):
             wait(lambda: all((s := latest(r, "native_player_sample")) and s.get("physics") for r in paths), "both rendered players", 90)
             if args.encounter:
                 from native_story_encounter_capture import verify_encounter
-                verify_encounter(result, previous, evidence, command, wait, view, screenshot, latest, args.return_path)
+                verify_encounter(result, previous, evidence, command, wait, view, screenshot, latest, args.return_path, args.relocate_source)
             else:
                 wait(lambda: all(view(r, s) for r in paths for s in (91, 92)), "four isolated story baselines")
                 for role in paths:
@@ -283,12 +286,15 @@ if __name__ == "__main__":
     parser.add_argument("--encounter", action="store_true")
     parser.add_argument("--return-path", action="store_true")
     parser.add_argument("--enable-source", action="store_true")
+    parser.add_argument("--relocate-source", action="store_true")
     parser.add_argument("--substitutions", action="store_true")
     parser.add_argument("--disposition", action="store_true")
     parser.add_argument("--speaker-name", default="", help="Expected winning speaker display name")
     parser.add_argument("--no-screenshots", action="store_true",
                         help="Validate semantic evidence without native-window capture; this remains synthetic")
     args = parser.parse_args()
+    if args.relocate_source and (args.return_path or args.enable_source):
+        parser.error("Relocation return/restoration is not admitted")
     args.return_path |= args.enable_source
-    args.encounter |= args.return_path
+    args.encounter |= args.return_path or args.relocate_source
     capture(args)

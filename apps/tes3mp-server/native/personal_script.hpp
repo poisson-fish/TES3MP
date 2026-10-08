@@ -41,6 +41,13 @@ namespace TES3MP::Native
         };
         struct Instance
         {
+            struct Relocation
+            {
+                std::array<float, 3> origin{}, position{};
+                float yaw = 0;
+                bool operator==(const Relocation&) const = default;
+                void validate() const;
+            };
             struct Npc
             {
                 uint64_t reference = 0, life = 0;
@@ -71,6 +78,7 @@ namespace TES3MP::Native
             uint64_t encounterLife = 0;
             bool encounterReturned = false; // Dormant outcome; origin and story receipts remain frozen.
             bool encounterEnabled = false; // Stock source Enable committed at safe return; never renews the story.
+            std::optional<Relocation> relocation; // Terminal inert pose; original placement/life, no new loot or actor simulation.
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -89,7 +97,7 @@ namespace TES3MP::Native
             std::string cellName;
         };
         PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false,
-            bool banks = false, bool intents = false, bool returns = false, bool enables = false);
+            bool banks = false, bool intents = false, bool returns = false, bool enables = false, bool relocations = false);
         uint64_t campaign() const { return mCampaign; }
         bool scheduled() const { return mScheduled; }
         bool banks() const { return mBanks; }
@@ -98,6 +106,8 @@ namespace TES3MP::Native
         bool encounters() const { return mEncounters; }
         bool returns() const { return mReturns; }
         bool enables() const { return mEnables; }
+        bool relocations() const { return mRelocations; }
+        static const Instance::Relocation* relocation(const State&, uint64_t character);
         static uint64_t physicalScope(const State&, uint64_t character);
         Prepared prepareReturn(const State&, uint64_t character, const MWWorld::ESMStore* = nullptr,
             uint64_t sourceLife = 0) const;
@@ -134,6 +144,7 @@ namespace TES3MP::Native
         bool mEncounters = false;
         bool mReturns = false;
         bool mEnables = false;
+        bool mRelocations = false;
         std::vector<Interpreter::Program> mRestorations;
         struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
         std::vector<std::vector<ResultProgram>> mResults;

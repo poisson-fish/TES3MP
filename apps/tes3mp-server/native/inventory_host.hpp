@@ -8,6 +8,10 @@
 
 namespace TES3MP::Native
 {
+    // V89 admits source-only stock Position/PositionCell within the admitted
+    // interior. Durable terminal poses own inert visibility/collision; no new
+    // AI/combat/loot writer. Relocated scopes stay occupied until return is proven.
+    // Fresh images, capability 42 and existing motion/suppression fields.
     // V88 executes bounded stock Enable on the detached disabled source at the
     // V87 safe-return boundary. Restoration/occupancy persist together while
     // terminal story state stays frozen. Only the living original life admits;

@@ -2043,6 +2043,44 @@ namespace TES3MP::Native
         }
         operation();
     }
+    bool InteriorActorScene::actorPoseClear(uint64_t actor, const std::array<float, 3>& position, float yaw)
+    {
+        struct Contact final : btCollisionWorld::ContactResultCallback
+        {
+            bool clear = true;
+            btScalar addSingleResult(btManifoldPoint& point, const btCollisionObjectWrapper*, int, int,
+                const btCollisionObjectWrapper*, int, int) override
+            { if (point.getDistance() < -.1f) clear = false; return 0; }
+        } contact;
+        contact.m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
+        contact.m_collisionFilterMask = MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap
+            | MWPhysics::CollisionType_Actor;
+        withActorPose(actor, position, yaw, [&] {
+            auto& scene = *forActor(actor).mImpl;
+            scene.mWorld.contactTest(scene.mActor->mCollisionObject, contact);
+        });
+        return contact.clear;
+    }
+
+    void InteriorActorScene::withActorPose(uint64_t actor, const std::array<float, 3>& position, float yaw,
+        const std::function<void()>& operation)
+    {
+        auto& scene = *forActor(actor).mImpl;
+        if (!std::ranges::all_of(position, [](float value) { return std::isfinite(value) && std::abs(value) <= 1e6f; })
+            || !std::isfinite(yaw) || std::abs(yaw) > 6.283186f || !contains(position))
+            throw std::invalid_argument("Scoped actor pose outside bounds");
+        auto* body = scene.mActor->mCollisionObject;
+        struct Restore
+        {
+            btCollisionWorld& world; btCollisionObject* body; btTransform transform;
+            ~Restore() { body->setWorldTransform(transform); world.updateSingleAabb(body); }
+        } restore{scene.mWorld, body, body->getWorldTransform()};
+        auto frame = *scene.mActor;
+        frame.mPosition = {position[0], position[1], position[2]}; frame.mRotation.y() = yaw;
+        body->setWorldTransform(scene.actorTransform(frame)); scene.mWorld.updateSingleAabb(body);
+        operation();
+    }
+
     void InteriorActorScene::withHiddenActors(std::span<const uint64_t> actors, const std::function<void()>& operation)
     {
         struct Restore
@@ -2422,7 +2460,7 @@ namespace TES3MP::Native
         for (float axis : axes)
             if (!std::isfinite(axis) || std::abs(axis) > 1.f)
                 throw std::invalid_argument("Movement controls outside bounds");
-        if (!std::isfinite(pitch) || !std::isfinite(yaw) || std::abs(pitch) > 3.141593f
+        if (!std::isfinite(pitch) || !std::isfinite(yaw) || std::abs(pitch) > 6.283186f
             || std::abs(yaw) > 6.283186f) throw std::invalid_argument("Movement facing outside bounds");
         const auto localDoors = mImpl->localDoors(doors);
         mImpl->validateDoors(localDoors);

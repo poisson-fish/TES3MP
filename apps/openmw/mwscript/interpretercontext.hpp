@@ -101,6 +101,8 @@ namespace MWScript
         void enable(const MWWorld::Ptr& reference) const;
         void disable(const MWWorld::Ptr& reference) const;
         bool disabled(const MWWorld::Ptr& reference) const;
+        void position(const MWWorld::Ptr&, const std::array<float, 3>&, float, const ESM::RefId&) const;
+        const ESM::Position& position(const MWWorld::Ptr&) const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
         DialogueState* getDialogueState() const;

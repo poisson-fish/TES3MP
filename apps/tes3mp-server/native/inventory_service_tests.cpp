@@ -5595,8 +5595,9 @@ namespace TES3MP::Native::Testing
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
         const bool storyEnable = effectFamily == "story-enable";
+        const bool storyRelocation = effectFamily == "story-relocation";
         const bool storyReturn = storyEnable || effectFamily == "story-return";
-        const bool storyEncounter = storyReturn || effectFamily == "story-encounter";
+        const bool storyEncounter = storyReturn || storyRelocation || effectFamily == "story-encounter";
         const bool dialogueNpc = effectFamily == "dialogue-npc-state";
         const bool personalIntents = storyEncounter || dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
         const bool personalDialogue = personalIntents || effectFamily == "dialogue";
@@ -6343,7 +6344,9 @@ namespace TES3MP::Native::Testing
                                 select.mFunction = ESM::DialogueCondition::Function_PcAlchemy;
                                 info.mSelects.push_back(select);
                                 info.mResponse = "A private passage for %PCName|%PCClass|%cell|%ambient_counter_83|%pccrimelevel.";
-                                info.mResultScript += storyEncounter ? "Disable\nset ambient_counter_83 to GetDisabled\n" : "Choice \"Proceed\" 7\n";
+                                info.mResultScript += storyRelocation
+                                    ? "PositionCell 200 -32 1 5400 \"NPC Door Contact Test\"\nset ambient_counter_83 to npc_door_actor->GetPos x\n"
+                                    : storyEncounter ? "Disable\nset ambient_counter_83 to GetDisabled\n" : "Choice \"Proceed\" 7\n";
                             }
                         }
                         if (dialogueDisposition && std::string_view(name) == "passage_k61")
@@ -9296,7 +9299,8 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (storyEnable                                  ? "native-inventory-88\nmanifest "
+            out << (storyRelocation                              ? "native-inventory-89\nmanifest "
+                : storyEnable                                   ? "native-inventory-88\nmanifest "
                 : storyReturn                                   ? "native-inventory-87\nmanifest "
                 : storyEncounter                                ? "native-inventory-86\nmanifest "
                 : personalIntents                              ? "native-inventory-85\nmanifest "
@@ -9657,7 +9661,12 @@ namespace TES3MP::Native::Testing
                                     id<ServerTick>(tick), id<CanonicalRevision>(tick), candidate);
                                 require(gear && gear->equipment && fight,
                                     "Encounter projection unavailable");
-                                require(removed ? gear->equipment->hiddenActors == std::vector<uint64_t>{request.speaker}
+                                require(removed && storyRelocation ? gear->equipment->hiddenActors.empty()
+                                        && gear->equipment->actors.size() == 1 && gear->equipment->motions.size() == 1
+                                        && gear->equipment->motions.front().position == std::array<float, 3>{200, -32, 1}
+                                        && std::abs(gear->equipment->motions.front().yaw - 1.5707963f) < .000001f
+                                        && gear->containers.empty() && fight->actors().empty()
+                                    : removed ? gear->equipment->hiddenActors == std::vector<uint64_t>{request.speaker}
                                         && gear->equipment->actors.empty() && gear->equipment->motions.empty()
                                         && fight->actors().empty()
                                     : gear->equipment->hiddenActors.empty() && gear->equipment->actors.size() == 1
@@ -9715,6 +9724,11 @@ namespace TES3MP::Native::Testing
                         require(scopes[0].encounterLife == request.life && scopes[1].encounterLife == 0
                             && scopes[2].encounterLife == 0 && scopes[3].encounterLife == 0,
                             "Disable crossed other character/story banks");
+                        if (storyRelocation)
+                            require(policy->relocations() && scopes[0].relocation
+                                && scopes[0].runtime.runtime.globals.front().mValue.getInteger() == 200
+                                && !scopes[1].relocation && !policy->returns(),
+                                "Relocation lost the staged source lookup or enabled unproven return");
                         // Collision and projectile queries share actual stock Bullet bodies.
                         auto& room = *native.characterBinding().mNavigatingActor;
                         const auto npc = room.snapshot();
@@ -9732,6 +9746,22 @@ namespace TES3MP::Native::Testing
                         }); } catch (const std::runtime_error&) {}
                         require(hiddenHit && room.projectileContact(from, to)->actor == request.speaker,
                             "Scoped collision leaked an invisible blocker or failed rollback");
+                        if (storyRelocation)
+                        {
+                            const std::array<float, 3> destination{200, -32, 1};
+                            const auto beforePose = room.image();
+                            bool originClear = false, destinationHit = false;
+                            try { room.withActorPose(request.speaker, destination, 1.5707963f, [&] {
+                                const auto origin = room.projectileContact(from, to);
+                                const auto hit = room.projectileContact({155, -32, 65}, {245, -32, 65});
+                                originClear = !origin || origin->actor != request.speaker;
+                                destinationHit = hit && hit->actor == request.speaker;
+                                throw std::runtime_error("injected pose query rollback");
+                            }); } catch (const std::runtime_error&) {}
+                            require(originClear && destinationHit && room.projectileContact(from, to)->actor == request.speaker
+                                && room.image() == beforePose,
+                                "Relocation hull differed from visibility or leaked after exception");
+                        }
                         auto walkingScene = native.characterBinding().mCreateActorSet({});
                         const auto record = ESM::RefId::stringRefId("npc_door_actor");
                         const std::array bodies{DynamicActorBody{PlayerHullBase, record,
@@ -9747,7 +9777,8 @@ namespace TES3MP::Native::Testing
                                 std::unique_ptr<InteriorActorScene::Prepared> step;
                                 const auto prepareStep = [&] { step = walker.prepareControlled(
                                     ActorMovement{.enabled = true, .walkSpeed = 200}, {0, 1, 0}, 0, 0); };
-                                if (removed) walkingScene->withHiddenActors(hidden, prepareStep);
+                                if (removed && storyRelocation) walkingScene->withActorPose(request.speaker, {200, -32, 1}, 1.5707963f, prepareStep);
+                                else if (removed) walkingScene->withHiddenActors(hidden, prepareStep);
                                 else prepareStep();
                                 walker.install(*step);
                             }
@@ -9802,6 +9833,18 @@ namespace TES3MP::Native::Testing
                         require(rejectedOrigin && image(restored) == saved,
                             "Recovery accepted a future private NPC origin or installed partial state");
                         verifyView(restored, nullptr, 5, true, false);
+                        if (storyRelocation)
+                        {
+                            auto invalidPose = policy->restore(scriptImage);
+                            invalidPose[0].relocation->position[2] = -32;
+                            const auto invalidImage = sealPersonalScriptCampaign(inner, policy->encode(invalidPose));
+                            bool rejectedGeometry = false;
+                            try { InventoryHost invalidHost(descriptor, manifest, *restoredRegistry, *crypto,
+                                std::as_bytes(std::span(invalidImage))); }
+                            catch (const std::exception& error)
+                            { rejectedGeometry = std::string_view(error.what()).find("relocation overlaps") != std::string_view::npos; }
+                            require(rejectedGeometry && image(restored) == saved, "Recovery installed an obstructed pose/partial state");
+                        }
                         auto duplicate = prepare(restored, 6, 1, 101, request);
                         const auto quiet = restored.projectPersonalDialogue(authority, id<SessionId>(1),
                             id<ServerTick>(6), id<CanonicalRevision>(6), duplicate.get());

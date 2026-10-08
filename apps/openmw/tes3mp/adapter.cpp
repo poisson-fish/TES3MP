@@ -43,7 +43,7 @@ namespace TES3MP::OpenMWAdapter
             magicEffectVisualLoopsCapability(), playerLifeReplicationCapability(),
             committedDeathPresentationCapability(), spellApplicationPresentationCapability(),
             extendedSpellSourcesCapability(), playerAppearanceCapability(), playerRespawnCapability(),
-            playerPhysicsCapability(), ambientPresentationCapability(), personalDialogueCapability(), storyEncounterCapability() };
+            playerPhysicsCapability(), ambientPresentationCapability(), personalDialogueCapability(), storyEncounterCapability(), storyRelocationCapability() };
         std::ranges::sort(optional);
         optional.erase(std::unique(optional.begin(), optional.end()), optional.end());
         auto offer = std::get<CapabilityOffer>(

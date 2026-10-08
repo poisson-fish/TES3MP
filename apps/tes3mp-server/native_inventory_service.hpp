@@ -29,6 +29,7 @@ namespace TES3MP::ServerApp
         virtual void synchronizeCells(const CanonicalServerState&) {}
         virtual bool hasPersonalDialogue() const { return false; }
         virtual bool hasStoryEncounters() const { return false; }
+        virtual bool hasStoryRelocations() const { return false; }
         virtual std::vector<ReliablePersonalDialogue> projectPersonalDialogue(const CanonicalServerState&, SessionId,
             ServerTick, CanonicalRevision, const PreparedNativeInventory* = nullptr) const
         {

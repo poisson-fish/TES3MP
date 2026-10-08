@@ -3199,6 +3199,9 @@ namespace TES3MP::Native
                     || decoded.combat->npcPlacements.size() != 1
                     || story.last.sourceReference != decoded.combat->npcPlacements.front())
                     throw std::invalid_argument("Encounter origin differs from durable NPC placement/life");
+                if (story.relocation && !mBinding.mNavigatingActor->actorPoseClear(story.last.sourceReference,
+                        story.relocation->position, story.relocation->yaw))
+                    throw std::invalid_argument("Encounter relocation overlaps admitted geometry");
             }
             if (personalState) for (const auto& story : *personalState) for (const auto& npc : story.npcs)
             {
@@ -5356,7 +5359,13 @@ namespace TES3MP::Native
                 return id == ESM::RefId::stringRefId("player") ? player : ptr;
             }
         } resolver;
-        resolver.ptr = ptr;
+        MWWorld::ManualRef source(mRuntime.mStore, ptr.getCellRef().getRefId());
+        source.getPtr().getCellRef() = ptr.getCellRef();
+        auto sourcePose = ptr.getRefData().getPosition();
+        std::copy(frame.mPosition.begin(), frame.mPosition.end(), sourcePose.pos);
+        sourcePose.rot[2] = frame.mYaw;
+        source.getPtr().getRefData().setPosition(sourcePose);
+        resolver.ptr = source.getPtr();
         resolver.player = mRuntime.mActors[self]->getPtr();
         const auto& current = prior ? prior->state : *mPersonalScriptState;
         const auto owned = std::ranges::find_if(current, [&](const auto& state) {
@@ -5427,6 +5436,18 @@ namespace TES3MP::Native
             journalStamp);
         if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
             return reject(prepared.result.diagnostic.c_str());
+        if (prepared.result.executed)
+            if (const auto* pose = PersonalScripts::relocation(prepared.state, session->playerId().value()))
+            {
+                bool clear = false;
+                std::vector<uint64_t> hidden;
+                for (size_t i = 0; i < 2; ++i)
+                    if (i != self && mBinding.mNavigatingActor->hasPlayer(PlayerHullBase + i)) hidden.push_back(PlayerHullBase + i);
+                mBinding.mNavigatingActor->withHiddenActors(hidden, [&] {
+                    clear = mBinding.mNavigatingActor->actorPoseClear(request.speaker, pose->position, pose->yaw);
+                });
+                if (!clear) return reject("relocated source overlaps scoped geometry/body");
+            }
         if (prepared.result.executed)
         {
             prior->state = std::move(prepared.state);
@@ -6097,15 +6118,19 @@ namespace TES3MP::Native
             }
             std::vector<uint64_t> hidden;
             const auto scope = physicalScope(player->playerId());
-            if (scope != 1) hidden.push_back(scene->snapshot().mActor);
+            const auto* stories = personalState();
+            const auto* pose = stories ? PersonalScripts::relocation(*stories, player->playerId().value()) : nullptr;
+            if (scope != 1 && !pose) hidden.push_back(scene->snapshot().mActor);
             for (size_t peer = 0; peer < 2; ++peer)
                 if (peer != i && scene->hasPlayer(PlayerHullBase + peer)
                     && physicalScope(mBinding.mPlayers[peer]) != scope) hidden.push_back(PlayerHullBase + peer);
             scene->withPlayerHulls(hulls, [&] {
                 scene->withHiddenActors(hidden, [&] {
-                    step = body.prepareControlled(movement,
+                    const auto prepare = [&] { step = body.prepareControlled(movement,
                         {float(state.controls.right) / 1024, float(state.controls.forward) / 1024, float(state.controls.vertical) / 1024},
-                        radians(state.controls.pitch), radians(state.facing), actorDoorFrames(command.get()));
+                        radians(state.controls.pitch), radians(state.facing), actorDoorFrames(command.get())); };
+                    if (pose) scene->withActorPose(scene->snapshot().mActor, pose->position, pose->yaw, prepare);
+                    else prepare();
                 });
             });
             auto after = step->snapshot();
@@ -12560,8 +12585,21 @@ namespace TES3MP::Native
             });
             if (view.physicalScope != 1)
             {
-                view.hiddenActors = {mBinding.mNavigatingActor->snapshot().mActor};
-                view.actors.clear(); view.motions.clear(); result->containers.clear();
+                const auto* stories = personalState(scopeCandidate);
+                const auto* pose = stories ? PersonalScripts::relocation(*stories, session->playerId().value()) : nullptr;
+                if (pose)
+                {
+                    // Appearance and one inert destination hull only. No public
+                    // container access, combat/life simulation or transient cues.
+                    for (auto& motion : view.motions)
+                    { motion.position = pose->position; motion.yaw = pose->yaw; motion.velocity = {}; }
+                }
+                else
+                {
+                    view.hiddenActors = {mBinding.mNavigatingActor->snapshot().mActor};
+                    view.actors.clear(); view.motions.clear();
+                }
+                result->containers.clear();
             }
         }
         return result;

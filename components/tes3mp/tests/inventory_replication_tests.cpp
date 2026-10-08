@@ -67,6 +67,40 @@ namespace
         assert(decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(shared))
             == EquipmentSnapshotDecodeResult(shared));
         assert(storyEncounterCapability().value() == 41);
+        auto relocated = scoped; relocated.hiddenActors.clear();
+        relocated.actors.push_back({id<ContainerId>(npc)});
+        relocated.motions.push_back({npc, 2, {200, -32, 1}, {}, 1.5707963f});
+        assert(decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(relocated)) == EquipmentSnapshotDecodeResult(relocated));
+        for (int invalid = 0; invalid < 9; ++invalid)
+        {
+            auto bad = relocated;
+            switch (invalid)
+            {
+                case 0: bad.actors.clear(); break;
+                case 1: bad.motions.clear(); break;
+                case 2: bad.motions.front().placement = npc + 1; break;
+                case 3: bad.motions.front().velocity[0] = 1; break;
+                case 4: bad.motions.front().position[0] = 1000001; break;
+                case 5: bad.motions.front().yaw = 7; break;
+                case 6: bad.hiddenActors = {npc}; break;
+                case 7: bad.actors.push_back({id<ContainerId>(npc + 1)}); break;
+                case 8: bad.members.push_back({id<PlayerId>(2)}); break;
+            }
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeLatestWinsEquipmentSnapshot(encodeLatestWinsEquipmentSnapshot(bad))));
+        }
+        const auto posedBytes = encodeLatestWinsEquipmentSnapshot(relocated);
+        for (size_t size = 0; size < posedBytes.size(); ++size)
+            assert(std::holds_alternative<InventoryReplicationDecodeError>(decodeLatestWinsEquipmentSnapshot(std::span(posedBytes).first(size))));
+        assert(storyRelocationCapability().value() == 42);
+        const auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+        const std::array required{storyRelocationCapability()};
+        const std::array oldCapabilities{storyEncounterCapability()};
+        const std::array currentCapabilities{storyEncounterCapability(), storyRelocationCapability()};
+        const auto server = std::get<CapabilityOffer>(CapabilityOffer::create(versions, {}, required));
+        const auto oldClient = ClientHello::fromOffer(std::get<CapabilityOffer>(CapabilityOffer::create(versions, oldCapabilities, {})));
+        const auto currentClient = ClientHello::fromOffer(std::get<CapabilityOffer>(CapabilityOffer::create(versions, currentCapabilities, {})));
+        assert(std::holds_alternative<SessionRejected>(negotiateClientHello(oldClient, server)));
+        assert(std::holds_alternative<ServerHello>(negotiateClientHello(currentClient, server)));
         std::cout << "PASS encounter: scoped source suppression, malformed bounds/identities and shared compatibility\n";
     }
 

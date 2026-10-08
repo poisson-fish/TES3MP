@@ -417,8 +417,18 @@ namespace TES3MP
         std::span<const NativeActorMotion> motions, std::span<const PublicPlayerAppearance> appearances,
         bool characterBodies, std::span<const uint64_t> hiddenActors, uint64_t physicalScope)
     {
-        if (!physicalScope || hiddenActors.size() > 1 || (physicalScope == 1) != hiddenActors.empty())
+        if (!physicalScope || hiddenActors.size() > 1 || (physicalScope == 1 && !hiddenActors.empty()))
             return error(Code::InvalidCommandShape);
+        if (physicalScope != 1)
+        {
+            const bool removed = hiddenActors.size() == 1 && actors.empty() && motions.empty();
+            const bool relocated = hiddenActors.empty() && actors.size() == 1 && motions.size() == 1
+                && actors.front().actor.value() == motions.front().placement
+                && std::ranges::all_of(motions.front().position, [](float value) { return std::isfinite(value) && std::abs(value) <= 1e6f; })
+                && motions.front().velocity == std::array<float, 3>{} && std::isfinite(motions.front().yaw)
+                && std::abs(motions.front().yaw) <= 6.283186f;
+            if ((!removed && !relocated) || members.size() > 1) return error(Code::InvalidCommandShape);
+        }
         for (auto hidden : hiddenActors)
             if (!(hidden >> 63) || std::ranges::any_of(actors, [&](const auto& actor) { return actor.actor.value() == hidden; })
                 || std::ranges::any_of(motions, [&](const auto& motion) { return motion.placement == hidden; }))

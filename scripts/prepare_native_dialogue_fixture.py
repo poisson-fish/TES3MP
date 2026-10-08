@@ -19,11 +19,14 @@ parser.add_argument('--disposition', action='store_true', help='Exercise stock d
 parser.add_argument('--encounter', action='store_true', help='V86 source-only Disable; base fixture must contain one dry static interior/NPC')
 parser.add_argument('--return-path', action='store_true', help='Fresh V87 encounter with bounded shared-exploration return')
 parser.add_argument('--enable-source', action='store_true', help='Fresh V88 stock source Enable at safe return')
+parser.add_argument('--relocate-source', action='store_true', help='Fresh V89 inert source relocation within the admitted interior')
 for name in ('base-content', 'stock-config', 'profiles', 'content', 'runtime', 'binary', 'settings'):
     parser.add_argument('--' + name, type=lambda p: Path(p).resolve(), required=True)
 args = parser.parse_args()
+if args.relocate_source and (args.return_path or args.enable_source):
+    raise ValueError('Relocation return/restoration is not admitted')
 args.return_path |= args.enable_source
-args.encounter |= args.return_path
+args.encounter |= args.return_path or args.relocate_source
 content, runtime = args.content, args.runtime
 content.mkdir()
 shutil.copytree(args.base_content / 'meshes', content / 'meshes')
@@ -104,7 +107,8 @@ for number, direction in ((91, 'north'), (92, 'south')):
     for i, (choice, stage, outcome) in enumerate(((7, 20, 'taken'), (9, 30, 'declined')), 2):
         blob += info(names[i], names[i-1], names[i+1] if i+1 < len(names) else '', 0,
             text_prefix + f'Your {direction} passage is {outcome}.', f'set calls to calls + 1\nJournal {quest} {stage}'
-            + ('\nDisable' if args.encounter and choice == 7 else ''),
+            + ('\nnpc_door_actor->PositionCell 200 -32 1 5400 "NPC Door Contact Test"'
+               if args.relocate_source and choice == 7 else '\nDisable' if args.encounter and choice == 7 else ''),
             [('4JX0' + quest, 10), ('1500', choice)])
     blob += record(b'DIAL', string(b'NAME', quest) + sub(b'DATA', b'\4'))
     for i, stage in enumerate((10, 20, 30)):
@@ -124,7 +128,7 @@ subprocess.run([str(binary / 'tes3mp_native_bootstrap.exe'), str(config), str(ru
     *(['npc_door_actor'] * 2 if args.encounter else ['npc_hit_female', 'npc_hit_beast']), '1', '60:-100:1', str(args.settings),
     'player-physics', 'shared_script', shared, 'globals', '0'], check=True, cwd=binary)
 native = (runtime / 'native.txt').read_text().replace('native-inventory-80',
-    'native-inventory-88' if args.enable_source else 'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
+    'native-inventory-89' if args.relocate_source else 'native-inventory-88' if args.enable_source else 'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
 native += 'personal_scripts 2 ' + ' '.join(stories) + '\n'
 prior = (runtime / 'manifest.txt').read_text().strip()
 manifest = hashlib.sha256((prior + native).encode()).hexdigest()
@@ -149,5 +153,5 @@ for i, role in enumerate(('Alice', 'Bob')):
     (user / 'openmw.cfg').write_text((config / 'openmw.cfg').read_text()+'\n'+(runtime / 'client-content.cfg').read_text())
 (runtime / 'players.txt').write_text('\n'.join(rows)+'\n', newline='\n')
 shutil.copyfile(args.profiles, runtime / 'profiles.json')
-print('Prepared fresh ' + ('V88 Enable encounter' if args.enable_source else 'V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
+print('Prepared fresh ' + ('V89 relocation encounter' if args.relocate_source else 'V88 Enable encounter' if args.enable_source else 'V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
       + ': ' + ('disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))

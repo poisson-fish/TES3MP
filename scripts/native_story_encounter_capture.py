@@ -3,7 +3,7 @@ import math
 import time
 
 
-def verify_encounter(result, previous, evidence, command, wait, view, screenshot, latest, return_path=False):
+def verify_encounter(result, previous, evidence, command, wait, view, screenshot, latest, return_path=False, relocation=False):
     roles = ("Alice", "Bob")
     npc = "npc_door_actor"
     result["returned"] = bool(previous and previous.get("returned"))
@@ -30,12 +30,19 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
         row = command(role, f"actorprobe {x-45} {y} {z+64} {x+45} {y} {z+64}",
                       "traversal_collision_probe")
         expected = not removed
-        if row["physics_hit"] != expected or row["projectile_hit"] != expected or row["rendered_actors"] != int(expected):
+        rendered = 1 if relocation else int(expected)
+        if row["physics_hit"] != expected or row["projectile_hit"] != expected or row["rendered_actors"] != rendered:
             raise RuntimeError(f"{role} visibility/collision disagrees at {label}: {row}")
-        face(role, (x, y))
+        if relocation:
+            dest = command(role, 'actorprobe 155 -32 65 245 -32 65', "traversal_collision_probe")
+            at_destination = removed
+            if dest["physics_hit"] != at_destination or dest["projectile_hit"] != at_destination:
+                raise RuntimeError(f"{role} destination hull disagrees at {label}: {dest}")
+            result["checks"].append(dict(role=role, phase=label, relocated=at_destination, destination_probe=dest))
+        face(role, (200, -32) if relocation and removed else (x, y))
         screenshot(role, label)
         result["checks"].append(dict(role=role, phase=label, removed=removed,
-                                     rendered_npc=expected, collision_npc=expected, probe=row))
+                                     rendered_npc=bool(rendered), origin_collision=expected, probe=row))
 
     def recover(role):
         old = {s: view(role, s) for s in (91, 92)}
@@ -76,14 +83,14 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
         result["checks"].append(dict(restart=True, silent=True, independent_views=True))
     else:
         for role in roles:
-            probe(role, False, "before-removal")
+            probe(role, False, "before-relocation" if relocation else "before-removal")
         command("Alice", f'dialoguestart "{npc}"')
         command("Alice", 'dialoguetopic "north_passage_91 (story 91)"')
         wait(lambda: view("Alice", 91)["revision"] == 1, "A offered private completion")
         command("Alice", "dialoguechoice 7")
         wait(lambda: view("Alice", 91)["revision"] == 2 and view("Alice", 91)["quests"][0]["finished"],
-             "A completed stock Journal/Disable")
-        command("Alice", "close")
+             "A completed stock Journal/Position" if relocation else "A completed stock Journal/Disable")
+        command("Alice", "dialogueclose" if relocation else "close")
         sample_start = len(evidence.rows("Alice", "native_player_sample"))
         if view("Bob", 91)["quests"] or view("Bob", 91)["revision"]:
             raise RuntimeError("A consumed B's unfinished story")
@@ -92,7 +99,7 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
         wait(lambda: len(evidence.rows("Alice", "native_player_sample")) >= sample_start + 8,
              "new scope installed in live prediction")
         for role in roles:
-            probe(role, role == "Alice", "after-removal")
+            probe(role, role == "Alice", "after-relocation" if relocation else "after-removal")
 
         # B approaches and stops at the retained public hull; A follows the same
         # route beyond the disabled placement using committed server physics.
@@ -116,12 +123,23 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
                 raise RuntimeError("B's retained NPC did not block authoritative movement")
             result["checks"].append(dict(role=role, movement_collision=True, position=position(role),
                                          npc_position=[x, y, z], distance=distance))
+        if relocation:
+            face("Alice", (200, -32))
+            command("Alice", "autowalk")
+            wait(lambda: math.dist(position("Alice")[:2], (200, -32)) < 70, "A reached relocated destination hull")
+            time.sleep(1)
+            command("Alice", "autowalk")
+            wait(lambda: stopped("Alice"), "A stopped at relocated hull")
+            distance = math.dist(position("Alice")[:2], (200, -32))
+            if not 20 < distance < 70:
+                raise RuntimeError("A's destination did not block authoritative movement")
+            result["checks"].append(dict(role="Alice", destination_collision=True, position=position("Alice"), distance=distance))
         # B can still execute the unchanged stock topic after A has finished.
         command("Bob", f'dialoguestart "{npc}"')
         command("Bob", 'dialoguetopic "north_passage_91 (story 91)"')
         wait(lambda: view("Bob", 91)["revision"] == 1 and len(view("Bob", 91)["choices"]) == 2,
              "B retained unfinished opportunity")
-        command("Bob", "close")
+        command("Bob", "dialogueclose")
     for role in roles:
         recover(role)
     if return_path and not previous:

@@ -24,36 +24,31 @@ clients install private views silently. Stats accepted,
 acceptance remains open. NPC relationships/atomic recovery:
 `build/logs/m5-npc-state{,-host}.log`; journal: `build/logs/m5-journal-host.log`.
 
-**V86 terminal encounter:** fresh campaign/capability 41; one dry interior, one living
-unscripted NPC and static geometry. Stock source-only Disable discovers a private
-character/story scope through rollback/retry. Lookup, visibility, Bullet collision
-and combat preserve B's opportunity without copying inventories/lives/loot.
-Origins/scopes/banks/progression/receipts persist with gameplay; rejected writes
-install nothing, uncertain writes close authority. Paired removals are atomic.
-Scoped movement/resources continue; banks/new interactions suspend.
+**V86–88 encounter base:** capability 41/fresh images; one dry interior,
+one living unscripted NPC, static geometry. Stock Disable discovers private scope
+through rollback/retry; origins/banks/progression/receipts share gameplay durability.
+Lookup, visibility, Bullet collision and combat preserve B's opportunity without
+new inventories/lives/loot. Grounded separated bodies can return; fixed stock
+Enable restores only the original life. Completed stories stay frozen.
+Native: `build/logs/m5-encounter-{state,host,wire,stock}.log`,
+`build/logs/m5-return-{state,host-08}.log`, `build/logs/m5-enable-{state,host-02,stock}.log`.
+Rendered: `build/m5-encounter-{desktop-05,restart-01}/result.json`,
+`build/m5-return-{desktop,restart}-01/result.json`,
+`build/m5-enable-{desktop-02,restart-01}/result.json`.
+Recovery is silent; the stock GUI lifetime guard closes removed replicas.
 
-Synthetic proofs: `build/logs/m5-encounter-{state,host,wire,stock}.log`;
-rollback, scoped collision, bounded input/lookup and silent recovery.
-V85 NPC regression: `build/logs/m5-encounter-npc-regression.log`.
-Paired rendered/semantic proof: `build/m5-encounter-desktop-05/result.json` and
-`build/m5-encounter-restart-01/result.json`: A loses/passes the NPC; B retains
-rendering/collision/unfinished choices. Reconnect/restart are silent; the stock
-GUI lifetime guard closes removed replicas.
+**V89 relocation:** fresh images/capability 42; stock source-only
+Position/PositionCell/GetPos/GetAngle within the same admitted interior. Discovery
+rolls back/retries; finite coordinates ≤1,000,000, displacement ≤4,096,
+rotation ≤360 degrees, existing instruction/call budgets. Terminal inert destination
+visibility/collision persists with origin/banks/progression/receipts; B keeps the
+original opportunity. Overlap checks precede commit/recovery; rejected writes
+install nothing and uncertain writes close authority. No public inventory/life copies.
+Relocated scopes stay occupied; AI/combat, new interactions and return remain closed.
+Native: `build/logs/m5-relocation-{state,host-03,wire}.log`;
+V88 regression: `build/logs/m5-relocation-enable-regression.log`.
+Rendered: `build/m5-relocation-{desktop-04,restart-01}/result.json`; A retains destination, B unfinished; recovery silent.
 
-**V87 return:** fresh images/capability 41; grounded online living bodies rejoin
-at a quiescent hull separation boundary (minimum NPC/peer gaps 256/128 units).
-Dormant removal/origin and terminal bank/progression/receipts freeze; other banks resume.
-Proof: `build/logs/m5-return-{state,host-08}.log`,
-`build/m5-return-{desktop,restart}-01/result.json`.
-
-**V88 Enable:** fresh images, unchanged views; fixed stock source-NPC Enable at
-V87's boundary against the living original life. ≤16 instructions/call within
-the 16-call transaction budget. Restoration/occupancy persist atomically; terminal
-story/origin/receipts freeze. No public loot/life renewal.
-Native: `build/logs/m5-enable-{state,host-02,stock}.log`.
-Rendered: `build/m5-enable-{desktop-02,restart-01}/result.json`;
-NPC visibility/collision return, A stays complete, B unfinished, recovery silent.
-
-**Next:** bounded stock source-NPC relocation within the admitted interior under
+**Next:** prove relocated-scope return while retaining the destination outcome under
 the [M5 contract](DECISIONS.md#m5-implementation-contract). Escorts/mutable scenes,
 broader restoration and unchanged Seyda Neen/TR proofs remain open. M5 stays open.

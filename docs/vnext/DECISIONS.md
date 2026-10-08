@@ -258,27 +258,27 @@ share durability. Payload v2 rejects prior frames/images. Clients preserve early
 baselines, silently install stock entries and reopen other-story choices without
 expansion, restamping or replay. V85 scene edits remain closed.
 
-**Terminal encounter (V86).** One dry interior/unscripted NPC with static geometry
-bounds all interacting dependencies. Source-only stock Disable discovers scope,
-discards discovery effects and retries with a detached reference and identical causal
-occurrence; each attempt is instruction-bounded and charged. Persist character/story
-scope and placement/record/life origins with gameplay; never clone loot/lives.
-Lookup, peer/NPC presentation, Bullet hulls and combat share scope. Collision masks
-restore without allocation on failure. Terminal scopes suspend banks/new interactions;
-Enable and departure await separate admission. Capability 41/fresh images gate
-compatibility; exact receipts acknowledge silently without resolving removed speakers.
+**Terminal encounters (V86–88).** One dry interior/living unscripted NPC and
+static geometry bound dependencies. Source-only stock Disable rolls back discovery
+and retries a detached reference with the same occurrence; charge every bounded
+attempt. Persist character/story scope and placement/record/life origins with
+gameplay, without new loot/lives. Lookup, presentation, Bullet hulls and combat
+share scope; failed collision queries restore masks. Terminal banks/interactions
+suspend; receipts recover silently. V87 permits grounded online living bodies to
+rejoin at a quiescent NPC/peer hull boundary, retaining dormant outcomes. V88
+runs fixed stock Enable there against the original life, ≤16 instructions/one
+call; restoration/occupancy commit together. Fresh images/capability 41; stories,
+origins and receipts stay frozen, other banks resume. General restoration stays closed.
 
-**Dormant return (V87).** Only occupancy rejoins; freeze private removal/origin and
-terminal bank/progression/receipts. Other banks resume; completed-source requests
-reject. Grounded online living bodies return at a quiescent authoritative NPC/peer
-hull separation boundary. No teleport, public mutation or scene/loot renewal.
-Fresh images persist one-way dormancy; capability 41/views are unchanged.
-
-**Source restoration (V88).** Fixed stock Enable at V87's safe boundary restores
-only the detached living original source life. Charge ≤16 instructions and one
-call within the transaction budget. Persist Enable/occupancy atomically; freeze
-terminal story/origin/receipts. Fresh images, unchanged capability/views, silent
-recovery; general restoration remains closed.
+**Source relocation (V89).** Stock source-only Position/PositionCell and position
+reads use the same staged reference. Same interior; coordinates ≤1,000,000,
+displacement ≤4,096, rotation ≤360°; existing instruction/call limits. Persist
+original provenance and inert destination pose with banks/progression/receipts;
+validate scoped overlap before durability and geometry before recovery. Borrowed
+Bullet transforms restore on failure. No separate AI/combat/inventory/life writer.
+Relocated scopes remain occupied; return, escorts/cross-cell movement and mixed
+removal/relocation await admission. Capability 42 gates the bounded visible-pose
+wire form; ≤37 optional capabilities. Fresh images; silent recovery.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

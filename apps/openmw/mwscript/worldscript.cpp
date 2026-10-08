@@ -1,4 +1,5 @@
 #include "worldscript.hpp"
+#include "transformationextensions.hpp"
 
 #include "interpretercontext.hpp"
 #include "locals.hpp"
@@ -314,6 +315,7 @@ namespace MWScript
         if (dialogue) Dialogue::installJournalOpcodes(interpreter);
         if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
         if (referenceState) Misc::installDisableOpcodes(interpreter);
+        if (referenceState) Transformation::installPositionOpcodes(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
         interpreter.run(program ? *program : mProgram, *context, MaximumExecutedInstructions, trace);
@@ -325,7 +327,7 @@ namespace MWScript
     }
 
     Interpreter::Program WorldScript::compileResult(std::string_view text, bool physical, const ESM::RefId& reference,
-        bool restoration) const
+        bool restoration, bool relocation) const
     {
         require(mBank && text.size() <= MaximumSourceBytes && text.find('\0') == std::string_view::npos,
             "Dialogue result source exceeds bounds or lacks bank");
@@ -337,6 +339,8 @@ namespace MWScript
         if (physical) Misc::registerDisableOpcodes(extensions);
         require(!restoration || (physical && !reference.empty()), "Restoration lacks bounded source");
         if (restoration) Misc::registerEnableOpcodes(extensions);
+        require(!relocation || (physical && !reference.empty()), "Relocation lacks bounded source");
+        if (relocation) Transformation::registerPositionOpcodes(extensions);
         context.setExtensions(&extensions);
         std::string source = "begin " + std::string(mId.getRefIdString()) + "\n";
         for (const auto kind : {'s', 'l', 'f'})

@@ -1436,6 +1436,117 @@ namespace
             "A removes privately, B completes independently; late failure/waits, bound receipts and silent exact restart\n";
     }
 
+    void relocation(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        for (auto& definition : fixture.definitions)
+        {
+            definition.encounter = PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("room_e87")};
+            definition.dialogues[1].mInfo.front().mResultScript =
+                "set calls to calls + 1\nJournal journey_t37 20\nPosition 200 -32 1 5400\n"
+                "set personal_counter to speaker_r29->GetPos x\n"
+                "if GetAngle z != 90\nGoodbye\nendif\nMessageBox \"Relocated for this story\"";
+        }
+        PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true, false, false, true);
+        Resolver resolver; resolver.actor = fixture.actor.getPtr();
+        MWWorld::ManualRef foreignPlayer(fixture.content, id("speaker_r29")); resolver.player = foreignPlayer.getPtr();
+        const auto run = [&](const PersonalScripts& policy, const PersonalScripts::State& input,
+            uint64_t character, size_t budget = 16) {
+            const auto& instance = *std::ranges::find_if(input, [&](const auto& value) {
+                return value.last.character == character && value.last.story == 31;
+            });
+            resolver.expected = instance.last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = instance.eventCursor + 1;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
+            return policy.prepareIntent(input, character, 101, {31, 41, 3, instance.dialogueRevision, "passage_k61", -1},
+                "Room", fixture.content, resolver, budget, nullptr, {}, nullptr, JournalDate);
+        };
+        const auto initial = runtime.initial(); const auto before = runtime.encode(initial);
+        const auto alice = run(runtime, initial, 11);
+        if (!alice.result.executed) throw std::runtime_error("Relocation: " + alice.result.diagnostic);
+        require(alice.invocations == 2 && calls(alice.state[0].runtime) == 1
+            && alice.state[0].runtime.runtime.globals.front().mValue.getInteger() == 200
+            && alice.state[0].relocation && alice.state[0].relocation->position == std::array<float, 3>{200, -32, 1}
+            && std::abs(alice.state[0].relocation->yaw - 1.5707963f) < .000001f
+            && alice.state[0].encounterLife == 3 && PersonalScripts::physicalScope(alice.state, 11) == 2
+            && PersonalScripts::physicalScope(alice.state, 22) == 1 && !alice.state[1].relocation
+            && std::ranges::count(alice.result.presentation, "Relocated for this story") == 1,
+            "Scoped pose/read/rotation, discovery rollback or B's opportunity diverged");
+        require(runtime.encode(initial) == before && fixture.actor.getPtr().getRefData().getPosition().pos[0] != 200,
+            "Position mutated public source/bank");
+        require(run(runtime, initial, 11, 1).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Position retry escaped call budget");
+        const auto restored = runtime.restore(alice.image);
+        require(runtime.encode(restored) == alice.image && run(runtime, restored, 22).result.executed,
+            "Restart lost A's destination or B's original opportunity");
+        const auto duplicate = runtime.prepareIntent(restored, 11, 101, {31, 41, 3, 0, "passage_k61", -1},
+            "Room", fixture.content, resolver);
+        require(duplicate.result.outcome == SharedWorldScript::Outcome::Committed && !duplicate.result.executed
+            && duplicate.result.presentation.empty() && duplicate.response.empty(), "Recovery replayed relocation/output");
+        for (const std::string suffix : {"\nGoodbye", "\nDisable", "\nChoice \"Pending\" 7"})
+        {
+            auto definitions = fixture.definitions;
+            for (auto& definition : definitions) definition.dialogues[1].mInfo.front().mResultScript += suffix;
+            PersonalScripts failed(7, definitions, crypto, true, true, true, false, false, true);
+            const auto result = run(failed, failed.initial(), 11);
+            require(result.result.outcome == SharedWorldScript::Outcome::Rejected && result.state.empty()
+                && result.image.empty() && result.response.empty() && result.result.presentation.empty(),
+                "Late failure/mixed outcome leaked relocation/progression/output");
+        }
+        for (const std::string result : {"player->Position 200 -32 1 0", "set personal_counter to player->GetPos x",
+            "PositionCell 200 -32 1 0 other_room", "Position 5000 0 1 0", "Position 200 -32 1 21601",
+            "Disable\nPosition 200 -32 1 0"})
+        {
+            auto definitions = fixture.definitions;
+            for (auto& definition : definitions) definition.dialogues[1].mInfo.front().mResultScript = result;
+            PersonalScripts rejected(7, definitions, crypto, true, true, true, false, false, true);
+            const auto attempt = run(rejected, rejected.initial(), 11);
+            require(attempt.result.outcome == SharedWorldScript::Outcome::Rejected && attempt.state.empty(),
+                "Foreign source/read, cross-cell, unbounded pose or mixed result admitted");
+        }
+        auto named = fixture.definitions;
+        for (auto& definition : named) definition.dialogues[1].mInfo.front().mResultScript =
+            "speaker_r29->PositionCell 200 -32 1 5400 room_e87\nset personal_counter to GetPos x";
+        PersonalScripts cell(7, named, crypto, true, true, true, false, false, true);
+        require(run(cell, cell.initial(), 11).state[0].relocation == alice.state[0].relocation,
+            "Named PositionCell did not resolve the same scoped source");
+        resolver.wait = true;
+        require(run(runtime, initial, 11).result.outcome == SharedWorldScript::Outcome::Deferred,
+            "Unavailable relocation source did not defer"); resolver.wait = false;
+        auto invalid = restored; invalid[0].relocation->position[0] = std::numeric_limits<float>::infinity();
+        rejects([&] { runtime.encode(invalid); }, "Nonfinite durable pose accepted");
+        invalid = restored; invalid[0].relocation->position[0] = 5000;
+        rejects([&] { runtime.encode(invalid); }, "Unbounded durable displacement accepted");
+        invalid = initial; invalid[0].relocation = restored[0].relocation;
+        rejects([&] { runtime.encode(invalid); }, "Pose without source origin accepted");
+        for (size_t size = 0; size < alice.image.size(); ++size)
+            rejects([&] { runtime.restore(std::span(alice.image).first(size)); }, "Truncated pose image accepted");
+        std::vector<char> poseBytes;
+        const auto real = [&](float value) {
+            const uint64_t bits = std::bit_cast<uint32_t>(value);
+            for (unsigned i = 0; i < 8; ++i) poseBytes.push_back(char(bits >> (i * 8)));
+        };
+        for (float value : alice.state[0].relocation->origin) real(value);
+        for (float value : alice.state[0].relocation->position) real(value);
+        real(alice.state[0].relocation->yaw);
+        const auto pose = std::search(alice.image.begin(), alice.image.end(), poseBytes.begin(), poseBytes.end());
+        require(pose != alice.image.end(), "Durable pose encoding absent");
+        auto malformed = alice.image;
+        const auto offset = size_t(pose - alice.image.begin()) + 3 * 8;
+        const auto infinite = std::bit_cast<uint32_t>(std::numeric_limits<float>::infinity());
+        for (unsigned i = 0; i < 4; ++i) malformed[offset + i] = char(infinite >> (i * 8));
+        rejects([&] { runtime.restore(malformed); }, "Nonfinite pose passed recovery preflight");
+        auto old = fixture.definitions;
+        for (auto& definition : old) definition.dialogues[1].mInfo.front().mResultScript = "Disable";
+        PersonalScripts v88(7, old, crypto, true, true, true, true, true);
+        rejects([&] { runtime.restore(v88.encode(v88.initial())); }, "V89 silently migrated V88");
+        rejects([&] { v88.restore(alice.image); }, "V88 accepted relocation state");
+        rejects([&] { fixture.definitions[0].script->compileResult("Position 200 -32 1 0", true, id("speaker_r29")); },
+            "Previous encounter admitted Position");
+        std::cout << "relocation: stock implicit/named Position/PositionCell/GetPos/GetAngle; source/cell/pose bounds; "
+            "discovery retry, late rollback, private destination and B's original opportunity; exact silent recovery\n";
+    }
+
     void stock(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto);
@@ -1509,6 +1620,7 @@ int main(int argc, char** argv)
         else if (filter == "npc-state") disposition(*crypto, true);
         else if (filter == "encounter") encounter(*crypto);
         else if (filter == "enable") encounter(*crypto, true);
+        else if (filter == "relocation") relocation(*crypto);
         else if (filter == "substitutions")
             substitutions(*crypto);
         else if (filter == "journal") journal(*crypto);

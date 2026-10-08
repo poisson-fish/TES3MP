@@ -254,6 +254,20 @@ namespace MWScript
             throw std::runtime_error("Script service lacks scoped transaction");
     }
 
+    const ESM::Position& InterpreterContext::position(const MWWorld::Ptr& reference) const
+    {
+        if (!mExecution) return reference.getRefData().getPosition();
+        if (!mReferenceState) throw std::invalid_argument("Position read lacks staged physical scope");
+        return mReferenceState->position(*mExecution, reference);
+    }
+
+    void InterpreterContext::position(const MWWorld::Ptr& reference, const std::array<float, 3>& xyz,
+        float yaw, const ESM::RefId& cell) const
+    {
+        if (!mExecution || !mReferenceState) throw std::invalid_argument("Position lacks staged physical scope");
+        mReferenceState->position(*mExecution, reference, xyz, yaw, cell);
+    }
+
     void InterpreterContext::enable(const MWWorld::Ptr& reference) const
     {
         if (mExecution)

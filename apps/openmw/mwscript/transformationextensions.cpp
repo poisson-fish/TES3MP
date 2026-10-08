@@ -7,6 +7,8 @@
 #include <components/esm/util.hpp>
 
 #include <components/compiler/opcodes.hpp>
+#include <components/compiler/extensions.hpp>
+#include "transformationextensions.hpp"
 
 #include <components/interpreter/interpreter.hpp>
 #include <components/interpreter/opcodes.hpp>
@@ -237,15 +239,15 @@ namespace MWScript
                 {
                     if (axis[0] == 'x')
                     {
-                        ret = osg::RadiansToDegrees(ptr.getRefData().getPosition().rot[0]);
+                        ret = osg::RadiansToDegrees(static_cast<InterpreterContext&>(runtime.getContext()).position(ptr).rot[0]);
                     }
                     else if (axis[0] == 'y')
                     {
-                        ret = osg::RadiansToDegrees(ptr.getRefData().getPosition().rot[1]);
+                        ret = osg::RadiansToDegrees(static_cast<InterpreterContext&>(runtime.getContext()).position(ptr).rot[1]);
                     }
                     else if (axis[0] == 'z')
                     {
-                        ret = osg::RadiansToDegrees(ptr.getRefData().getPosition().rot[2]);
+                        ret = osg::RadiansToDegrees(static_cast<InterpreterContext&>(runtime.getContext()).position(ptr).rot[2]);
                     }
                 }
                 runtime.push(ret);
@@ -268,15 +270,15 @@ namespace MWScript
                 {
                     if (axis[0] == 'x')
                     {
-                        ret = ptr.getRefData().getPosition().pos[0];
+                        ret = static_cast<InterpreterContext&>(runtime.getContext()).position(ptr).pos[0];
                     }
                     else if (axis[0] == 'y')
                     {
-                        ret = ptr.getRefData().getPosition().pos[1];
+                        ret = static_cast<InterpreterContext&>(runtime.getContext()).position(ptr).pos[1];
                     }
                     else if (axis[0] == 'z')
                     {
-                        ret = ptr.getRefData().getPosition().pos[2];
+                        ret = static_cast<InterpreterContext&>(runtime.getContext()).position(ptr).pos[2];
                     }
                 }
                 runtime.push(ret);
@@ -388,6 +390,14 @@ namespace MWScript
                 std::string_view cellID = runtime.getStringLiteral(runtime[0].mInteger);
                 runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    if (cellID.empty() || cellID.size() > ExecutionContext::MaximumReferenceNameBytes)
+                        throw std::invalid_argument("PositionCell destination outside bounds");
+                    context.position(ptr, {x, y, z}, osg::DegreesToRadians(zRot / 60.f), ESM::RefId::stringRefId(cellID));
+                    return;
+                }
                 if (ptr.getContainerStore())
                     return;
 
@@ -460,6 +470,12 @@ namespace MWScript
                 Interpreter::Type_Float zRot = runtime[0].mFloat;
                 runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.position(ptr, {x, y, z}, osg::DegreesToRadians(zRot / 60.f), {});
+                    return;
+                }
                 if (!ptr.isInCell())
                     return;
 
@@ -809,6 +825,28 @@ namespace MWScript
                 MWBase::Environment::get().getWorld()->fixPosition();
             }
         };
+
+        void registerPositionOpcodes(Compiler::Extensions& extensions)
+        {
+            using namespace Compiler::Transformation;
+            extensions.registerInstruction("position", "ffffz", opcodePosition, opcodePositionExplicit);
+            extensions.registerInstruction("positioncell", "ffffczz", opcodePositionCell, opcodePositionCellExplicit);
+            extensions.registerFunction("getpos", 'f', "c", opcodeGetPos, opcodeGetPosExplicit);
+            extensions.registerFunction("getangle", 'f', "c", opcodeGetAngle, opcodeGetAngleExplicit);
+        }
+
+        void installPositionOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            using namespace Compiler::Transformation;
+            interpreter.installSegment5<OpPosition<ImplicitRef>>(opcodePosition);
+            interpreter.installSegment5<OpPosition<ExplicitRef>>(opcodePositionExplicit);
+            interpreter.installSegment5<OpPositionCell<ImplicitRef>>(opcodePositionCell);
+            interpreter.installSegment5<OpPositionCell<ExplicitRef>>(opcodePositionCellExplicit);
+            interpreter.installSegment5<OpGetPos<ImplicitRef>>(opcodeGetPos);
+            interpreter.installSegment5<OpGetPos<ExplicitRef>>(opcodeGetPosExplicit);
+            interpreter.installSegment5<OpGetAngle<ImplicitRef>>(opcodeGetAngle);
+            interpreter.installSegment5<OpGetAngle<ExplicitRef>>(opcodeGetAngleExplicit);
+        }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)
         {

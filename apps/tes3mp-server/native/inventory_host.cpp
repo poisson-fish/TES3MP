@@ -99,7 +99,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 88; ++candidate)
+            for (unsigned candidate = 3; candidate <= 89; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -1184,7 +1184,7 @@ namespace TES3MP::Native
                                 entry.globals, crypto, records), entry.bank[i].second});
                     }
                     if (start.text.starts_with("native-inventory-86\n") || start.text.starts_with("native-inventory-87\n")
-                        || start.text.starts_with("native-inventory-88\n"))
+                        || start.text.starts_with("native-inventory-88\n") || start.text.starts_with("native-inventory-89\n"))
                     {
                         const auto& binding = start.binding;
                         if (!binding.mNavigatingActor || binding.worldDomains().size() != 1
@@ -1208,9 +1208,10 @@ namespace TES3MP::Native
                     = std::make_shared<const PersonalScripts>(campaign, std::move(definitions), crypto,
                         start.personalScheduling, start.personalBanks,
                         (start.text.starts_with("native-inventory-85\n") || start.text.starts_with("native-inventory-86\n")
-                            || start.text.starts_with("native-inventory-87\n") || start.text.starts_with("native-inventory-88\n")),
+                            || start.text.starts_with("native-inventory-87\n") || start.text.starts_with("native-inventory-88\n")
+                            || start.text.starts_with("native-inventory-89\n")),
                         (start.text.starts_with("native-inventory-87\n") || start.text.starts_with("native-inventory-88\n")),
-                        start.text.starts_with("native-inventory-88\n"));
+                        start.text.starts_with("native-inventory-88\n"), start.text.starts_with("native-inventory-89\n"));
             }
             if (start.binding.mSummons)
             {

@@ -17,6 +17,8 @@ namespace MWScript
     namespace Transformation
     {
         void installOpcodes(Interpreter::Interpreter& interpreter);
+        void registerPositionOpcodes(Compiler::Extensions&);
+        void installPositionOpcodes(Interpreter::Interpreter&);
     }
 }
 

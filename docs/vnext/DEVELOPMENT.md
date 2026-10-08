@@ -78,19 +78,22 @@ Source-only stock ModDisposition persists ≤64 placement relationships/characte
 record/life validation restores the private base before filtering. Player stat writes,
 V85 scene changes and broader NPC restoration remain closed. Prior images never silently migrate;
 V81–84 personal output stays closed. Bootstrap emits V80.
-V86: fresh descriptor/capability 41; exactly one dry interior, one living unscripted
-NPC and static geometry. <=12 mirrored scripts reserve four discovery/retry calls;
-source-only stock Disable/GetDisabled. Terminal character/story scopes suspend banks
-and close new interactions, ground mutations and summons. Movement/resources continue;
-source origins/receipts recover without public loot/life copies. V87 fresh images
-retain dormant outcomes while grounded online living characters return during a
-quiescent physics tick: >=256 units from the NPC, >=128 from shared peers, enlarged by
-resource hull radii plus 32 units. The terminal bank/source stays closed; other banks
-resume. Capability 41/views are unchanged; V87 retains removal without Enable.
-V88 fresh images execute stock source-only Enable at that safe-return boundary;
-one living original life, ≤16 instructions/call within the existing 16-call tick
-budget. Restoration/occupancy persist together; terminal banks/receipts stay frozen.
-Other Enable callers and broader restoration remain closed; recovery is silent.
+V86–88: fresh descriptor/images, capability 41; one dry interior, one living
+unscripted NPC, static geometry. Source-only Disable/GetDisabled; ≤12 mirrored
+scripts reserve four discovery/retry calls. Terminal scopes suspend banks/new
+interactions, ground mutations and summons; movement/resources continue.
+V87 returns grounded online living bodies at a quiescent hull boundary:
+NPC/peer gaps ≥256/128 units, enlarged by hull radii plus 32. Dormant outcomes
+freeze; other banks resume. V88 runs fixed stock source Enable there against
+the original life, ≤16 instructions/one call in the 16-call tick budget.
+V89: fresh images/capability 42; source-only Position/PositionCell/GetPos/GetAngle,
+same interior, finite coordinates ≤1,000,000, displacement ≤4,096, rotation ≤360°.
+Stock discovery/retry and original instruction/call budgets apply. Validate final
+hull against scoped geometry/body before durability and geometry on recovery.
+One inert destination pose, no new NPC simulation/life/loot; relocated scopes
+remain occupied. No relocation return, cross-cell movement, escorts or mixed
+Disable/Position results. Scoped wire permits one suppressed source or one
+zero-velocity source pose; advertise ≤37 optional capabilities. Recovery is silent.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.
