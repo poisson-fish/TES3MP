@@ -1290,7 +1290,7 @@ namespace TES3MP
                                         requiresSpatialAdvance = false;
                                         disposition = mNativeInventory
                                                 && mNativeInventory->appendDialogueIntent(
-                                                    *prepared.mState, proposal, prepared.mNativeInventory)
+                                                    *prepared.mState, proposal, prepared.mNativeInventory, world)
                                             ? CommandDisposition::Applied
                                             : CommandDisposition::DialogueChoiceRejected;
                                     }

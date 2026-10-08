@@ -28,13 +28,16 @@ def verify(root: Path) -> None:
             # annotation. Validate its script path, not the entire command text.
             if item.startswith("scripts/") and not (root / item.split(maxsplit=1)[0]).is_file():
                 raise ValueError(f"missing registered test: {item}")
+    # Engine patches can also own stock components (for example interpreter text
+    # expansion). Check those exact registered files alongside the complete app tree.
+    paths = ["apps/openmw", *sorted(item for item in covered if not item.startswith("apps/openmw/"))]
     result = subprocess.run(
-        ["git", "-C", str(root), "diff", "--name-only", data["baseline_commit"], "--", "apps/openmw"],
+        ["git", "-C", str(root), "diff", "--name-only", data["baseline_commit"], "--", *paths],
         check=True, capture_output=True, text=True, encoding="utf-8")
     changed = {line for line in result.stdout.splitlines()
                if line and not line.startswith("apps/openmw/tes3mp/")}
     untracked = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", "apps/openmw"],
+        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", *paths],
         check=True, capture_output=True, text=True, encoding="utf-8")
     changed.update(line for line in untracked.stdout.splitlines()
                    if line and not line.startswith("apps/openmw/tes3mp/"))

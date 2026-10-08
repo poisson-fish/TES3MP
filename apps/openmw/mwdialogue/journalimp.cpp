@@ -1,6 +1,7 @@
 #include "journalimp.hpp"
 
 #include <iterator>
+#include <algorithm>
 
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/esmwriter.hpp>
@@ -8,6 +9,8 @@
 #include <components/esm3/queststate.hpp>
 
 #include <components/misc/strings/algorithm.hpp>
+#include <tes3mp/personal_dialogue.hpp>
+#include "../mwscript/dialoguestate.hpp"
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
@@ -20,6 +23,7 @@ namespace MWDialogue
 {
     Quest& Journal::getOrStartQuest(const ESM::RefId& id)
     {
+        if (mPersonalStory) throw std::runtime_error("Private journal requires an authoritative commit");
         TQuestContainer::iterator iter = mQuests.find(id);
 
         if (iter == mQuests.end())
@@ -30,6 +34,12 @@ namespace MWDialogue
 
     Quest* Journal::getQuestOrNull(const ESM::RefId& id)
     {
+        if (mPersonalStory)
+        {
+            auto& quests = mPersonalJournals.at(mPersonalStory).quests;
+            const auto found = quests.find(id);
+            return found == quests.end() ? nullptr : &found->second;
+        }
         TQuestContainer::iterator iter = mQuests.find(id);
         if (iter == mQuests.end())
         {
@@ -73,9 +83,50 @@ namespace MWDialogue
 
     void Journal::clear()
     {
+        mPersonalJournals.clear();
+        mPersonalStory = 0;
         mJournal.clear();
         mQuests.clear();
         mTopics.clear();
+    }
+
+    void Journal::installPersonalJournal(const TES3MP::ReliablePersonalDialogue& view, const MWWorld::ESMStore& content)
+    {
+        if (!TES3MP::validPersonalDialogue(view) || TES3MP::encodeReliablePersonalDialogue(view).empty())
+            throw std::invalid_argument("Invalid private journal view");
+        PersonalJournal staged;
+        for (const auto& quest : view.quests)
+        {
+            const auto id = ESM::RefId::stringRefId(quest.topic);
+            const auto& dialogue = *content.get<ESM::Dialogue>().find(id);
+            if (dialogue.mType != ESM::Dialogue::Journal) throw std::invalid_argument("Invalid private journal quest");
+            staged.quests.emplace(id, Quest(ESM::QuestState{id, quest.index, static_cast<unsigned char>(quest.finished)}, dialogue));
+        }
+        for (const auto& entry : view.entries)
+        {
+            const auto topic = ESM::RefId::stringRefId(entry.topic), info = ESM::RefId::stringRefId(entry.info);
+            const auto& dialogue = *content.get<ESM::Dialogue>().find(topic);
+            if (!MWScript::DialogueState::Stamp{entry.day, entry.month, entry.dayOfMonth}.valid()
+                || std::ranges::none_of(dialogue.mInfo, [&](const auto& value) {
+                    return value.mId == info && value.mData.mJournalIndex != -1; }))
+                throw std::invalid_argument("Invalid private journal entry");
+            ESM::JournalEntry saved;
+            saved.mTopic = topic; saved.mInfo = info; saved.mText = entry.text;
+            saved.mDay = entry.day; saved.mMonth = entry.month; saved.mDayOfMonth = entry.dayOfMonth;
+            // Install already expanded stock entries. No globals, clock, Lua or UI callbacks.
+            staged.quests.at(topic).insertEntry(saved);
+            if (!entry.text.empty()) staged.entries.emplace_back(saved);
+        }
+        if (mPersonalJournals.size() >= 8 && !mPersonalJournals.contains(view.story))
+            throw std::invalid_argument("Private journal story bound");
+        mPersonalJournals.insert_or_assign(view.story, std::move(staged));
+        if (!mPersonalStory) mPersonalStory = view.story;
+    }
+
+    void Journal::selectPersonalJournal(uint64_t story)
+    {
+        if (!story) { mPersonalJournals.clear(); mPersonalStory = 0; return; }
+        if (mPersonalJournals.contains(story)) mPersonalStory = story;
     }
 
     void Journal::addEntry(const ESM::RefId& id, int index, const MWWorld::Ptr& actor)
@@ -143,9 +194,10 @@ namespace MWDialogue
 
     int Journal::getJournalIndex(const ESM::RefId& id) const
     {
-        TQuestContainer::const_iterator iter = mQuests.find(id);
+        const auto& quests = getQuests();
+        TQuestContainer::const_iterator iter = quests.find(id);
 
-        if (iter == mQuests.end())
+        if (iter == quests.end())
             return 0;
 
         return iter->second.getIndex();

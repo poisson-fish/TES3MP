@@ -45,7 +45,7 @@ namespace MWScript
                     if constexpr (std::is_same_v<R, ExplicitRef>) R()(runtime, false);
                     ESM::RefId quest = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                     runtime.pop(); const int index = runtime[0].mInteger; runtime.pop();
-                    staged->journal(quest, index);
+                    staged->journal(quest, index, &runtime.getContext());
                     return;
                 }
                 MWWorld::Ptr ptr = R()(runtime, false); // required=false

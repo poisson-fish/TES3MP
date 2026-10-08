@@ -893,19 +893,21 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
         view.response = "Committed passage.";
         view.choices = { { "Proceed", 7 } };
         view.quests = { { "quest", 10, false } };
-        view.entries = { { "quest", "info" } };
+        view.entries = { { "quest", "info", "Committed for Ada ^PCName", 42, 0, 1 } };
         view.serverTick = value<ServerTick>(3);
         view.canonicalRevision = value<CanonicalRevision>(3);
         send();
         require(presentation.personal.size() == 2 && presentation.personal.back().response == "Committed passage.");
         require(coordinator->personalDialogue().front().response.empty()
-            && coordinator->personalDialogue().front().choices.size() == 1);
+            && coordinator->personalDialogue().front().choices.size() == 1
+            && coordinator->personalDialogue().front().entries == view.entries);
         send();
         require(presentation.personal.size() == 2);
         view.serverTick = value<ServerTick>(4);
         view.canonicalRevision = value<CanonicalRevision>(4);
         send();
-        require(presentation.personal.size() == 3 && presentation.personal.back().response.empty());
+        require(presentation.personal.size() == 3 && presentation.personal.back().response.empty()
+            && presentation.personal.back().messages.empty() && presentation.personal.back().entries == view.entries);
         if (personalProgress == 5)
         {
             const auto speaker = std::pair{ uint64_t(41), uint64_t(3) };
@@ -1343,6 +1345,8 @@ void chargenInstallation()
         early.speaker = 41; early.life = 3; early.topic = "early topic";
         early.choices = {{"Retained choice", 7}}; early.response = "Missed response";
         early.messages = {"Missed message"};
+        early.quests = {{"quest", 10, false}};
+        early.entries = {{"quest", "info", "Frozen journal", 42, 0, 1}};
         wire->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePersonalDialogue,
             encodeReliablePersonalDialogue(early), TransportChannel::ReliableOrdered);
         coordinator->frame(.01f);
@@ -1370,7 +1374,8 @@ void chargenInstallation()
         require(coordinator->characterLifecycle() == CharacterLifecycle::EstablishedCharacter);
 
         require(presentation.personal.size() == 1 && presentation.personal.front().response.empty()
-            && presentation.personal.front().messages.empty() && presentation.personal.front().choices == early.choices);
+            && presentation.personal.front().messages.empty() && presentation.personal.front().choices == early.choices
+            && presentation.personal.front().entries == early.entries);
 
         // Resume uses a new session generation and a coherent current image.
         control.pending = true; coordinator->frame(.01f);
@@ -1500,7 +1505,7 @@ int main(int argc, char** argv)
         view.response = "Committed response";
         view.choices = { { "Proceed", 7 } };
         view.quests = { { "quest", -2, false } };
-        view.entries = { { "quest", "info" } };
+        view.entries = { { "quest", "info", "Committed for Ada ^PCName", 42, 0, 1 } };
         view.topics = { "topic" };
         view.messages = { "Private message" };
         const auto encoded = encodeReliablePersonalDialogue(view);
@@ -1510,6 +1515,15 @@ int main(int argc, char** argv)
         malformed = encoded;
         malformed.push_back(std::byte{ 0 });
         require(!decodeReliablePersonalDialogue(malformed));
+        malformed = encoded; malformed[0] = std::byte{1};
+        require(!decodeReliablePersonalDialogue(malformed));
+        auto badJournal = view; badJournal.entries.front().dayOfMonth = 0;
+        require(encodeReliablePersonalDialogue(badJournal).empty());
+        badJournal = view; badJournal.entries.front().text.assign(4097, 'x');
+        require(encodeReliablePersonalDialogue(badJournal).empty());
+        badJournal = view; auto sameIdentity = badJournal.entries.front(); sameIdentity.text = "Changed";
+        badJournal.entries.push_back(sameIdentity);
+        require(encodeReliablePersonalDialogue(badJournal).empty());
         view.choices.push_back({ "duplicate", 7 });
         require(encodeReliablePersonalDialogue(view).empty());
         view.choices.resize(1);

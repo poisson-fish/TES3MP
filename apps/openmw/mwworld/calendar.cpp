@@ -6,9 +6,9 @@
 #include <components/esm3/timestamp.hpp>
 #include <stdexcept>
 
-namespace
+namespace MWWorld
 {
-    static int getDaysPerMonth(int month)
+    int Calendar::getDaysPerMonth(int month)
     {
         switch (month)
         {

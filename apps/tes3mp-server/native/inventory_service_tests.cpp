@@ -5592,7 +5592,8 @@ namespace TES3MP::Native::Testing
         bool strike, bool knockout, bool defense, bool shield, bool effectLifecycle, bool constantEffects, bool generalConstants, bool durableCasters, bool actorCasts, bool automaticCasts, bool weaponCompetition, bool fullSelection, bool castLifecycle, std::string_view encounterProfile, bool participantHits, bool weaponExecution, bool knockoutAnimation, bool zeroBase, bool interruptedCasts, bool deathHistory, bool statDrains, bool expandedEffects, bool reconnectCombat, bool playerCastLifecycle, bool castingInterference, std::string_view effectFamily, bool wetMovement, bool deepMovement)
     {
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
-        const bool personalIntents = dialogueDisposition || effectFamily == "dialogue-intents";
+        const bool dialogueJournal = effectFamily == "dialogue-journal";
+        const bool personalIntents = dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
         const bool personalDialogue = personalIntents || effectFamily == "dialogue";
         const bool personalBanks = personalDialogue || effectFamily == "script-banks";
         const bool personalScheduling = personalBanks || effectFamily == "personal-scheduling";
@@ -6306,7 +6307,8 @@ namespace TES3MP::Native::Testing
                         out.startRecord("DIAL"); dialogue.save(out); out.endRecord("DIAL");
                         ESM::DialInfo info; info.blank(); info.mId = ESM::RefId::stringRefId(std::string(name) + "_info");
                         if (dialogue.mType == ESM::Dialogue::Journal)
-                        { info.mData.mJournalIndex = 10; info.mResponse = "A milestone."; }
+                        { info.mData.mJournalIndex = 10; info.mResponse = dialogueJournal
+                            ? "Journal for %PCName|%PCClass|%cell|%ambient_counter_83|%pccrimelevel." : "A milestone."; }
                         else
                         {
                             info.mActor = personalIntents ? ESM::RefId{} : speaker.mId;
@@ -6356,7 +6358,7 @@ namespace TES3MP::Native::Testing
                             info.mId = ESM::RefId::stringRefId("finished_20");
                             info.mData.mJournalIndex = 20;
                             info.mQuestStatus = ESM::DialInfo::QS_Finished;
-                            info.mResponse = "Completed.";
+                            info.mResponse = dialogueJournal ? "Finished for ^PCName." : "Completed.";
                             out.startRecord("INFO");
                             info.save(out);
                             out.endRecord("INFO");
@@ -9477,7 +9479,7 @@ namespace TES3MP::Native::Testing
             }
             const auto image = [](const auto& owner) { return std::vector(owner.inventoryImage().begin(), owner.inventoryImage().end()); };
             CanonicalWorldTimeState worldTime; worldTime.daysPassed = 42; worldTime.day = 1; worldTime.year = 427;
-            const auto world = CanonicalWorldState::initial(worldTime, GlobalVariableCatalog::create({}).value(),
+            auto world = CanonicalWorldState::initial(worldTime, GlobalVariableCatalog::create({}).value(),
                 QuestJournalCatalog::create(testContentManifestId(), {}, {}).value(),
                 FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value()).value();
             auto initialized = native.prepareNativeTick(authority, id<ServerTick>(1), 1.f/30, {}, &world);
@@ -9618,7 +9620,7 @@ namespace TES3MP::Native::Testing
                     const auto prepare = [&](InventoryService& owner, uint64_t tick, uint64_t session, uint64_t command,
                                              DialogueIntent intent) {
                         std::unique_ptr<PreparedNativeInventory> input;
-                        require(owner.appendDialogueIntent(authority, proposal(session, command, intent), input),
+                        require(owner.appendDialogueIntent(authority, proposal(session, command, intent), input, &world),
                             "Authenticated dialogue intent rejected");
                         return owner.prepareNativePlayerTick(
                             authority, id<ServerTick>(tick), 1.f / 30, std::move(input), &world, {}, {});
@@ -9634,6 +9636,25 @@ namespace TES3MP::Native::Testing
                             + "|NPC Door Contact Test|" + std::to_string(state(service)[index * 2].runtime.runtime.globals.front().mValue.getInteger())
                             + "|" + std::to_string(index ? (dialogueDisposition ? 100000 : 29) : 11) + ".";
                     };
+                    const auto checkJournal = [&](const auto& view, size_t index) {
+                        if (!dialogueJournal) return;
+                        auto text = expectedResponse(index);
+                        text.replace(0, std::string("A private passage for ").size(), "Journal for ");
+                        const auto marker = "|" + std::to_string(state(service)[index * 2].runtime.runtime.globals.front().mValue.getInteger()) + "|";
+                        const auto offset = text.find(marker);
+                        require(offset != std::string::npos, "Journal fixture global marker absent");
+                        text.replace(offset, marker.size(), "|" + std::to_string(
+                            state(service)[index * 2].runtime.runtime.globals.front().mValue.getInteger() + 1) + "|");
+                        require(view.entries.size() == 1 && view.entries[0].text == text
+                            && view.entries[0].day == 42 && view.entries[0].month == 0 && view.entries[0].dayOfMonth == 1,
+                            "Host journal lost private expansion, result-time global or authoritative calendar");
+                    };
+                    if (dialogueJournal)
+                    {
+                        std::unique_ptr<PreparedNativeInventory> missingClock;
+                        require(!native.appendDialogueIntent(authority, proposal(1, 101, request), missingClock)
+                            && !missingClock && image(service) == before, "Missing host calendar mutated journal candidate");
+                    }
                     auto idle = native.prepareNativePlayerTick(
                         authority, id<ServerTick>(5), 1.f / 30, nullptr, &world, {}, {});
                     const auto idleViews = service.projectPersonalDialogue(
@@ -9652,6 +9673,7 @@ namespace TES3MP::Native::Testing
                             && alice[0].choices.size() == 1 && alice[0].quests[0].index == 10 && alice[1].revision == 0
                             && bob.size() == 2 && bob[0].revision == 0 && bob[0].response.empty(),
                         "Personal output crossed clients/stories");
+                    checkJournal(alice[0], 0);
                     require(candidate->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
                                 == CanonicalDurabilityResult::Rejected
                             && image(service) == before,
@@ -9660,12 +9682,13 @@ namespace TES3MP::Native::Testing
                         authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5));
                     require(rejectedView[0].response.empty() && rejectedView[0].choices.empty(),
                         "Rejected durability installed expanded response or choices");
+                    require(rejectedView[0].entries.empty(), "Rejected durability installed journal text/date");
                     candidate = prepare(native, 5, 1, 101, request);
                     // A second client joins the same detached gameplay transaction.
                     auto& detached = dynamic_cast<InventoryService&>(service);
                     std::unique_ptr<PreparedNativeInventory> paired;
-                    require(detached.appendDialogueIntent(authority, proposal(1, 101, request), paired)
-                            && detached.appendDialogueIntent(authority, proposal(2, 101, request), paired),
+                    require(detached.appendDialogueIntent(authority, proposal(1, 101, request), paired, &world)
+                            && detached.appendDialogueIntent(authority, proposal(2, 101, request), paired, &world),
                         "Two-client paired intent admission failed");
                     paired = detached.prepareNativePlayerTick(
                         authority, id<ServerTick>(5), 1.f / 30, std::move(paired), &world, {}, {});
@@ -9679,6 +9702,7 @@ namespace TES3MP::Native::Testing
                     require(pairedAlice[0].response == expectedResponse(0) && pairedBob[0].response == expectedResponse(1)
                         && pairedAlice[0].response != pairedBob[0].response,
                         "Paired substitutions shared character/class/bounty/global context");
+                    checkJournal(pairedAlice[0], 0); checkJournal(pairedBob[0], 1);
                     require(paired && paired->commit([](auto) {
                         return CanonicalDurabilityResult::Committed;
                     }) == CanonicalDurabilityResult::Committed,
@@ -9692,6 +9716,7 @@ namespace TES3MP::Native::Testing
                     require(baseline[0].revision == 1 && baseline[0].response.empty() && baseline[0].messages.empty()
                             && baseline[0].choices.size() == 1,
                         "Reconnect replayed output/lost choices");
+                    require(baseline[0].entries == pairedAlice[0].entries, "Silent baseline lost committed journal text/date");
                     auto resumedSessions
                         = std::vector(authority.activeSessions().begin(), authority.activeSessions().end());
                     const auto& originalSession = resumedSessions.front();
@@ -9718,27 +9743,39 @@ namespace TES3MP::Native::Testing
                     std::unique_ptr<PreparedNativeInventory> invalid;
                     auto forged = request;
                     forged.life++;
-                    require(!native.appendDialogueIntent(authority, proposal(1, 102, forged), invalid),
+                    require(!native.appendDialogueIntent(authority, proposal(1, 102, forged), invalid, &world),
                         "Stale speaker life admitted");
                     forged = request;
                     forged.story = 93;
-                    require(!native.appendDialogueIntent(authority, proposal(1, 102, forged), invalid),
+                    require(!native.appendDialogueIntent(authority, proposal(1, 102, forged), invalid, &world),
                         "Unowned story admitted");
                     forged = request;
                     forged.topic = "followup_p82";
                     forged.revision = 1;
                     const auto intact = image(service);
-                    require(!native.appendDialogueIntent(authority, proposal(1, 102, forged), invalid) && !invalid
+                    require(!native.appendDialogueIntent(authority, proposal(1, 102, forged), invalid, &world) && !invalid
                             && image(service) == intact,
                         "Late result rejection leaked locals/journal/presentation");
                     request.revision = 1;
                     request.choice = 7;
+                    if (dialogueJournal)
+                    {
+                        worldTime.daysPassed = 43; worldTime.day = 2;
+                        world = CanonicalWorldState::initial(worldTime, GlobalVariableCatalog::create({}).value(),
+                            QuestJournalCatalog::create(testContentManifestId(), {}, {}).value(),
+                            FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value()).value();
+                    }
                     auto choice = prepare(native, 7, 1, 102, request);
                     auto output = service.projectPersonalDialogue(
                         authority, id<SessionId>(1), id<ServerTick>(7), id<CanonicalRevision>(7), choice.get());
                     require(output[0].response == "Passage complete for " + completed[0].name() + "." && output[0].quests[0].finished
                             && output[0].choices.empty(),
                         "Choice result/progression did not stage");
+                    if (dialogueJournal)
+                        require(output[0].entries.size() == 2 && output[0].entries[0] == pairedAlice[0].entries[0]
+                            && output[0].entries[1].text == "Finished for " + completed[0].name() + "."
+                            && output[0].entries[1].day == 43 && output[0].entries[1].dayOfMonth == 2,
+                            "Choice journal changed prior text/date or used invocation time");
                     require(choice->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
                             == CanonicalDurabilityResult::Rejected,
                         "Choice rollback failed");
@@ -9758,6 +9795,7 @@ namespace TES3MP::Native::Testing
                         authority, id<SessionId>(1), id<ServerTick>(7), id<CanonicalRevision>(7));
                     require(restoredView[0].response.empty() && restoredView[0].messages.empty() && restoredView[0].choices.size() == 1,
                         "Exact restart replayed expanded response or lost pending choice");
+                    require(restoredView[0].entries == baseline[0].entries, "Exact restart changed journal text/date");
                     choice = prepare(restored, 7, 1, 102, request);
                     std::vector<std::byte> uncertain;
                     require(choice->commit([&](auto bytes) {
@@ -9774,6 +9812,7 @@ namespace TES3MP::Native::Testing
                     require(image(newRestart.service()) == uncertain && quiet[0].revision == 2
                             && quiet[0].response.empty() && quiet[0].quests[0].finished,
                         "Uncertain restart repeated choice output/progression");
+                    require(quiet[0].entries == output[0].entries, "Uncertain recovery changed durable journal text/date");
                     auto independent = newRestart.service().projectPersonalDialogue(
                         authority, id<SessionId>(2), id<ServerTick>(8), id<CanonicalRevision>(8));
                     require(independent[0].revision == 1 && !independent[0].quests[0].finished

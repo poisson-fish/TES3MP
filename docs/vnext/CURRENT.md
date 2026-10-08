@@ -4,51 +4,33 @@
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp):
 60 Hz NPC/door/player physics substeps; 30 Hz commits.
 
-**V77 exploration:** radius 0–7; 256 cells, 37 actors, 8,192 references/region,
-256 navigation tiles/actor. Shared collision/streaming retain state and frozen hulls.
-Synthetic paired split/regroup/restart under 100ms ±25ms/10% loss/reorder:
-`build/exploration-desktop-{06,restart-01}/result.json`. Scripts/leveled/corpses reject;
-full AI packages remain M5.
-
-**V78 characters:** stock/TR creation, starters, inventory/appearance and recovery
-verified synthetically; starters accepted 2026-10-04.
+**V77/V78 migration:** bounded shared exploration and character creation retain
+split/regroup/restart, streaming, stock/TR bodies and starter evidence:
+`build/exploration-desktop-{06,restart-01}/result.json`,
 `build/character-desktop-fixture-02/{complete-03,restart-02}/result.json`.
-Incomplete creation cannot simulate; TR appearance-only, OS input unverified.
-Resume retains inactivity/expiry/generation/replay bounds (`build/logs/resume-inactivity.log`).
+TR remains appearance-only. Resume inactivity/replay bounds:
+`build/logs/resume-inactivity.log`.
 
-**Death/respawn:** capability 37; ordinary inventory retained.
-`build/logs/respawn-{protocol,adapter,native}.log`, `player-lives-regression.log`,
-`chargen-respawn-launch-build.log`. Same-cell correction:
-(`build/logs/respawn-same-cell-{client-build,locomotion}.log`). Operator accepted
-revival/Seyda Neen safe-point respawn, 2026-10-04; unarmed confirmed.
-
-**Exterior trace:** `build/logs/seyda-six-actors.log`: six actors/nine interiors;
+**Death/respawn:** ordinary inventory retained; owner accepted revival/safe-point
+respawn, 2026-10-04. Same-cell and corpse recovery:
+`build/logs/respawn-same-cell-{client-build,locomotion}.log`,
+`build/logs/peer-loot-{reconnect-retry,restart}.log`.
+Seyda Neen six-actor/nine-interior trace: `build/logs/seyda-six-actors.log`;
 scripts/scripted inventory await M5.
 
-**M4 combat/body:** melee accepted 2026-10-05; Argonian recoil,
-fatigue/HUD and crab-contact damage passed (`build/logs/melee-recoil-{baseline,fixed}.log`).
-Peer/creature corpse transfers/recovery retain identities/counts
-(`build/logs/peer-loot-{reconnect-retry,restart}.log`). Corpse accepted 2026-10-05;
-body/door/NPC 2026-10-06:
+**M4 accepted, 2026-10-06:** body/door/NPC:
 `build/m4-user-acceptance-body-door-npc-v78-20261005-230100/operator-acceptance.json`.
-Split/regroup/restart retain bodies/inventories/resources/NPC identities;
-stale/resampled contradictions reject atomically. Doors/travel/quit survive capture exhaustion; relay reclaims idle endpoints.
+Contact/recoil: `build/logs/melee-recoil-{baseline,fixed}.log`.
 
-**V79 player cutover:** capability 38; latest-wins controls/acknowledgements, fixed
-stock physics/shared player/NPC/door hulls, durable frames/resources and bounded replay.
-Retry/expiry/epoch/rollback/restart/ground:
-`build/logs/player-{physics-native,physics-scene,physics-world,controls-protocol,controls-queue,controls-server,physics-adapter,physics-angles}.log`.
-Two-desktop heading/jump/stop/contact/reconnect:
-`build/player-physics-desktop-impaired-16/result.json`; screenshots inspected.
-100ms ±25ms/10% loss/reorder: corrections max 19.3/23.7,
-mean 1.3/1.5 units (budgets 35/8).
-Exact stopped positions/reconnect: `build/player-physics-desktop-restart-04/result.json`.
-Clock recovery: `build/logs/player-physics-clock.log`.
-Fresh campaigns require `player-physics`; V78 retains migration; movement skills await M5.
-
-**V79 accepted, 2026-10-06:**
+**V79 accepted, 2026-10-06:** capability 38; stock player physics, shared hulls,
+durable resources/frames and bounded replay. Impaired heading/jump/stop/contact:
+`build/player-physics-desktop-impaired-16/result.json`; corrections max
+19.3/23.7, mean 1.3/1.5 units (budgets 35/8), screenshots inspected.
+Exact recovery: `build/player-physics-desktop-restart-04/result.json`.
+Owner sign-off/128-input backpressure/combat/death/loot/respawn:
 `build/m4-user-acceptance-player-v79-20261006-live-01/operator-acceptance.json`.
-128-input backpressure passed; combat/death/loot/respawn retained. Abort resolved.
+Clock: `build/logs/player-physics-clock.log`. Fresh campaigns require
+`player-physics`; V78 retains migration; movement skills await M5.
 
 **M5 shared execution:** [runtime](../../apps/tes3mp-server/native/world_script.hpp)
 Stock compiler/opcodes; atomic globals/locals/messages and GSCR/GLOB recovery.
@@ -130,6 +112,14 @@ Private branches/waits/rollback/retry/silent recovery:
 restart: `build/m5-dialogue-disposition-{desktop-02,restart-01}/result.json`
 (synthetic; no screenshots). Relationship writes remain closed.
 
-**Next:** journal text/timestamps ([M5 contract](DECISIONS.md#m5-implementation-contract)).
-Physical results/NPC restoration, scoped recovery and unchanged Seyda Neen/TR
-proofs remain; M5 stays open.
+**Journal text/timestamps:** V85 commits bounded stock expansion from authenticated
+character/speaker, result-time globals and authoritative calendar with private
+progression. Stock journal views isolate stories; notifications follow durability;
+recovery neither expands nor restamps/replays. Prior policies/frames reject.
+Synthetic isolation/waits/rollback/bounds/recovery/client:
+`build/logs/m5-journal{,-stock,-intents,-substitutions,-client,-legacy,-host,-adapter,-installation}.log`.
+Desktop visual acceptance remains open.
+
+**Next:** scoped physical dialogue results/NPC restoration
+([M5 contract](DECISIONS.md#m5-implementation-contract)); scoped recovery and
+unchanged Seyda Neen/TR proofs remain. M5 stays open.

@@ -44,6 +44,8 @@ namespace TES3MP
     struct DialogueEntry
     {
         std::string topic, info;
+        std::string text;
+        int32_t day = 0, month = 0, dayOfMonth = 0;
         bool operator==(const DialogueEntry&) const = default;
     };
     // Full personal progression is recoverable. Response/messages are transient:

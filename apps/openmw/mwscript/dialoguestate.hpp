@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+namespace Interpreter { class Context; }
+
 namespace MWScript
 {
     // Borrowed transaction state. No Environment, singleton journal or UI writes.
@@ -17,7 +19,27 @@ namespace MWScript
         static constexpr size_t MaximumRecords = 16;
         static constexpr size_t MaximumInfos = 64;
         static constexpr size_t MaximumEntries = 64;
-        struct Entry { ESM::RefId topic, info; bool operator==(const Entry&) const = default; };
+        static constexpr size_t MaximumTextBytes = 4096;
+        static constexpr size_t MaximumJournalTextBytes = 16384;
+        struct Stamp
+        {
+            int day = 0, month = 0, dayOfMonth = 0;
+            bool valid() const;
+            bool operator==(const Stamp&) const = default;
+        };
+        struct Entry
+        {
+            ESM::RefId topic, info;
+            std::string text;
+            Stamp stamp;
+            bool operator==(const Entry&) const = default;
+        };
+        struct JournalText
+        {
+            Stamp stamp;
+            virtual ~JournalText() = default;
+            virtual std::string expand(std::string_view, Interpreter::Context&) const = 0;
+        };
         struct State
         {
             std::vector<ESM::QuestState> quests;
@@ -36,7 +58,8 @@ namespace MWScript
         const ESM::Dialogue& record(const ESM::RefId&, ESM::Dialogue::Type) const;
         int journalIndex(const ESM::RefId&) const;
         void setJournalIndex(const ESM::RefId&, int);
-        void journal(const ESM::RefId&, int);
+        void journal(const ESM::RefId&, int, Interpreter::Context* = nullptr);
+        void setJournalText(const JournalText& value) { mJournalText = &value; }
         void addTopic(const ESM::RefId&);
         void validate() const;
         void validateExecution(const ExecutionContext& value) const;
@@ -45,6 +68,7 @@ namespace MWScript
         State& mState;
         std::span<const ESM::Dialogue> mRecords;
         bool mChoicesAllowed;
+        const JournalText* mJournalText = nullptr;
         ESM::QuestState& quest(const ESM::RefId&);
     };
 }

@@ -1,12 +1,19 @@
 #include "dialoguestate.hpp"
 #include "../mwdialogue/quest.hpp"
 #include "../mwdialogue/journalentry.hpp"
+#include "../mwworld/calendar.hpp"
 #include <components/misc/strings/algorithm.hpp>
+#include <components/interpreter/context.hpp>
 #include <algorithm>
 #include <stdexcept>
 
 namespace MWScript
 {
+    bool DialogueState::Stamp::valid() const
+    {
+        return day >= 0 && month >= 0 && month < 12 && dayOfMonth >= 1
+            && dayOfMonth <= MWWorld::Calendar::getDaysPerMonth(month);
+    }
     namespace
     {
         void require(bool condition)
@@ -61,7 +68,7 @@ namespace MWScript
         value.setIndex(index, false);
         value.write(saved);
     }
-    void DialogueState::journal(const ESM::RefId& id, int index)
+    void DialogueState::journal(const ESM::RefId& id, int index, Interpreter::Context* context)
     {
         const auto& dialogue = record(id, ESM::Dialogue::Journal);
         const auto found = std::ranges::find_if(dialogue.mInfo,
@@ -69,11 +76,30 @@ namespace MWScript
         // Stock Journal permits missing indices and advances the index only.
         if (found == dialogue.mInfo.end() || index == -1)
         { if (journalIndex(id) < index) setJournalIndex(id, index); return; }
-        const Entry key{id, found->mId};
-        const bool duplicate = std::ranges::find(mState.entries, key) != mState.entries.end();
-        if (duplicate && !found->mResponse.empty())
-        { if (journalIndex(id) < index) setJournalIndex(id, index); return; }
+        const auto existing = std::ranges::find_if(mState.entries, [&](const auto& entry) {
+            return entry.topic == id && entry.info == found->mId; });
+        const bool duplicate = existing != mState.entries.end();
+        if (duplicate && (mJournalText ? !existing->text.empty() : !found->mResponse.empty()))
+        {
+            if (journalIndex(id) < index)
+            {
+                setJournalIndex(id, index);
+                if (mJournalText) { require(context); context->messageBox("#{sJournalEntry}", {}); }
+            }
+            return;
+        }
         require(duplicate || mState.entries.size() < MaximumEntries);
+        Entry key{id, found->mId};
+        if (mJournalText)
+        {
+            require(context && mJournalText->stamp.valid());
+            key.text = mJournalText->expand(found->mResponse, *context);
+            key.stamp = mJournalText->stamp;
+            size_t bytes = key.text.size();
+            for (const auto& entry : mState.entries) bytes += entry.text.size();
+            require(key.text.size() <= MaximumTextBytes && key.text.find('\0') == key.text.npos
+                && bytes <= MaximumJournalTextBytes);
+        }
         auto& saved = quest(id);
         MWDialogue::Quest value(saved, dialogue);
         MWDialogue::JournalEntry entry; entry.mTopic = id; entry.mInfoId = found->mId;
@@ -90,8 +116,15 @@ namespace MWScript
                 if (other.mFinished && Misc::StringUtils::ciEqual(name(record(other.mTopic, ESM::Dialogue::Journal)), name(dialogue)))
                     other.mFinished = 0;
         }
-        // Text/timestamps/personal journal UI remain closed in this slice.
-        if (!duplicate) mState.entries.push_back(key);
+        // Empty entries still participate in stock quest restart/finished semantics.
+        const bool notify = mJournalText && !key.text.empty();
+        if (!duplicate) mState.entries.push_back(std::move(key));
+        else if (!key.text.empty())
+        {
+            mState.entries.erase(existing);
+            mState.entries.push_back(std::move(key));
+        }
+        if (notify) context->messageBox("#{sJournalEntry}", {});
     }
     void DialogueState::addTopic(const ESM::RefId& id)
     {
@@ -110,13 +143,19 @@ namespace MWScript
             require(value.mFinished <= 1);
             for (size_t j = 0; j < i; ++j) require(value.mTopic != mState.quests[j].mTopic);
         }
+        size_t textBytes = 0;
         for (size_t i = 0; i < mState.entries.size(); ++i)
         {
             const auto& entry = mState.entries[i]; const auto& topic = record(entry.topic, ESM::Dialogue::Journal);
             require(std::ranges::find(mState.quests, entry.topic, &ESM::QuestState::mTopic) != mState.quests.end());
             require(std::ranges::any_of(topic.mInfo, [&](const auto& info) {
                 return info.mId == entry.info && info.mData.mJournalIndex != -1; }));
-            for (size_t j = 0; j < i; ++j) require(entry != mState.entries[j]);
+            textBytes += entry.text.size();
+            require(entry.text.size() <= MaximumTextBytes && entry.text.find('\0') == entry.text.npos
+                && textBytes <= MaximumJournalTextBytes
+                && (mChoicesAllowed ? entry.stamp.valid() : (entry.text.empty() && entry.stamp == Stamp{})));
+            for (size_t j = 0; j < i; ++j)
+                require(entry.topic != mState.entries[j].topic || entry.info != mState.entries[j].info);
         }
         for (size_t i = 0; i < mState.topics.size(); ++i)
         {

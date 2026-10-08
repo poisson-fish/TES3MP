@@ -13,6 +13,13 @@ namespace MWDialogue
         TEntryContainer mJournal;
         TQuestContainer mQuests;
         TTopicContainer mTopics;
+        struct PersonalJournal
+        {
+            TEntryContainer entries;
+            TQuestContainer quests;
+        };
+        std::map<uint64_t, PersonalJournal> mPersonalJournals;
+        uint64_t mPersonalStory = 0;
 
     private:
         Topic& getTopic(const ESM::RefId& id);
@@ -47,11 +54,15 @@ namespace MWDialogue
         ///< Removes the last topic response added for the given topicId and actor name.
         /// \note topicId must be lowercase
 
-        const TEntryContainer& getEntries() const override { return mJournal; }
+        const TEntryContainer& getEntries() const override
+        { return mPersonalStory ? mPersonalJournals.at(mPersonalStory).entries : mJournal; }
 
         const TTopicContainer& getTopics() const override { return mTopics; }
 
-        const TQuestContainer& getQuests() const override { return mQuests; }
+        const TQuestContainer& getQuests() const override
+        { return mPersonalStory ? mPersonalJournals.at(mPersonalStory).quests : mQuests; }
+        void installPersonalJournal(const TES3MP::ReliablePersonalDialogue&, const MWWorld::ESMStore&) override;
+        void selectPersonalJournal(uint64_t story) override;
 
         size_t countSavedGameRecords() const override;
 

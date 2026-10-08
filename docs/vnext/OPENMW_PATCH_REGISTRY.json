@@ -6,7 +6,7 @@
       "id": "M5-003",
       "slice": "character/story dialogue transactions, authenticated intents and committed presentation",
       "owner": "OpenMW dialogue Filter, Quest/Topic and MWScript stock compiler/opcodes",
-      "purpose": "Stock INFO ordering, comparisons and result bytecode use explicit character/story state. V84 retains trusted calls. V85 binds authenticated topics and offered choices to a living placed unscripted NPC and the owned primary bank; current reach, sight, life and complete execution identity validate. Journals, topics, choices, bank writes and revision/command receipts join gameplay durability. Stock response substitutions read authenticated character/speaker/content, staged faction ranks/bounty, authoritative cell names and owned globals before result execution. Bounded expansion propagates errors/waits and isolates global-name lookup; unsupported action bindings reject. Reliable private views carry expanded responses, literal messages and progression metadata; reconnect is silent. The stock client manager presents committed views without re-expansion, local filters, results, Journal, World or Lua writes. Bounds and policy/content identities reject incompatible images. Authenticated thresholds 0-100 use the shared stock disposition calculation with staged character stats/social state/disease and selected speaker base/Charm; unavailable contexts discard output. Physical results, greetings, journal text/timestamps and unsupported filter services remain closed.",
+      "purpose": "Stock INFO ordering, comparisons and result bytecode use explicit character/story state. V84 retains trusted calls. V85 binds authenticated topics and offered choices to a living placed unscripted NPC and the owned primary bank; current reach, sight, life and complete execution identity validate. Journals, topics, choices, bank writes and revision/command receipts join gameplay durability. Stock response substitutions read authenticated character/speaker/content, staged faction ranks/bounty, authoritative cell names and owned globals before result execution. Bounded expansion propagates errors/waits and isolates global-name lookup; unsupported action bindings reject. Reliable private views carry expanded responses, literal messages and progression metadata; reconnect is silent. The stock client manager presents committed views without re-expansion, local filters, results, Journal, World or Lua writes. Bounds and policy/content identities reject incompatible images. Authenticated thresholds 0-100 use the shared stock disposition calculation with staged character stats/social state/disease and selected speaker base/Charm; unavailable contexts discard output. V85 Journal commands capture bounded stock text using authenticated character/speaker and current result globals, stamp canonical game-calendar days/month/day, and persist private entries with gameplay. Private payload v2 installs stock journal/quest records per story without re-expansion, restamping, Lua or notices; committed journal update messages share gameplay durability. Old frames/images reject. Physical results, greetings and unsupported filter services remain closed.",
       "paths": [
         "apps/openmw/mwdialogue/filter.cpp",
         "apps/openmw/mwdialogue/filter.hpp",
@@ -25,9 +25,11 @@
         "components/interpreter/defines.hpp",
         "apps/openmw/mwworld/cell.cpp",
         "apps/openmw/mwworld/cell.hpp",
-        "apps/openmw/mwworld/worldimp.cpp",
         "apps/openmw/mwmechanics/disposition.cpp",
-        "apps/openmw/mwmechanics/disposition.hpp"
+        "apps/openmw/mwmechanics/disposition.hpp",
+        "apps/openmw/mwbase/journal.hpp",
+        "apps/openmw/mwdialogue/journalimp.cpp",
+        "apps/openmw/mwdialogue/journalimp.hpp"
       ],
       "tests": [
         "tes3mp_native_dialogue_tests isolation",
@@ -45,7 +47,9 @@
         "tes3mp_server_app_tests personal-dialogue-ingress",
         "tes3mp_combat_interest_projection_tests personal-dialogue",
         "tes3mp_native_dialogue_tests disposition",
-        "tes3mp_native_loadout_tests dialogue-disposition NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
+        "tes3mp_native_loadout_tests dialogue-disposition NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS",
+        "tes3mp_native_dialogue_tests journal",
+        "tes3mp_native_loadout_tests dialogue-journal NEW_SCRATCH CONFIG_DIRECTORY NAV_SETTINGS"
       ],
       "disposition": "V85 authenticated personal dialogue and presentation through gameplay durability; V84 trusted migration preserved. Stock filters read detached character attributes, skills and resources without admitting result stat writes. Early baselines survive character installation; other-story pending choices restore silently. Two rendered clients prove private divergent progression and reconnect/restart without transient replay using semantic input. Physical results and broader NPC restoration remain closed.",
       "removal_condition": "OpenMW supplies equivalent explicit scoped dialogue filtering, result execution and transactional progression interfaces"

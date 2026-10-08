@@ -152,6 +152,7 @@ namespace MWDialogue
         const auto speaker = multiplayer->dialogueSpeaker(mActor);
         if (!speaker || view.speaker != speaker->first || view.life != speaker->second)
             return;
+        MWBase::Environment::get().getJournal()->selectPersonalJournal(view.story);
         mLastTopic = ESM::RefId::stringRefId(view.topic);
         mChoices.clear();
         for (const auto& choice : view.choices)
@@ -189,6 +190,7 @@ namespace MWDialogue
             if (views.empty())
                 return false;
             mPersonalStory = views.front().story;
+            MWBase::Environment::get().getJournal()->selectPersonalJournal(mPersonalStory);
             presentPersonalDialogue(views.front());
             return true;
         }
@@ -510,6 +512,7 @@ namespace MWDialogue
             if (pending != views.end())
             {
                 mPersonalStory = story;
+                MWBase::Environment::get().getJournal()->selectPersonalJournal(story);
                 mPersonalCallback = callback;
                 mPersonalRevision = UINT64_MAX;
                 auto restored = *pending;
@@ -521,6 +524,7 @@ namespace MWDialogue
             if (speaker && multiplayer->submitPersonalDialogue(story, *speaker, topic, -1))
             {
                 mPersonalStory = story;
+                MWBase::Environment::get().getJournal()->selectPersonalJournal(story);
                 mPersonalCallback = callback;
             }
             return;

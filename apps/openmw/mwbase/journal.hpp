@@ -22,6 +22,8 @@ namespace ESM
     class ESMReader;
     class ESMWriter;
 }
+namespace TES3MP { struct ReliablePersonalDialogue; }
+namespace MWWorld { class ESMStore; }
 
 namespace MWBase
 {
@@ -73,6 +75,9 @@ namespace MWBase
         virtual const TTopicContainer& getTopics() const = 0;
 
         virtual const TQuestContainer& getQuests() const = 0;
+        virtual void installPersonalJournal(const TES3MP::ReliablePersonalDialogue&, const MWWorld::ESMStore&) = 0;
+        // Zero clears the private session cache and restores stock journal access.
+        virtual void selectPersonalJournal(uint64_t story) = 0;
 
         virtual size_t countSavedGameRecords() const = 0;
 

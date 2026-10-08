@@ -446,7 +446,7 @@ namespace TES3MP::Native
             return mBinding.mPersonalScripts && mBinding.mPersonalScripts->intents();
         }
         bool appendDialogueIntent(const CanonicalServerState&, const ServerCommandProposal&,
-            std::unique_ptr<PreparedNativeInventory>&) override;
+            std::unique_ptr<PreparedNativeInventory>&, const CanonicalWorldState* = nullptr) override;
         std::vector<ReliablePersonalDialogue> projectPersonalDialogue(const CanonicalServerState&, SessionId,
             ServerTick, CanonicalRevision, const PreparedNativeInventory* = nullptr) const override;
         std::optional<ReliableAmbientBatch> projectAmbient(const CanonicalServerState&,

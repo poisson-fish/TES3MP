@@ -4272,6 +4272,7 @@ namespace TES3MP::OpenMWAdapter
         const ReliablePersonalDialogue& view, MonotonicInstant) noexcept
     try
     {
+        MWBase::Environment::get().getJournal()->installPersonalJournal(view, *MWBase::Environment::get().getESMStore());
         MWBase::Environment::get().getDialogueManager()->presentPersonalDialogue(view);
         for (const auto& message : view.messages)
             MWBase::Environment::get().getWindowManager()->messageBox(message);
@@ -4481,5 +4482,6 @@ namespace TES3MP::OpenMWAdapter
     void DesktopPresentation::clear() noexcept
     {
         mImpl->clear();
+        try { MWBase::Environment::get().getJournal()->selectPersonalJournal(0); } catch (...) {}
     }
 }

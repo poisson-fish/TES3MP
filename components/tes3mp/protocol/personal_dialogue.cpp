@@ -13,7 +13,8 @@ namespace TES3MP
         }
         struct Writer
         {
-            std::vector<std::byte> bytes{ std::byte{ 1 } };
+            std::vector<std::byte> bytes;
+            explicit Writer(unsigned version = 1) : bytes{std::byte(version)} {}
             void word(uint64_t value)
             {
                 for (unsigned i = 0; i < 8; ++i)
@@ -29,10 +30,10 @@ namespace TES3MP
         struct Reader
         {
             std::span<const std::byte> bytes;
-            explicit Reader(std::span<const std::byte> input, size_t bound)
+            explicit Reader(std::span<const std::byte> input, size_t bound, unsigned version = 1)
                 : bytes(input)
             {
-                if (bytes.empty() || bytes.size() > bound || bytes[0] != std::byte{ 1 })
+                if (bytes.empty() || bytes.size() > bound || bytes[0] != std::byte(version))
                     throw std::invalid_argument("dialogue frame");
                 bytes = bytes.subspan(1);
             }
@@ -116,11 +117,19 @@ namespace TES3MP
                 || std::ranges::any_of(
                     std::span(v.quests).first(i), [&](const auto& q) { return q.topic == v.quests[i].topic; }))
                 return false;
+        size_t journalBytes = 0;
         for (size_t i = 0; i < v.entries.size(); ++i)
+        {
+            const auto& e = v.entries[i];
+            journalBytes += e.text.size();
             if (!textValid(v.entries[i].topic, 128, false) || !textValid(v.entries[i].info, 128, false)
-                || std::ranges::find(std::span(v.entries).first(i), v.entries[i]) != std::span(v.entries).first(i).end()
+                || !textValid(e.text, 4096) || journalBytes > 16384
+                || e.day < 0 || e.month < 0 || e.month >= 12 || e.dayOfMonth < 1 || e.dayOfMonth > 31
+                || std::ranges::any_of(std::span(v.entries).first(i), [&](const auto& prior) {
+                    return prior.topic == e.topic && prior.info == e.info; })
                 || std::ranges::none_of(v.quests, [&](const auto& q) { return q.topic == v.entries[i].topic; }))
                 return false;
+        }
         for (size_t i = 0; i < v.topics.size(); ++i)
             if (!textValid(v.topics[i], 128, false)
                 || std::ranges::find(std::span(v.topics).first(i), v.topics[i]) != std::span(v.topics).first(i).end())
@@ -160,7 +169,7 @@ namespace TES3MP
     {
         if (!validPersonalDialogue(v))
             return {};
-        Writer w;
+        Writer w(2);
         for (auto n : { v.targetSessionId.value(), v.targetSessionGeneration.value(), v.serverTick.value(),
                  v.canonicalRevision.value(), v.story, v.revision, v.speaker, v.life, v.command })
             w.word(n);
@@ -184,6 +193,10 @@ namespace TES3MP
         {
             w.string(e.topic);
             w.string(e.info);
+            w.string(e.text);
+            w.word(std::bit_cast<uint32_t>(e.day));
+            w.word(std::bit_cast<uint32_t>(e.month));
+            w.word(std::bit_cast<uint32_t>(e.dayOfMonth));
         }
         w.word(v.topics.size());
         for (const auto& t : v.topics)
@@ -198,7 +211,7 @@ namespace TES3MP
     std::optional<ReliablePersonalDialogue> decodeReliablePersonalDialogue(std::span<const std::byte> bytes)
     try
     {
-        Reader r(bytes, MaximumPersonalDialogueBytes);
+        Reader r(bytes, MaximumPersonalDialogueBytes, 2);
         ReliablePersonalDialogue v{ r.strong<SessionId>(), r.strong<SessionGeneration>(), r.strong<ServerTick>(),
             r.strong<CanonicalRevision>() };
         v.story = r.word();
@@ -218,7 +231,7 @@ namespace TES3MP
             v.quests.push_back({ std::move(t), i, bool(b) });
         }
         for (size_t n = r.count(64); n--;)
-            v.entries.push_back({ r.string(128), r.string(128) });
+            v.entries.push_back({ r.string(128), r.string(128), r.string(4096), r.integer(), r.integer(), r.integer() });
         for (size_t n = r.count(16); n--;)
             v.topics.push_back(r.string(128));
         for (size_t n = r.count(8); n--;)

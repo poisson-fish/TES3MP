@@ -22,15 +22,19 @@
 #include <components/esm3/loadgmst.hpp>
 #include <components/esm3/loadregn.hpp>
 #include <components/esm3/loadscpt.hpp>
+#include <components/esm3/esmreader.hpp>
+#include <components/esm3/esmwriter.hpp>
 #include <components/interpreter/defines.hpp>
 #include <components/interpreter/installopcodes.hpp>
 #include <iostream>
+#include <sstream>
 
 namespace
 {
     using namespace TES3MP;
     using namespace TES3MP::Native;
     ESM::RefId id(std::string_view name) { return ESM::RefId::stringRefId(name); }
+    constexpr MWScript::DialogueState::Stamp JournalDate{42, 0, 1};
     void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
     template<class F> void rejects(F&& operation, const char* message)
     { try { operation(); } catch (const std::exception&) { return; } throw std::runtime_error(message); }
@@ -287,13 +291,14 @@ namespace
             execution.sourceReference = 41;
             execution.sourceLife = 3;
             resolver.expected = execution;
-            return runtime.prepareIntent(state, character, command, request, "", fixture.content, resolver);
+            return runtime.prepareIntent(state, character, command, request, "", fixture.content, resolver,
+                PersonalScripts::MaximumInvocationsPerTransaction, nullptr, {}, nullptr, JournalDate);
         };
         DialogueIntent request{ 31, 41, 3, 0, "passage_k61", -1 };
         auto prepared = run(11, 101, request);
         require(prepared.result.executed && prepared.response == "Your passage awaits."
                 && prepared.state[0].choices.size() == 2
-                && prepared.result.presentation == std::vector<std::string>{ "Private notice" }
+                && prepared.result.presentation == std::vector<std::string>{ "Private notice", "#{sJournalEntry}" }
                 && prepared.state[0].dialogueRevision == 1 && prepared.state[1].dialogueRevision == 0
                 && prepared.state[2].dialogueRevision == 0,
             "Intent routing/presentation leaked between characters/stories");
@@ -351,7 +356,8 @@ namespace
         resolver.expected.sourceReference = 41;
         resolver.expected.sourceLife = 3;
         resolver.actor = bad.actor.getPtr();
-        auto failed = badRuntime.prepareIntent(badState, 11, 101, request, "", bad.content, resolver);
+        auto failed = badRuntime.prepareIntent(badState, 11, 101, request, "", bad.content, resolver,
+            PersonalScripts::MaximumInvocationsPerTransaction, nullptr, {}, nullptr, JournalDate);
         require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.image.empty()
                 && failed.response.empty() && failed.result.presentation.empty(),
             "Late rejected result leaked presentation/progression");
@@ -406,7 +412,7 @@ namespace
             resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
             auto intent = request; intent.story = story;
             return runtime.prepareIntent(state, character, 101, intent, "", fixture.content, resolver,
-                PersonalScripts::MaximumInvocationsPerTransaction, snapshot);
+                PersonalScripts::MaximumInvocationsPerTransaction, snapshot, {}, nullptr, JournalDate);
         };
         std::vector<C::Function> functions{C::Function_PcStrength, C::Function_PcIntelligence,
             C::Function_PcWillpower, C::Function_PcAgility, C::Function_PcSpeed, C::Function_PcEndurance,
@@ -603,7 +609,7 @@ namespace
             resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
             return policy.prepareIntent(input, character, command, {story, 41, 3, revision, "passage_k61", choice},
                 "", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction,
-                playerStats, {}, speakerStats);
+                playerStats, {}, speakerStats, JournalDate);
         };
         const auto low = run(runtime, state, 11, 31, &statsA, &speaker);
         const auto high = run(runtime, state, 22, 31, &statsB, &speaker);
@@ -729,7 +735,8 @@ namespace
             resolver.expected.causalEvent = found->eventCursor + 1;
             resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
             return policy.prepareIntent(input, character, command, {story, 41, 3, 0, "passage_k61", -1},
-                "Context Cell", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction, stats, customClass);
+                "Context Cell", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction, stats, customClass,
+                nullptr, JournalDate);
         };
         MWScript::InterpreterContext stock(nullptr, sa.getPtr(), a.getPtr(), fixture.content, &statsA);
         const auto expected = Interpreter::fixDefinesDialog(builtins, stock) + "|Context Cell|7|0|-3|1.5|%unknown|100%";
@@ -737,7 +744,7 @@ namespace
         require(prepared.result.executed && prepared.response == expected
             && prepared.state[0].runtime.runtime.globals.front().mValue.getInteger() == 1
             && prepared.state[1].dialogueRevision == 0 && prepared.state[2].dialogueRevision == 0
-            && prepared.result.presentation == std::vector<std::string>{"Private notice"}
+            && prepared.result.presentation == std::vector<std::string>{"Private notice", "#{sJournalEntry}"}
             && runtime.encode(state) == before,
             "Response differs from stock speaker/character substitution or pre-result global ordering");
         require(run(runtime, state, 11, 31, &statsA).image == prepared.image, "Substitution rollback retry differs");
@@ -872,6 +879,8 @@ namespace
             }
         } callback;
         MWBase::Environment environment;
+        MWDialogue::Journal journal;
+        environment.setJournal(journal);
         environment.setMultiplayerCoordinator(&coordinator);
         Compiler::Extensions extensions;
         Translation::Storage translation;
@@ -951,6 +960,187 @@ namespace
                "source-life/story isolation; progression and silent reentry; no Journal/World/Lua services installed\n";
     }
 
+    void journal(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        for (const auto& [name, display] : std::vector<std::pair<const char*, const char*>>{
+            {"reader_a", "Ada ^PCName"}, {"reader_b", "Beren"}, {"guide_a", "Guide A"}, {"guide_b", "Guide B"}})
+        {
+            ESM::NPC value; value.blank(); value.mId = id(name); value.mName = display;
+            fixture.content.insertStatic(value);
+        }
+        MWWorld::ManualRef a(fixture.content, id("reader_a")), b(fixture.content, id("reader_b"));
+        MWWorld::ManualRef sa(fixture.content, id("guide_a")), sb(fixture.content, id("guide_b"));
+        MWMechanics::NpcStats statsA(fixture.content), statsB(fixture.content);
+        statsA.setBounty(11); statsB.setBounty(29);
+        const std::string source = "%PCName|^name|%PCClass|%cell|%personal_counter|%pccrimelevel";
+        for (auto& definition : fixture.definitions)
+        {
+            for (auto& info : definition.dialogues[0].mInfo)
+                if (info.mData.mJournalIndex == 10 || info.mData.mJournalIndex == 20) info.mResponse = source;
+            for (auto& topic : definition.dialogues)
+                if (topic.mType == ESM::Dialogue::Topic)
+                    for (auto& info : topic.mInfo) info.mActor = {};
+        }
+        PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true);
+        auto state = runtime.initial(); const auto before = runtime.encode(state);
+        Resolver resolver; resolver.actor = sa.getPtr();
+        const auto run = [&](const PersonalScripts& policy, const PersonalScripts::State& input,
+            uint64_t character = 11, uint64_t story = 31, uint64_t command = 101,
+            int choice = -1, std::optional<MWScript::DialogueState::Stamp> stamp = JournalDate,
+            std::string_view topic = "passage_k61", std::string_view customClass = "Custom scholar") {
+            const auto& current = *std::ranges::find_if(input, [&](const auto& value) {
+                return value.last.character == character && value.last.story == story; });
+            resolver.player = character == 11 ? a.getPtr() : b.getPtr();
+            resolver.expected = current.last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = current.eventCursor + 1;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
+            return policy.prepareIntent(input, character, command,
+                {story, 41, 3, current.dialogueRevision, std::string(topic), choice}, "Authoritative cell",
+                fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction,
+                character == 11 ? &statsA : &statsB, customClass, nullptr, stamp);
+        };
+        auto first = run(runtime, state);
+        require(first.result.executed, first.result.diagnostic.c_str());
+        const auto& entry = first.state[0].dialogue.entries.front();
+        require(entry.text == "Ada ^PCName|Guide A|Custom scholar|Authoritative cell|1|11"
+            && entry.stamp == JournalDate && first.state[1].dialogue.entries.empty()
+            && first.state[2].dialogue.entries.empty() && runtime.encode(state) == before,
+            "Journal expansion/stamp lost authenticated context, result-time global or private ownership");
+        require(run(runtime, state).image == first.image, "Journal rollback retry changed bytes");
+        resolver.actor = sb.getPtr();
+        const auto second = run(runtime, state, 22);
+        require(second.result.executed && second.state[1].dialogue.entries.front().text
+            == "Beren|Guide B|Custom scholar|Authoritative cell|1|29" && second.state[0].dialogue.entries.empty(),
+            "Journal crossed authenticated characters/speakers");
+        resolver.actor = sa.getPtr();
+        require(run(runtime, state, 11, 32).state[2].dialogue.entries.front() == entry,
+            "Second story inherited or lost its personal journal");
+        for (auto stamp : {std::optional<MWScript::DialogueState::Stamp>{},
+            std::optional<MWScript::DialogueState::Stamp>{{42, 1, 29}},
+            std::optional<MWScript::DialogueState::Stamp>{{-1, 0, 1}}})
+        {
+            const auto failed = run(runtime, state, 11, 31, 101, -1, stamp);
+            require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty()
+                && failed.image.empty() && failed.response.empty() && failed.result.presentation.empty()
+                && runtime.encode(state) == before, "Missing/invalid journal calendar leaked results");
+        }
+        resolver.waitPlayer = true;
+        auto failed = run(runtime, state);
+        require(failed.result.outcome == SharedWorldScript::Outcome::Deferred && failed.state.empty()
+            && failed.response.empty() && failed.result.presentation.empty() && runtime.encode(state) == before,
+            "Unavailable journal player fell back or leaked results");
+        resolver.waitPlayer = false;
+        const std::string oversized(4096, 'x');
+        failed = run(runtime, state, 11, 31, 101, -1, JournalDate, "passage_k61", oversized);
+        require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty()
+            && runtime.encode(state) == before, "Expanded journal text exceeded its bound");
+        auto badDefinitions = fixture.definitions;
+        for (auto& definition : badDefinitions)
+            definition.dialogues[1].mInfo.front().mResultScript += "\nGoodbye";
+        PersonalScripts bad(7, badDefinitions, crypto, true, true, true);
+        failed = run(bad, bad.initial());
+        require(failed.result.outcome == SharedWorldScript::Outcome::Rejected && failed.state.empty()
+            && failed.image.empty() && failed.response.empty() && failed.result.presentation.empty(),
+            "Late failure leaked expanded journal text/date");
+        state = first.state;
+        auto finished = run(runtime, state, 11, 31, 102, 7, MWScript::DialogueState::Stamp{43, 0, 2});
+        require(finished.result.executed && finished.state[0].dialogue.entries.size() == 2
+            && finished.state[0].dialogue.entries[0] == entry
+            && finished.state[0].dialogue.entries[1].stamp == MWScript::DialogueState::Stamp{43, 0, 2},
+            "Later journal entry restamped/re-expanded prior text");
+        state = finished.state;
+        const auto duplicate = run(runtime, state, 11, 31, 103, -1,
+            MWScript::DialogueState::Stamp{44, 0, 3}, "followup_p82");
+        require(duplicate.result.executed && duplicate.state[0].dialogue.entries == state[0].dialogue.entries
+            && duplicate.state[0].dialogue.quests.front().mState == 77,
+            "Duplicate/missing Journal index changed committed text/date");
+        PersonalScripts restarted(7, fixture.definitions, crypto, true, true, true);
+        auto restored = restarted.restore(finished.image);
+        require(restarted.encode(restored) == finished.image && restored[0].dialogue.entries == state[0].dialogue.entries,
+            "Journal recovery re-expanded or restamped entries");
+        resolver.expected = restored[0].last;
+        auto replay = restarted.prepareIntent(restored, 11, 102, restored[0].dialogueRequest, "Changed cell",
+            fixture.content, resolver);
+        require(!replay.result.executed && replay.response.empty() && replay.result.presentation.empty(),
+            "Recovered journal command replayed output");
+        auto invalid = restored; invalid[0].dialogue.entries[0].stamp = {42, 1, 29};
+        rejects([&] { runtime.encode(invalid); }, "Invalid durable calendar accepted");
+        invalid = restored; invalid[0].dialogue.entries[0].text.assign(4097, 'x');
+        rejects([&] { runtime.encode(invalid); }, "Oversized durable text accepted");
+        invalid = restored; auto copied = invalid[0].dialogue.entries[0]; copied.text = "Contradictory duplicate";
+        invalid[0].dialogue.entries.push_back(copied);
+        rejects([&] { runtime.encode(invalid); }, "Duplicate identity with changed text accepted");
+        auto corrupt = finished.image; corrupt.pop_back();
+        rejects([&] { runtime.restore(corrupt); }, "Truncated journal image accepted");
+        corrupt = finished.image; corrupt[7] = '5';
+        rejects([&] { runtime.restore(corrupt); }, "Prior journal policy silently upgraded");
+        // Stock suppresses empty expanded entries in its duplicate journal search.
+        // A later speaker can make the same INFO visible for the first time.
+        auto emptyDefinitions = fixture.definitions;
+        for (auto& definition : emptyDefinitions)
+            std::ranges::find_if(definition.dialogues[0].mInfo, [](const auto& info) {
+                return info.mData.mJournalIndex == 10; })->mResponse = "%name";
+        ESM::NPC unnamed; unnamed.blank(); unnamed.mId = id("unnamed_guide");
+        fixture.content.insertStatic(unnamed);
+        MWWorld::ManualRef unnamedGuide(fixture.content, unnamed.mId); resolver.actor = unnamedGuide.getPtr();
+        PersonalScripts emptyRuntime(7, emptyDefinitions, crypto, true, true, true);
+        auto empty = run(emptyRuntime, emptyRuntime.initial());
+        require(empty.result.executed && empty.state[0].dialogue.entries[0].text.empty(),
+            "Empty stock substitution produced a visible journal entry");
+        empty = run(emptyRuntime, empty.state, 11, 31, 102, 7);
+        ESM::NPC guide; guide.blank(); guide.mId = id("named_guide"); guide.mName = "Guide G64";
+        fixture.content.insertStatic(guide);
+        MWWorld::ManualRef namedGuide(fixture.content, guide.mId); resolver.actor = namedGuide.getPtr();
+        auto visible = run(emptyRuntime, empty.state, 11, 31, 103, -1,
+            MWScript::DialogueState::Stamp{44, 0, 3}, "followup_p82");
+        require(visible.result.executed && visible.state[0].dialogue.entries.size() == 2
+            && visible.state[0].dialogue.entries.back().info == id("journal_10")
+            && visible.state[0].dialogue.entries.back().text == "Guide G64"
+            && visible.state[0].dialogue.entries.back().stamp == MWScript::DialogueState::Stamp{44, 0, 3},
+            "Previously empty Journal INFO suppressed later stock text/date");
+        resolver.actor = sa.getPtr();
+        std::ostringstream journalContent(std::ios::binary);
+        ESM::ESMWriter writer; writer.setVersion(ESM::VER_130); writer.save(journalContent);
+        for (auto dialogue : fixture.definitions.front().dialogues)
+        {
+            dialogue.mStringId = dialogue.mId.toString();
+            writer.startRecord("DIAL"); dialogue.save(writer); writer.endRecord("DIAL");
+            for (const auto& info : dialogue.mInfo)
+            { writer.startRecord("INFO"); info.save(writer); writer.endRecord("INFO"); }
+        }
+        writer.close(); ESM::ESMReader reader;
+        reader.open(std::make_unique<std::istringstream>(journalContent.str(), std::ios::binary), {});
+        ESM::Dialogue* loaded = nullptr; fixture.content.load(reader, nullptr, loaded);
+        fixture.content.getWritable<ESM::Dialogue>().setUp();
+        MWDialogue::Journal presentation;
+        auto view = PersonalScripts::view(restored[0], *SessionId::fromValue(1), SessionGeneration::initial(),
+            ServerTick::initial(), CanonicalRevision::initial());
+        require(decodeReliablePersonalDialogue(encodeReliablePersonalDialogue(view)) == view,
+            "Private journal wire text/date did not round trip");
+        presentation.installPersonalJournal(view, fixture.content);
+        require(presentation.getEntries().size() == 2 && presentation.getEntries().front().getText() == entry.text
+            && presentation.getEntries().front().mDay == 42 && presentation.getEntries().back().mDayOfMonth == 2
+            && presentation.getQuestOrNull(id("journey_t37"))->isFinished()
+            && presentation.getJournalIndex(id("journey_t37")) == 20,
+            "Stock journal presentation lost committed text/date/quest status");
+        rejects([&] { presentation.setJournalIndex(id("journey_t37"), 99); }, "Client wrote private journal progression");
+        auto other = PersonalScripts::view(second.state[1], *SessionId::fromValue(1), SessionGeneration::initial(),
+            ServerTick::initial(), CanonicalRevision::initial());
+        other.story = 32;
+        presentation.installPersonalJournal(other, fixture.content);
+        require(presentation.getEntries().size() == 2, "Foreign story replaced selected journal");
+        presentation.selectPersonalJournal(32);
+        require(presentation.getEntries().size() == 1 && presentation.getEntries().front().getText().starts_with("Beren")
+            && !presentation.getQuestOrNull(id("journey_t37"))->isFinished(), "Journal story selection merged progress");
+        other.entries.front().info = "missing";
+        rejects([&] { presentation.installPersonalJournal(other, fixture.content); }, "Unknown client journal INFO accepted");
+        require(presentation.getEntries().front().getText().starts_with("Beren"), "Invalid journal installation was not atomic");
+        presentation.clear(); require(presentation.getEntries().empty(), "Session cleanup retained private journal");
+        std::cout << "journal: stock authenticated expansion, result-time globals, authoritative calendar; private text/date "
+            "isolation, waits/bounds/late rollback, duplicate semantics, durable recovery and silent stock journal installation\n";
+    }
+
     void stock(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto);
@@ -990,7 +1180,7 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|substitutions");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|substitutions|journal");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
@@ -1006,6 +1196,7 @@ int main(int argc, char** argv)
             disposition(*crypto);
         else if (filter == "substitutions")
             substitutions(*crypto);
+        else if (filter == "journal") journal(*crypto);
         else if (filter == "stock") stock(*crypto);
         else throw std::invalid_argument("Unknown dialogue filter");
         std::cout << "PASS dialogue " << filter << '\n'; return 0;

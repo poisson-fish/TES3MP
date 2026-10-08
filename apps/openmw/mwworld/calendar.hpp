@@ -11,6 +11,7 @@ namespace MWWorld
     class Calendar
     {
     public:
+        static int getDaysPerMonth(int month);
         void setup(Globals& globals);
         void advanceTime(double hours, Globals& globals);
         void updateGlobalInt(GlobalVariableName name, int value);

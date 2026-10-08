@@ -74,8 +74,10 @@ staged ranks/bounty, owned globals and authoritative cell names before results;
 action bindings reject. Literal messages, choices and progression follow durability;
 reconnect is silent. Filters read staged modified attributes/skills, current resources
 and health percentage. Thresholds 0–100 share stock disposition with authenticated
-character/speaker snapshots and winning settings. Result stat writes, journal text/timestamps,
-physical results and NPC restoration remain closed. Prior images never silently migrate;
+character/speaker snapshots and winning settings. Journal commands freeze stock expanded text and server calendar dates at invocation;
+64 entries/story, 4,096 bytes/entry, 16,384 total text bytes, 32,768-byte private frames.
+Journal update notices follow durability; stock journal installation is silent.
+Result stat writes, physical results and NPC restoration remain closed. Prior images never silently migrate;
 V81–84 personal output stays closed. Bootstrap emits V80.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.

@@ -74,6 +74,7 @@ namespace TES3MP::Native
         State initial() const;
         std::vector<char> encode(const State&) const;
         State restore(std::span<const char>) const;
+        static ReliablePersonalDialogue view(const Instance&, SessionId, SessionGeneration, ServerTick, CanonicalRevision);
         Prepared prepare(const State&, const MWScript::ExecutionContext&, const MWWorld::ESMStore&,
             const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction) const;
         Prepared prepareScheduled(const State&, uint64_t worldTick, std::span<const uint64_t> activeCharacters,
@@ -83,12 +84,14 @@ namespace TES3MP::Native
             const MWWorld::ESMStore&, const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction,
             const MWMechanics::NpcStats* playerStats = nullptr,
             std::optional<std::string_view> customClassName = {},
-            const MWMechanics::NpcStats* speakerStats = nullptr) const;
+            const MWMechanics::NpcStats* speakerStats = nullptr,
+            std::optional<MWScript::DialogueState::Stamp> journalStamp = {}) const;
         Prepared prepareIntent(const State&, uint64_t character, uint64_t command, const DialogueIntent&,
             std::string_view cellName, const MWWorld::ESMStore&, const MWScript::ReferenceResolver&,
             size_t budget = MaximumInvocationsPerTransaction, const MWMechanics::NpcStats* playerStats = nullptr,
             std::optional<std::string_view> customClassName = {},
-            const MWMechanics::NpcStats* speakerStats = nullptr) const;
+            const MWMechanics::NpcStats* speakerStats = nullptr,
+            std::optional<MWScript::DialogueState::Stamp> journalStamp = {}) const;
 
     private:
         uint64_t mCampaign;

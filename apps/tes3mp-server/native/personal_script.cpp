@@ -25,7 +25,7 @@ namespace TES3MP::Native
         constexpr uint64_t ScheduledMagic = 0x3254535054335354;
         constexpr uint64_t BankMagic = 0x3354535054335354;
         constexpr uint64_t DialogueMagic = 0x3454535054335354;
-        constexpr uint64_t IntentMagic = 0x3554535054335354;
+        constexpr uint64_t IntentMagic = 0x3654535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
             if (!value)
@@ -59,21 +59,29 @@ namespace TES3MP::Native
             require(std::ranges::find(bytes, '\0') == bytes.end());
             return ESM::RefId::stringRefId(std::string_view(bytes.data(), bytes.size()));
         }
-        void progression(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        void progression(std::vector<char>& bytes, const PersonalScripts::Instance& state, bool journalText)
         {
             ref(bytes, state.lastTopic); ref(bytes, state.lastInfo); word(bytes, std::bit_cast<uint32_t>(state.lastChoice));
             word(bytes, state.dialogue.quests.size());
             for (const auto& quest : state.dialogue.quests)
             { ref(bytes, quest.mTopic); word(bytes, std::bit_cast<uint32_t>(quest.mState)); word(bytes, quest.mFinished); }
             word(bytes, state.dialogue.entries.size());
-            for (const auto& entry : state.dialogue.entries) { ref(bytes, entry.topic); ref(bytes, entry.info); }
+            for (const auto& entry : state.dialogue.entries)
+            {
+                ref(bytes, entry.topic); ref(bytes, entry.info);
+                if (journalText)
+                {
+                    word(bytes, entry.text.size()); bytes.insert(bytes.end(), entry.text.begin(), entry.text.end());
+                    word(bytes, entry.stamp.day); word(bytes, entry.stamp.month); word(bytes, entry.stamp.dayOfMonth);
+                }
+            }
             word(bytes, state.dialogue.topics.size());
             for (const auto& topic : state.dialogue.topics) ref(bytes, topic);
         }
-        void progression(Cursor& cursor, PersonalScripts::Instance* state)
+        void progression(Cursor& cursor, PersonalScripts::Instance* state, bool journalText)
         {
-            const auto topic = ref(cursor), info = ref(cursor); const auto choice = cursor.word(); require(choice <= UINT32_MAX);
-            if (state) { state->lastTopic = topic; state->lastInfo = info; state->lastChoice = std::bit_cast<int32_t>(uint32_t(choice)); }
+            const auto topic = ref(cursor), lastInfo = ref(cursor); const auto choice = cursor.word(); require(choice <= UINT32_MAX);
+            if (state) { state->lastTopic = topic; state->lastInfo = lastInfo; state->lastChoice = std::bit_cast<int32_t>(uint32_t(choice)); }
             auto count = cursor.word(); require(count <= MWScript::DialogueState::MaximumRecords);
             for (size_t i = 0; i < count; ++i)
             {
@@ -82,8 +90,23 @@ namespace TES3MP::Native
                 if (state) state->dialogue.quests.push_back({id, std::bit_cast<int32_t>(uint32_t(index)), static_cast<unsigned char>(finished)});
             }
             count = cursor.word(); require(count <= MWScript::DialogueState::MaximumEntries);
+            size_t textBytes = 0;
             for (size_t i = 0; i < count; ++i)
-            { auto id = ref(cursor), entry = ref(cursor); if (state) state->dialogue.entries.push_back({id, entry}); }
+            {
+                auto id = ref(cursor), info = ref(cursor);
+                MWScript::DialogueState::Entry entry{id, info};
+                if (journalText)
+                {
+                    const auto size = cursor.word(); require(size <= MWScript::DialogueState::MaximumTextBytes);
+                    textBytes += size; require(textBytes <= MWScript::DialogueState::MaximumJournalTextBytes);
+                    const auto text = cursor.take(size); require(std::ranges::find(text, '\0') == text.end());
+                    const auto day = cursor.word(), month = cursor.word(), dayOfMonth = cursor.word();
+                    require(day <= INT32_MAX && month < 12 && dayOfMonth <= 31);
+                    entry.stamp = {int(day), int(month), int(dayOfMonth)}; require(entry.stamp.valid());
+                    if (state) entry.text.assign(text.data(), text.size());
+                }
+                if (state) state->dialogue.entries.push_back(std::move(entry));
+            }
             count = cursor.word(); require(count <= MWScript::DialogueState::MaximumRecords);
             for (size_t i = 0; i < count; ++i) { auto id = ref(cursor); if (state) state->dialogue.topics.push_back(id); }
         }
@@ -186,6 +209,7 @@ namespace TES3MP::Native
             const std::vector<ESM::Global>& globals;
             const std::string_view cellName;
             const std::optional<std::string_view> customClassName;
+            const Interpreter::Context* journalGlobals = nullptr;
             FilterContext(const MWScript::ExecutionContext& execution, const MWWorld::ESMStore& content,
                 const MWScript::ReferenceResolver& resolver, Bank& bank, MWScript::DialogueState& dialogue,
                 const std::vector<ESM::Global>& values, MWMechanics::NpcStats* playerStats, std::string_view cell,
@@ -201,6 +225,7 @@ namespace TES3MP::Native
             std::string_view getCurrentCellName() const override { return cellName; }
             std::vector<std::string> getGlobals() const override
             {
+                if (journalGlobals) return journalGlobals->getGlobals();
                 std::vector<std::string> names;
                 for (const auto& value : globals) names.emplace_back(value.mId.getRefIdString());
                 return names;
@@ -212,13 +237,29 @@ namespace TES3MP::Native
             }
             char getGlobalType(std::string_view id) const override
             {
+                if (journalGlobals) return journalGlobals->getGlobalType(id);
                 auto found = std::ranges::find(globals, ESM::RefId::stringRefId(id), &ESM::Global::mId);
                 if (found == globals.end()) return ' ';
                 return found->mValue.getType() == ESM::VT_Float ? 'f' : found->mValue.getType() == ESM::VT_Short ? 's' : 'l';
             }
-            int getGlobalShort(std::string_view id) const override { return global(id).getInteger(); }
-            int getGlobalLong(std::string_view id) const override { return global(id).getInteger(); }
-            float getGlobalFloat(std::string_view id) const override { return global(id).getFloat(); }
+            int getGlobalShort(std::string_view id) const override
+            { return journalGlobals ? journalGlobals->getGlobalShort(id) : global(id).getInteger(); }
+            int getGlobalLong(std::string_view id) const override
+            { return journalGlobals ? journalGlobals->getGlobalLong(id) : global(id).getInteger(); }
+            float getGlobalFloat(std::string_view id) const override
+            { return journalGlobals ? journalGlobals->getGlobalFloat(id) : global(id).getFloat(); }
+        };
+        struct JournalText final : MWScript::DialogueState::JournalText
+        {
+            const FilterContext& snapshot;
+            explicit JournalText(const FilterContext& value, MWScript::DialogueState::Stamp date) : snapshot(value)
+            { stamp = date; }
+            std::string expand(std::string_view source, Interpreter::Context& globals) const override
+            {
+                auto context = snapshot;
+                context.journalGlobals = &globals;
+                return Interpreter::fixDefinesDialog(source, context, MWScript::DialogueState::MaximumTextBytes);
+            }
         };
         void context(std::vector<char>& bytes, const MWScript::ExecutionContext& value)
         {
@@ -317,7 +358,7 @@ namespace TES3MP::Native
             if (mIntents)
             {
                 constexpr std::string_view intentLimits
-                    = "authenticated-dialogue-3;14;2;8;256;4096;32768;64;root-first;bounded-substitutions;stock-disposition;unscripted-"
+                    = "authenticated-dialogue-4;14;2;8;256;4096;32768;64;journal-text-16384;game-calendar;root-first;bounded-substitutions;stock-disposition;unscripted-"
                       "speaker;primary-bank";
                 binding.insert(binding.end(), intentLimits.begin(), intentLimits.end());
             }
@@ -359,6 +400,23 @@ namespace TES3MP::Native
         return state;
     }
 
+    ReliablePersonalDialogue PersonalScripts::view(const Instance& state, SessionId target,
+        SessionGeneration generation, ServerTick tick, CanonicalRevision revision)
+    {
+        ReliablePersonalDialogue value{target, generation, tick, revision};
+        value.story = state.last.story; value.revision = state.dialogueRevision;
+        value.command = state.dialogueCommand; value.speaker = state.dialogueRequest.speaker;
+        value.life = state.dialogueRequest.life; value.topic = state.dialogueRequest.topic;
+        for (const auto& c : state.choices) value.choices.push_back({c.text, c.id});
+        for (const auto& q : state.dialogue.quests)
+            value.quests.push_back({q.mTopic.toString(), q.mState, bool(q.mFinished)});
+        for (const auto& e : state.dialogue.entries)
+            value.entries.push_back({e.topic.toString(), e.info.toString(), e.text,
+                e.stamp.day, e.stamp.month, e.stamp.dayOfMonth});
+        for (const auto& t : state.dialogue.topics) value.topics.push_back(t.toString());
+        return value;
+    }
+
     void PersonalScripts::validate(const Instance& state, size_t index) const
     {
         const auto& expected = mDefinitions.at(index);
@@ -384,7 +442,7 @@ namespace TES3MP::Native
                 if (!execution.invocation)
                     execution.invocation = 1;
                 auto copy = state.dialogue;
-                MWScript::DialogueState dialogue(execution, copy, expected.dialogues);
+                MWScript::DialogueState dialogue(execution, copy, expected.dialogues, mIntents);
                 (void)dialogue.record(ESM::RefId::stringRefId(request.topic), ESM::Dialogue::Topic);
                 require(std::ranges::find(state.talkedSpeakers, request.speaker) != state.talkedSpeakers.end());
             }
@@ -416,7 +474,7 @@ namespace TES3MP::Native
         {
             auto execution = last; if (!execution.invocation) execution.invocation = 1;
             auto progress = state.dialogue;
-            MWScript::DialogueState dialogue(execution, progress, expected.dialogues);
+            MWScript::DialogueState dialogue(execution, progress, expected.dialogues, mIntents);
             require(state.lastTopic.empty() == !last.sourceReference && state.lastTopic.empty() == state.lastInfo.empty());
             if (!state.lastTopic.empty())
             {
@@ -428,6 +486,9 @@ namespace TES3MP::Native
         }
         else require(state.dialogue.quests.empty() && state.dialogue.entries.empty() && state.dialogue.topics.empty()
             && state.lastTopic.empty() && state.lastInfo.empty() && state.lastChoice == -1);
+        if (mIntents)
+            require(!encodeReliablePersonalDialogue(view(state, *SessionId::fromValue(1), SessionGeneration::initial(),
+                ServerTick::initial(), CanonicalRevision::initial())).empty());
     }
 
     std::vector<char> PersonalScripts::encode(const State& state) const
@@ -459,7 +520,7 @@ namespace TES3MP::Native
                     word(bytes, encoded.size()); bytes.insert(bytes.end(), encoded.begin(), encoded.end());
                 }
             }
-            if (mDialogues) progression(bytes, state[i]);
+            if (mDialogues) progression(bytes, state[i], mIntents);
             if (mIntents)
                 conversation(bytes, state[i]);
         }
@@ -497,7 +558,7 @@ namespace TES3MP::Native
                     require(memberSize && memberSize <= SharedWorldScript::MaximumImageBytes); preflight.take(memberSize);
                 }
             }
-            if (mDialogues) progression(preflight, nullptr);
+            if (mDialogues) progression(preflight, nullptr, mIntents);
             if (mIntents)
                 conversation(preflight, nullptr);
         }
@@ -519,7 +580,7 @@ namespace TES3MP::Native
                     member.runtime.globals.clear(); entry.members.push_back(std::move(member));
                 }
             }
-            if (mDialogues) progression(input, &entry);
+            if (mDialogues) progression(input, &entry, mIntents);
             if (mIntents)
                 conversation(input, &entry);
             validate(entry, i); state.push_back(std::move(entry));
@@ -626,7 +687,8 @@ namespace TES3MP::Native
         const MWScript::ExecutionContext& execution, const ESM::RefId& topic, int choice, int disposition,
         bool talkedToPlayer, std::string_view cellName, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats,
-        std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats) const
+        std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats,
+        std::optional<MWScript::DialogueState::Stamp> journalStamp) const
     {
         Prepared prepared; auto& result = prepared.result; result.invocationTick = execution.invocation;
         try
@@ -659,6 +721,8 @@ namespace TES3MP::Native
             if (playerStats) stats.emplace(*playerStats);
             FilterContext script(execution, content, resolver, bank, dialogue, state.runtime.runtime.globals,
                 stats ? &*stats : nullptr, cellName, customClassName);
+            JournalText journalText(script, journalStamp.value_or(MWScript::DialogueState::Stamp{}));
+            if (mIntents) dialogue.setJournalText(journalText);
             const auto actor = script.resolveReference({});
             require(actor.hasLiveReference()
                 && (mIntents ? actor.getClass().getScript(actor).empty()
@@ -729,7 +793,8 @@ namespace TES3MP::Native
     PersonalScripts::Prepared PersonalScripts::prepareIntent(const State& before, uint64_t character, uint64_t command,
         const DialogueIntent& request, std::string_view cellName, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats,
-        std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats) const
+        std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats,
+        std::optional<MWScript::DialogueState::Stamp> journalStamp) const
     {
         Prepared rejected;
         try
@@ -768,7 +833,7 @@ namespace TES3MP::Native
             const bool talked
                 = std::ranges::find(found->talkedSpeakers, request.speaker) != found->talkedSpeakers.end();
             auto prepared = prepareDialogue(before, execution, ESM::RefId::stringRefId(request.topic), request.choice,
-                0, talked, cellName, content, resolver, budget, playerStats, customClassName, speakerStats);
+                0, talked, cellName, content, resolver, budget, playerStats, customClassName, speakerStats, journalStamp);
             if (prepared.result.outcome != SharedWorldScript::Outcome::Committed || !prepared.result.executed)
                 return prepared;
             auto& state = prepared.state[size_t(found - before.begin())];
@@ -780,6 +845,10 @@ namespace TES3MP::Native
                 require(state.talkedSpeakers.size() < 64);
                 state.talkedSpeakers.push_back(request.speaker);
             }
+            auto output = view(state, *SessionId::fromValue(1), SessionGeneration::initial(),
+                ServerTick::initial(), CanonicalRevision::initial());
+            output.response = prepared.response; output.messages = prepared.result.presentation;
+            require(!encodeReliablePersonalDialogue(output).empty());
             prepared.image = encode(prepared.state);
             return prepared;
         }

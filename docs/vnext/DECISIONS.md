@@ -255,7 +255,10 @@ Clients retain early personal baselines through body installation and reopen oth
 choices silently. Bounded stock response substitutions use authenticated character/speaker, staged ranks/bounty,
 owned globals and shared stock cell naming before results; errors/waits discard output.
 Thresholds 0–100 share stock disposition with authenticated character/speaker snapshots;
-relationship writes remain closed. Clients never re-expand/replay output; policy changes reject old images.
+relationship writes remain closed. Journal text captures authenticated substitutions and
+result-time globals with authoritative calendar dates; private story views install stock entries
+silently. Journal notices share durability. Payload v2/policy changes reject old frames/images;
+clients never expand, restamp or replay saved entries.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

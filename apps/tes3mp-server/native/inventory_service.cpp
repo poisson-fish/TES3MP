@@ -5233,7 +5233,8 @@ namespace TES3MP::Native
     };
 
     bool InventoryService::appendDialogueIntent(const CanonicalServerState& players,
-        const ServerCommandProposal& proposal, std::unique_ptr<PreparedNativeInventory>& candidate)
+        const ServerCommandProposal& proposal, std::unique_ptr<PreparedNativeInventory>& candidate,
+        const CanonicalWorldState* world)
     {
         const auto reject = [&](const char* reason) {
             std::fprintf(stderr, "native dialogue rejected: command=%llu reason=%.256s\n",
@@ -5242,6 +5243,11 @@ namespace TES3MP::Native
         };
         if (!hasPersonalDialogue() || inventoryImage().empty())
             return reject("authority unavailable");
+        if (!world || !world->time().daysPassed || *world->time().daysPassed > INT32_MAX)
+            return reject("journal calendar unavailable");
+        const MWScript::DialogueState::Stamp journalStamp{int(*world->time().daysPassed),
+            int(world->time().month), int(world->time().day)};
+        if (!journalStamp.valid()) return reject("journal calendar invalid");
         auto* prior = dynamic_cast<DialogueTransaction*>(candidate.get());
         if (candidate && (!prior || &prior->service != this || prior->before != mActorImage))
             return reject("transaction unavailable");
@@ -5364,7 +5370,8 @@ namespace TES3MP::Native
                 ptr.getCellRef().getRefId(), mTimedEffects, npc).charm));
         auto prepared = mBinding.mPersonalScripts->prepareIntent(prior->state, session->playerId().value(),
             proposal.commandId().value(), request, cell.getCellName(mRuntime.mStore), mRuntime.mStore, resolver,
-            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats, customClassName, &speakerStats);
+            PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats, customClassName, &speakerStats,
+            journalStamp);
         if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
             return reject(prepared.result.diagnostic.c_str());
         if (prepared.result.executed)
@@ -5777,21 +5784,7 @@ namespace TES3MP::Native
         for (const auto& instance : state)
             if (instance.last.character == session->playerId().value())
             {
-                ReliablePersonalDialogue view{ target, session->sessionGeneration(), tick, revision };
-                view.story = instance.last.story;
-                view.revision = instance.dialogueRevision;
-                view.command = instance.dialogueCommand;
-                view.speaker = instance.dialogueRequest.speaker;
-                view.life = instance.dialogueRequest.life;
-                view.topic = instance.dialogueRequest.topic;
-                for (const auto& c : instance.choices)
-                    view.choices.push_back({ c.text, c.id });
-                for (const auto& q : instance.dialogue.quests)
-                    view.quests.push_back({ q.mTopic.toString(), q.mState, bool(q.mFinished) });
-                for (const auto& e : instance.dialogue.entries)
-                    view.entries.push_back({ e.topic.toString(), e.info.toString() });
-                for (const auto& t : instance.dialogue.topics)
-                    view.topics.push_back(t.toString());
+                auto view = PersonalScripts::view(instance, target, session->sessionGeneration(), tick, revision);
                 if (staged)
                     for (const auto& output : staged->dialogueOutputs)
                         if (output.targetSessionId == target && output.story == view.story
@@ -5800,7 +5793,7 @@ namespace TES3MP::Native
                             view.response = output.response;
                             view.messages = output.messages;
                         }
-                if (!validPersonalDialogue(view))
+                if (encodeReliablePersonalDialogue(view).empty())
                     throw std::invalid_argument("Invalid personal dialogue projection");
                 result.push_back(std::move(view));
             }
