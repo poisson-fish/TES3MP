@@ -41,6 +41,15 @@ namespace TES3MP::Native
         };
         struct Instance
         {
+            struct SourceWait
+            {
+                MWScript::ExecutionContext invocation;
+                ESM::RefId script;
+                int instruction = -1;
+                uint64_t sinceTick = 0, respawnTick = 0;
+                uint64_t reason = 1; // Foreign death; wake only on a newer living placement life.
+                bool operator==(const SourceWait&) const = default;
+            };
             struct Relocation
             {
                 std::array<float, 3> origin{}, position{};
@@ -79,6 +88,15 @@ namespace TES3MP::Native
             bool encounterReturned = false; // Dormant outcome; origin and story receipts remain frozen.
             bool encounterEnabled = false; // Stock source Enable committed at safe return; never renews the story.
             std::optional<Relocation> relocation; // Terminal inert pose; original placement/life, no new loot or actor simulation.
+            uint64_t clockTicks = 0; // Successful scheduled story steps only; no wait/offline/downtime catch-up.
+            std::optional<SourceWait> sourceWait; // One bounded dependency; banks remain running and unchanged.
+        };
+        struct Source
+        {
+            uint64_t reference = 0, life = 0, respawnTick = 0;
+            ESM::RefId record;
+            bool living = false;
+            uint64_t killer = 0, killerKind = 0;
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -97,7 +115,8 @@ namespace TES3MP::Native
             std::string cellName;
         };
         PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false,
-            bool banks = false, bool intents = false, bool returns = false, bool enables = false, bool relocations = false);
+            bool banks = false, bool intents = false, bool returns = false, bool enables = false, bool relocations = false,
+            bool sourceWaits = false);
         uint64_t campaign() const { return mCampaign; }
         bool scheduled() const { return mScheduled; }
         bool banks() const { return mBanks; }
@@ -107,6 +126,7 @@ namespace TES3MP::Native
         bool returns() const { return mReturns; }
         bool enables() const { return mEnables; }
         bool relocations() const { return mRelocations; }
+        bool sourceWaits() const { return mSourceWaits; }
         static const Instance::Relocation* relocation(const State&, uint64_t character);
         static uint64_t physicalScope(const State&, uint64_t character);
         Prepared prepareReturn(const State&, uint64_t character, const MWWorld::ESMStore* = nullptr,
@@ -116,9 +136,10 @@ namespace TES3MP::Native
         State restore(std::span<const char>) const;
         static ReliablePersonalDialogue view(const Instance&, SessionId, SessionGeneration, ServerTick, CanonicalRevision);
         Prepared prepare(const State&, const MWScript::ExecutionContext&, const MWWorld::ESMStore&,
-            const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction) const;
+            const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction,
+            MWScript::ReferenceState* = nullptr) const;
         Prepared prepareScheduled(const State&, uint64_t worldTick, std::span<const uint64_t> activeCharacters,
-            const MWWorld::ESMStore&, const MWScript::ReferenceResolver&) const;
+            const MWWorld::ESMStore&, const MWScript::ReferenceResolver&, const Source* = nullptr) const;
         Prepared prepareDialogue(const State&, const MWScript::ExecutionContext&, const ESM::RefId& topic,
             int choice, int disposition, bool talkedToPlayer, std::string_view cellName,
             const MWWorld::ESMStore&, const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction,
@@ -145,12 +166,13 @@ namespace TES3MP::Native
         bool mReturns = false;
         bool mEnables = false;
         bool mRelocations = false;
+        bool mSourceWaits = false;
         std::vector<Interpreter::Program> mRestorations;
         struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
         std::vector<std::vector<ResultProgram>> mResults;
         void validate(const Instance&, size_t) const;
         Prepared prepareBank(const State&, size_t, const MWScript::ExecutionContext&, const MWWorld::ESMStore&,
-            const MWScript::ReferenceResolver&, size_t budget) const;
+            const MWScript::ReferenceResolver&, size_t budget, MWScript::ReferenceState*) const;
     };
 }
 #endif

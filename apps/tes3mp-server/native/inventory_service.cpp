@@ -3145,6 +3145,27 @@ namespace TES3MP::Native
             if (personalState && std::ranges::any_of(*personalState,
                     [&](const auto& entry) { return entry.scheduledTick > decoded.tick; }))
                 throw std::invalid_argument("Personal schedule exceeds durable world tick");
+            if (personalState && mBinding.mPersonalScripts->sourceWaits()
+                && (!decoded.life || std::ranges::any_of(*personalState, [&](const auto& story) {
+                    return story.last.sourceLife > decoded.life->generation;
+                })))
+                throw std::invalid_argument("Story source receipt exceeds canonical life");
+            if (personalState) for (const auto& story : *personalState) if (story.sourceWait)
+            {
+                const auto& wait = *story.sourceWait;
+                if (!decoded.life || !decoded.combat || decoded.combat->npcPlacements.size() != 1
+                    || wait.invocation.sourceReference != decoded.combat->npcPlacements.front()
+                    || wait.invocation.sourceLife > decoded.life->deaths.size()
+                    || wait.sinceTick > decoded.tick)
+                    throw std::invalid_argument("Story wait differs from canonical source history");
+                const auto& death = decoded.life->deaths.at(size_t(wait.invocation.sourceLife - 1));
+                if (!death.killer || (death.killerKind == 1 && death.killer == story.last.character)
+                    || death.tick > story.scheduledTick
+                    || wait.respawnTick <= death.tick
+                    || (wait.invocation.sourceLife == decoded.life->generation
+                        && wait.respawnTick != decoded.life->respawnTick))
+                    throw std::invalid_argument("Story wait lacks a foreign respawning death");
+            }
             EquipmentBytes personalImage(decoded.personalScripts.begin(), decoded.personalScripts.end());
             if (bool(mBinding.mSharedScript) != !decoded.sharedScript.empty())
                 throw std::invalid_argument("Shared script admission differs from campaign");
@@ -12436,9 +12457,20 @@ namespace TES3MP::Native
                         [&](const auto& session) { return session.playerId() == player; }))
                     active[count++] = player.value();
             PersonalReferenceResolver resolver;
+            std::optional<PersonalScripts::Source> source;
+            if (mBinding.mPersonalScripts->sourceWaits())
+            {
+                if (!transaction->life || !transaction->combat || transaction->combat->npcPlacements.size() != 1)
+                    throw std::invalid_argument("Story wait source snapshot absent");
+                const auto& life = *transaction->life;
+                const auto& owner = mBinding.mContainers.front();
+                const auto death = life.respawnTick ? life.deaths.back() : ActorDeathEvent{};
+                source = PersonalScripts::Source{owner.mId.value(), life.generation, life.respawnTick, owner.mBase,
+                    !life.respawnTick && transaction->combat->actors[2][8][2] > 0, death.killer, death.killerKind};
+            }
             auto scripts
                 = mBinding.mPersonalScripts->prepareScheduled(dialogue ? dialogue->state : *mPersonalScriptState,
-                    tick.value(), std::span(active).first(count), mRuntime.mStore, resolver);
+                    tick.value(), std::span(active).first(count), mRuntime.mStore, resolver, source ? &*source : nullptr);
             if (scripts.result.outcome != SharedWorldScript::Outcome::Committed)
             {
                 const auto& result = scripts.result;

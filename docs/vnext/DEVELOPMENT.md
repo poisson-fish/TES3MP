@@ -83,19 +83,21 @@ freeze; other banks resume. V88 runs fixed stock source Enable there against
 the original life, ≤16 instructions/one call in the 16-call tick budget.
 V89: fresh images/capability 42; source-only Position/PositionCell/GetPos/GetAngle,
 same interior, finite coordinates ≤1,000,000, displacement ≤4,096, rotation ≤360°.
-Stock discovery/retry and original instruction/call budgets apply. Validate final
-hull against scoped geometry/body before durability and geometry on recovery.
-One inert destination pose, no new NPC simulation/life/loot; relocated scopes
-remain occupied. No relocation return, cross-cell movement, escorts or mixed
-Disable/Position results. Scoped wire permits one suppressed source or one
-zero-velocity source pose; advertise ≤37 optional capabilities. Recovery is silent.
-V90: fresh images/capability 42; grounded online living bodies clear quiescent
-original/destination NPC hulls (≥256) and shared peers (≥128), enlarged by radii
-plus 32. Require living original source life. Occupancy commits with gameplay;
-destination/origin/banks/progression/receipts stay dormant without Enable/public
-move, renewed loot/life or completed-story reopening.
-`relocation-return` and `story-relocation-return` are focused state/host filters;
-desktop fixture/capture uses `--relocate-source --return-path`. Escorts/mutable AI stay closed.
+Inherited discovery/retry budgets; validate final scoped hull before durability,
+geometry on recovery. One inert pose, occupied scope; no new simulation/life/loot,
+cross-cell movement, escorts or mixed Disable/Position. Wire permits suppression
+or one zero-velocity pose; ≤37 optional capabilities; silent recovery.
+V90 returns grounded online living bodies beyond quiescent original/destination
+NPC (≥256) and peer (≥128) hulls, enlarged by radii plus 32; living original life
+required. Occupancy commits while outcomes/receipts remain dormant.
+Filters: `relocation-return`, `story-relocation-return`; capture: `--relocate-source --return-path`.
+V91: fresh images/capability 41; same single-NPC interior. One durable foreign-death
+dependency/story: pending invocation, script/instruction, reference/life/reason/deadline
+and paused clock. Stock named GetDisabled discovers waits; GetSecondsPassed advances
+one 30 Hz step only after bank success. Wake probes use the sixteen-call budget;
+newer living canonical lives resume once. Own enabled-state queries retain consequences.
+No health/OnDeath APIs, targeted StartScript, calendar arithmetic or wait UI.
+Filters: `source-waits`, `story-source-waits`; recovery is silent.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
 Compare profiles through join/reentry/reconnect/restart; creation has no body.

@@ -8,6 +8,10 @@
 
 namespace TES3MP::Native
 {
+    // V91 persists one foreign-death source wait per story with unchanged banks,
+    // pending invocation and a paused 30 Hz story clock. Named source queries
+    // resume only on a newer living canonical life; no death-credit API.
+    // Fresh images; existing private views restore silently.
     // V90 returns relocated scopes at a grounded quiescent boundary clear of
     // original/destination NPC and shared peer hulls. Occupancy commits with
     // gameplay; the private inert pose/origin/bank/receipts remain dormant.

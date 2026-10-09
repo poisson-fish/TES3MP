@@ -47,10 +47,11 @@ namespace MWScript
         };
 
         WorldScript(const ESM::Script& script, std::vector<ESM::Global> ownedGlobals,
-            std::span<const ESM::Script> bank = {});
+            std::span<const ESM::Script> bank = {}, const ESM::RefId& source = {});
         const ESM::RefId& id() const { return mId; }
         const Compiler::Locals& declarations() const { return mDeclarations; }
         bool bankCapable() const { return mBank; }
+        const ESM::RefId& sourceRecord() const { return mSource; }
         Interpreter::Program compileResult(std::string_view source, bool physical = false,
             const ESM::RefId& reference = {}, bool restoration = false, bool relocation = false) const;
         State initial() const;
@@ -72,6 +73,7 @@ namespace MWScript
         Interpreter::Program mProgram;
         std::vector<ESM::Global> mGlobals;
         bool mBank = false;
+        ESM::RefId mSource;
         std::vector<std::pair<ESM::RefId, Compiler::Locals>> mMembers;
     };
 }

@@ -37,6 +37,7 @@ namespace TES3MP::Native
         constexpr uint64_t EncounterRelocationMagic = 0x4254535054335354;
         constexpr uint64_t EncounterRelocationReturnMagic = 0x4354535054335354;
         constexpr uint64_t IntentMagic = 0x3754535054335354;
+        constexpr uint64_t SourceWaitMagic = 0x4454535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
             if (!value)
@@ -304,10 +305,33 @@ namespace TES3MP::Native
             return {Context::Ownership::Character, cursor.word(), cursor.word(), cursor.word(), cursor.word(),
                 cursor.word(), cursor.word(), cursor.word(), cursor.word()};
         }
+        void sourceWait(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        {
+            word(bytes, state.clockTicks); word(bytes, bool(state.sourceWait));
+            if (!state.sourceWait) return;
+            const auto& wait = *state.sourceWait;
+            context(bytes, wait.invocation); ref(bytes, wait.script);
+            word(bytes, std::bit_cast<uint32_t>(wait.instruction));
+            word(bytes, wait.sinceTick); word(bytes, wait.respawnTick); word(bytes, wait.reason);
+        }
+        void sourceWait(Cursor& cursor, PersonalScripts::Instance* state)
+        {
+            const auto clock = cursor.word(), present = cursor.word(); require(present <= 1);
+            if (state) state->clockTicks = clock;
+            if (!present) return;
+            PersonalScripts::Instance::SourceWait wait;
+            wait.invocation = context(cursor); wait.script = ref(cursor);
+            const auto instruction = cursor.word(); require(instruction <= INT32_MAX);
+            wait.instruction = int(instruction); wait.sinceTick = cursor.word();
+            wait.respawnTick = cursor.word(); wait.reason = cursor.word();
+            require(wait.reason == 1 && wait.sinceTick && wait.invocation.sourceReference && wait.invocation.sourceLife);
+            wait.invocation.validate();
+            if (state) state->sourceWait = std::move(wait);
+        }
     }
 
     PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
-        bool scheduled, bool banks, bool intents, bool returns, bool enables, bool relocations)
+        bool scheduled, bool banks, bool intents, bool returns, bool enables, bool relocations, bool sourceWaits)
         : mCampaign(campaign)
         , mDefinitions(std::move(definitions))
         , mScheduled(scheduled)
@@ -316,6 +340,7 @@ namespace TES3MP::Native
         , mReturns(returns)
         , mEnables(enables)
         , mRelocations(relocations)
+        , mSourceWaits(sourceWaits)
     {
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         size_t scripts = 0;
@@ -328,11 +353,14 @@ namespace TES3MP::Native
         require(!mReturns || mEncounters);
         require(!mEnables || mReturns);
         require(!mRelocations || (mEncounters && !mEnables));
+        require(!mSourceWaits || (mEncounters && mBanks && !mReturns && !mRelocations));
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
             const auto& entry = mDefinitions[i];
             require(entry.character && entry.story && entry.script);
+            require(!mSourceWaits || entry.encounter);
+            require(entry.script->sourceRecord() == (mSourceWaits ? entry.encounter->record : ESM::RefId{}));
             require(!mEncounters || (entry.encounter == mDefinitions.front().encounter && entry.encounter && entry.encounter->reference
                 && entry.encounter->record.is<ESM::StringRefId>() && !entry.encounter->record.empty()
                 && entry.encounter->cell.is<ESM::StringRefId>() && !entry.encounter->cell.empty()
@@ -348,6 +376,7 @@ namespace TES3MP::Native
             for (const auto& member : entry.members)
             {
                 require(member.script && member.script->bankCapable());
+                require(member.script->sourceRecord() == entry.script->sourceRecord());
                 const auto id = member.script->initial().runtime.script.mId;
                 require(std::ranges::find(names, id) == names.end()); names.push_back(id);
             }
@@ -416,6 +445,11 @@ namespace TES3MP::Native
         if (mRelocations)
         {
             constexpr std::string_view limits = "terminal-source-position-1;inert;one-interior;4096-displacement;1000000-coordinates;frozen-scope";
+            binding.insert(binding.end(), limits.begin(), limits.end());
+        }
+        if (mSourceWaits)
+        {
+            constexpr std::string_view limits = "durable-source-wait-1;one-dependency-per-story;foreign-death;newer-living-life;30hz-clock;rollback-bank;no-death-credit";
             binding.insert(binding.end(), limits.begin(), limits.end());
         }
         if (mRelocations && mReturns)
@@ -493,6 +527,27 @@ namespace TES3MP::Native
     {
         const auto& expected = mDefinitions.at(index);
         const auto& last = state.last;
+        require(!mSourceWaits || !last.sourceReference
+            || (last.sourceReference == expected.encounter->reference && last.sourceLife));
+        require(mSourceWaits ? state.clockTicks <= state.scheduledTick : !state.clockTicks && !state.sourceWait);
+        if (state.sourceWait)
+        {
+            const auto& wait = *state.sourceWait;
+            auto expectedInvocation = last;
+            require(last.invocation != UINT64_MAX);
+            ++expectedInvocation.invocation; expectedInvocation.causalEvent = 0;
+            expectedInvocation.sourceReference = expected.encounter->reference;
+            expectedInvocation.sourceLife = wait.invocation.sourceLife;
+            require(mSourceWaits && !state.encounterLife && wait.invocation == expectedInvocation
+                && wait.invocation.sourceLife && wait.reason == 1 && wait.sinceTick
+                && wait.sinceTick <= state.scheduledTick && wait.instruction >= 0
+                && wait.instruction < MWScript::WorldScript::MaximumInstructions
+                && wait.respawnTick
+                && ((wait.script == state.runtime.runtime.script.mId && state.runtime.runtime.script.mRunning)
+                    || std::ranges::any_of(state.members, [&](const auto& member) {
+                        return wait.script == member.runtime.script.mId && member.runtime.script.mRunning;
+                    })));
+        }
         require(!state.encounterLife || (mEncounters && last.sourceReference == expected.encounter->reference
             && last.sourceLife == state.encounterLife && state.choices.empty()));
         require(!state.encounterReturned || (mReturns && state.encounterLife));
@@ -570,7 +625,8 @@ namespace TES3MP::Native
             auto execution = last; if (!execution.invocation) execution.invocation = 1;
             auto progress = state.dialogue;
             MWScript::DialogueState dialogue(execution, progress, expected.dialogues, mIntents);
-            require(state.lastTopic.empty() == !last.sourceReference && state.lastTopic.empty() == state.lastInfo.empty());
+            require((mSourceWaits || state.lastTopic.empty() == !last.sourceReference)
+                && state.lastTopic.empty() == state.lastInfo.empty());
             if (!state.lastTopic.empty())
             {
                 const auto& topic = dialogue.record(state.lastTopic, ESM::Dialogue::Topic);
@@ -595,7 +651,8 @@ namespace TES3MP::Native
             }));
         std::vector<char> bytes;
         word(bytes,
-            mRelocations     ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
+            mSourceWaits     ? SourceWaitMagic
+                : mRelocations ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables   ? EncounterEnableMagic
                 : mReturns   ? EncounterReturnMagic
                 : mEncounters ? EncounterMagic
@@ -624,6 +681,7 @@ namespace TES3MP::Native
                 }
             }
             if (mDialogues) progression(bytes, state[i], mIntents);
+            if (mSourceWaits) sourceWait(bytes, state[i]);
             if (mIntents)
             {
                 conversation(bytes, state[i]);
@@ -652,7 +710,8 @@ namespace TES3MP::Native
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
         require(input.word()
-            == (mRelocations     ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
+            == (mSourceWaits     ? SourceWaitMagic
+                : mRelocations ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables      ? EncounterEnableMagic
                 : mReturns      ? EncounterReturnMagic
                 : mEncounters    ? EncounterMagic
@@ -682,6 +741,7 @@ namespace TES3MP::Native
                 }
             }
             if (mDialogues) progression(preflight, nullptr, mIntents);
+            if (mSourceWaits) sourceWait(preflight, nullptr);
             if (mIntents)
             {
                 conversation(preflight, nullptr);
@@ -725,6 +785,7 @@ namespace TES3MP::Native
                 }
             }
             if (mDialogues) progression(input, &entry, mIntents);
+            if (mSourceWaits) sourceWait(input, &entry);
             if (mIntents)
             {
                 conversation(input, &entry);
@@ -747,7 +808,8 @@ namespace TES3MP::Native
     }
 
     PersonalScripts::Prepared PersonalScripts::prepare(const State& before, const MWScript::ExecutionContext& execution,
-        const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver, size_t budget) const
+        const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver, size_t budget,
+        MWScript::ReferenceState* referenceState) const
     {
         Prepared prepared;
         auto& result = prepared.result;
@@ -763,7 +825,9 @@ namespace TES3MP::Native
             const auto index = size_t(found - mDefinitions.begin());
             const auto& current = before[index]; validate(current, index);
             require(execution.ownership == current.last.ownership && execution.campaign == mCampaign
-                && execution.physicalScope == 1 && !execution.sourceReference && !execution.sourceLife);
+                && execution.physicalScope == 1
+                && (mSourceWaits ? execution.sourceReference == found->encounter->reference && execution.sourceLife
+                    && !execution.causalEvent : !execution.sourceReference && !execution.sourceLife));
             result.script = current.runtime.runtime.script.mId;
             if (execution == current.last)
             { result.outcome = SharedWorldScript::Outcome::Committed; return prepared; }
@@ -771,7 +835,7 @@ namespace TES3MP::Native
             require(current.last.invocation != std::numeric_limits<uint64_t>::max()
                 && execution.invocation == current.last.invocation + 1
                 && (!execution.causalEvent || execution.causalEvent > current.eventCursor));
-            if (mBanks) return prepareBank(before, index, execution, content, resolver, budget);
+            if (mBanks) return prepareBank(before, index, execution, content, resolver, budget, referenceState);
             auto invocation = found->script->prepare(current.runtime, execution, content, resolver);
             result = std::move(invocation.result);
             if (result.outcome != SharedWorldScript::Outcome::Committed || !result.executed) return prepared;
@@ -791,7 +855,7 @@ namespace TES3MP::Native
 
     PersonalScripts::Prepared PersonalScripts::prepareBank(const State& before, size_t index,
         const MWScript::ExecutionContext& execution, const MWWorld::ESMStore& content,
-        const MWScript::ReferenceResolver& resolver, size_t budget) const
+        const MWScript::ReferenceResolver& resolver, size_t budget, MWScript::ReferenceState* referenceState) const
     {
         Prepared prepared;
         auto& result = prepared.result;
@@ -815,15 +879,16 @@ namespace TES3MP::Native
                 input.runtime.script.mRunning = descriptor.mRunning;
                 input.runtime.script.mLocals.mVariables.clear();
                 require(descriptor.mLocals.write(input.runtime.script.mLocals, scripts[i]->declarations()));
-                auto invocation = scripts[i]->prepareBank(input, execution, content, resolver, bank, descriptor);
+                ++prepared.invocations;
+                auto invocation = scripts[i]->prepareBank(input, execution, content, resolver, bank, descriptor, referenceState);
                 result = std::move(invocation.result); result.presentation.clear();
                 if (result.outcome != SharedWorldScript::Outcome::Committed || !result.executed)
-                { prepared.state.clear(); prepared.invocations = 0; result.executed = false; return prepared; }
+                { prepared.state.clear(); if (!result.sourceWait) prepared.invocations = 0; result.executed = false; return prepared; }
                 state.runtime.runtime.globals = std::move(invocation.state.runtime.globals);
                 member.tick = invocation.state.tick;
-                ++prepared.invocations;
             }
             bank.write(state);
+            state.sourceWait.reset();
             state.lastTopic = {}; state.lastInfo = {}; state.lastChoice = -1;
             state.last = execution; state.eventCursor = std::max(state.eventCursor, execution.causalEvent);
             prepared.image = encode(prepared.state);
@@ -948,6 +1013,7 @@ namespace TES3MP::Native
             require(found != mDefinitions.end());
             const auto index = size_t(found - mDefinitions.begin()); const auto& current = before[index];
             require(!current.encounterLife); // A dormant removal never reopens this story's source.
+            if (current.sourceWait) throw MWScript::ScriptContextUnavailable();
             result.script = current.runtime.runtime.script.mId;
             if (execution == current.last)
             {
@@ -1236,7 +1302,7 @@ namespace TES3MP::Native
 
     PersonalScripts::Prepared PersonalScripts::prepareScheduled(const State& before, uint64_t worldTick,
         std::span<const uint64_t> activeCharacters, const MWWorld::ESMStore& content,
-        const MWScript::ReferenceResolver& resolver) const
+        const MWScript::ReferenceResolver& resolver, const Source* source) const
     {
         Prepared prepared;
         auto& result = prepared.result;
@@ -1254,6 +1320,39 @@ namespace TES3MP::Native
             }
             // Validate the complete candidate before executing any instance.
             (void)encode(before);
+            require(!mSourceWaits || (source && source->reference == mDefinitions.front().encounter->reference
+                && source->record == mDefinitions.front().encounter->record && source->life
+                && (source->living ? !source->respawnTick : bool(source->respawnTick))));
+            struct SourceResolver final : MWScript::ReferenceResolver, MWScript::ReferenceState
+            {
+                const Source& source;
+                MWWorld::ManualRef reference;
+                SourceResolver(const Source& value, const MWWorld::ESMStore& store)
+                    : source(value), reference(store, value.record) {}
+                MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool) const override
+                {
+                    require(execution.physicalScope == 1 && execution.sourceReference == source.reference
+                        && execution.sourceLife == source.life && (id.empty() || id == source.record));
+                    if (!source.living)
+                    {
+                        require(source.killer && (source.killerKind == 1 || source.killerKind == 2));
+                        // Own consequences remain queryable. Only GetDisabled is
+                        // admitted: death does not change the canonical enabled
+                        // flag. Health/existence/death-credit reads stay closed.
+                        if (source.killerKind != 1 || source.killer != execution.character)
+                            throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
+                    }
+                    return reference.getPtr();
+                }
+                void enable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
+                { throw std::invalid_argument("Scheduled source writes not admitted"); }
+                void disable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
+                { throw std::invalid_argument("Scheduled source writes not admitted"); }
+                bool disabled(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
+                { require(ptr == resolve(execution, source.record, false)); return !ptr.getRefData().isEnabled(); }
+            };
+            std::unique_ptr<SourceResolver> sourceResolver;
+            if (mSourceWaits) sourceResolver = std::make_unique<SourceResolver>(*source, content);
             for (const auto& entry : before) require(entry.scheduledTick <= worldTick);
             prepared.state = before;
             bool processed = false;
@@ -1266,21 +1365,65 @@ namespace TES3MP::Native
                     && current.last.invocation != std::numeric_limits<uint64_t>::max());
                 auto execution = current.last;
                 ++execution.invocation; execution.causalEvent = 0; execution.sourceReference = execution.sourceLife = 0;
-                auto invocation = prepare(prepared.state, execution, content, resolver,
-                    MaximumInvocationsPerTransaction - prepared.invocations);
+                if (mSourceWaits)
+                {
+                    require(source->life >= current.last.sourceLife);
+                    execution.sourceReference = source->reference; execution.sourceLife = source->life;
+                    if (current.sourceWait)
+                    {
+                        const auto& wait = *current.sourceWait;
+                        require(source->life >= wait.invocation.sourceLife);
+                        const bool ownDeath = !source->living && source->killerKind == 1
+                            && source->killer == execution.character;
+                        if (!ownDeath && (!source->living || source->life == wait.invocation.sourceLife))
+                        {
+                            auto& state = prepared.state[i];
+                            if (!source->living)
+                            {
+                                require(source->killer && (source->killerKind == 1 || source->killerKind == 2)
+                                    && (source->killerKind != 1 || source->killer != execution.character));
+                                state.sourceWait->invocation.sourceLife = source->life;
+                                state.sourceWait->respawnTick = source->respawnTick;
+                            }
+                            state.scheduledTick = worldTick; processed = true;
+                            ++prepared.invocations; // Bounded wake probe, no bytecode or story clock step.
+                            continue;
+                        }
+                    }
+                }
+                auto invocation = prepare(prepared.state, execution, content, sourceResolver ? *sourceResolver : resolver,
+                    MaximumInvocationsPerTransaction - prepared.invocations, sourceResolver.get());
                 result = std::move(invocation.result);
                 // Personal presentation remains closed; never send it as shared output.
                 result.presentation.clear();
+                if (mSourceWaits && result.outcome == SharedWorldScript::Outcome::Deferred && result.sourceWait)
+                {
+                    const auto& dependency = *result.sourceWait;
+                    require(dependency.reference == source->reference && dependency.life == source->life);
+                    auto& state = prepared.state[i];
+                    state.sourceWait = Instance::SourceWait{execution, result.script, result.trace.instruction,
+                        worldTick, dependency.respawnTick};
+                    state.scheduledTick = worldTick; processed = true;
+                    prepared.invocations += invocation.invocations;
+                    continue;
+                }
                 if (result.outcome != SharedWorldScript::Outcome::Committed || !result.executed)
                 {
                     result.diagnostic = "character=" + std::to_string(execution.character)
-                        + " story=" + std::to_string(execution.story) + " scope=1 source=0 life=0 " + result.diagnostic;
+                        + " story=" + std::to_string(execution.story) + " scope=1 source="
+                        + std::to_string(execution.sourceReference) + " life=" + std::to_string(execution.sourceLife)
+                        + " " + result.diagnostic;
                     result.diagnostic.resize(std::min(result.diagnostic.size(), SharedWorldScript::MaximumDiagnosticBytes));
                     prepared.state.clear(); prepared.invocations = 0; result.executed = false;
                     return prepared;
                 }
                 prepared.state.swap(invocation.state);
                 prepared.state[i].scheduledTick = worldTick;
+                if (mSourceWaits)
+                {
+                    require(prepared.state[i].clockTicks != UINT64_MAX);
+                    ++prepared.state[i].clockTicks;
+                }
                 processed = true;
                 prepared.invocations += invocation.invocations;
                 require(prepared.invocations <= MaximumInvocationsPerTransaction);

@@ -217,7 +217,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                runtime.push(MWBase::Environment::get().getFrameDuration());
+                runtime.push(static_cast<InterpreterContext&>(runtime.getContext()).getSecondsPassed());
             }
         };
 
@@ -1807,6 +1807,22 @@ namespace MWScript
             extensions.registerInstruction("startscript", "c", Compiler::Misc::opcodeStartScript,
                 Compiler::Misc::opcodeStartScriptExplicit);
             extensions.registerInstruction("stopscript", "c", Compiler::Misc::opcodeStopScript);
+        }
+
+        void registerSourceWaitOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerFunction("getdisabled", 'l', "x", Compiler::Misc::opcodeGetDisabled, Compiler::Misc::opcodeGetDisabledExplicit);
+            extensions.registerFunction("getsecondspassed", 'f', "", Compiler::Misc::opcodeGetSecondsPassed);
+        }
+
+        void installSourceWaitOpcodes(Interpreter::Interpreter& interpreter, bool queries)
+        {
+            if (queries)
+            {
+                interpreter.installSegment5<OpGetDisabled<ImplicitRef>>(Compiler::Misc::opcodeGetDisabled);
+                interpreter.installSegment5<OpGetDisabled<ExplicitRef>>(Compiler::Misc::opcodeGetDisabledExplicit);
+            }
+            interpreter.installSegment5<OpGetSecondsPassed>(Compiler::Misc::opcodeGetSecondsPassed);
         }
 
         void registerEnableOpcodes(Compiler::Extensions& extensions)

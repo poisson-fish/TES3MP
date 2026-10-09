@@ -62,6 +62,7 @@ namespace MWScript
         {
             std::vector<ESM::Global>& mGlobals;
             std::vector<std::string>& mPresentation;
+            bool mSourceClock = false;
             ESM::Variant& global(std::string_view id) const
             {
                 const auto* found = find(mGlobals, id);
@@ -83,8 +84,12 @@ namespace MWScript
                 : InterpreterContext(&locals, {}), mGlobals(globals), mPresentation(presentation) {}
             Context(Locals& locals, std::vector<ESM::Global>& globals, std::vector<std::string>& presentation,
                 const ExecutionContext& execution, const MWWorld::ESMStore& content, const ReferenceResolver& resolver,
-                ScriptState* bank, DialogueState* dialogue, MWMechanics::NpcStats* sourceNpcStats, ReferenceState* referenceState)
-                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank, dialogue, sourceNpcStats, referenceState), mGlobals(globals), mPresentation(presentation) {}
+                ScriptState* bank, DialogueState* dialogue, MWMechanics::NpcStats* sourceNpcStats, ReferenceState* referenceState,
+                bool sourceClock)
+                : InterpreterContext(&locals, execution, content, resolver, nullptr, bank, dialogue, sourceNpcStats, referenceState), mGlobals(globals), mPresentation(presentation), mSourceClock(sourceClock) {}
+
+            float getSecondsPassed() const override
+            { require(mSourceClock, "Story clock not admitted"); return 1.f / 30; }
 
             int getGlobalShort(std::string_view id) const override { return global(id).getInteger(); }
             int getGlobalLong(std::string_view id) const override { return global(id).getInteger(); }
@@ -173,8 +178,8 @@ namespace MWScript
     }
 
     WorldScript::WorldScript(const ESM::Script& script, std::vector<ESM::Global> ownedGlobals,
-        std::span<const ESM::Script> bank)
-        : mId(script.mId), mGlobals(std::move(ownedGlobals)), mBank(!bank.empty())
+        std::span<const ESM::Script> bank, const ESM::RefId& sourceRecord)
+        : mId(script.mId), mGlobals(std::move(ownedGlobals)), mBank(!bank.empty()), mSource(sourceRecord)
     {
         require(mId.is<ESM::StringRefId>(), "World script ID must be a content string");
         name(mId.getRefIdString());
@@ -192,7 +197,9 @@ namespace MWScript
         }
         require(bank.size() <= 4, "Script bank exceeds bounds");
         std::vector<std::pair<ESM::RefId, Compiler::Locals>> members;
-        CompilerContext context(mGlobals, members);
+        require(mSource.empty() || (mBank && mSource.is<ESM::StringRefId>()), "Source query requires a script bank");
+        if (!mSource.empty()) name(mSource.getRefIdString());
+        CompilerContext context(mGlobals, members, mSource);
         for (const auto& member : bank)
         {
             require(member.mId.is<ESM::StringRefId>(), "Invalid bank script identity");
@@ -221,6 +228,7 @@ namespace MWScript
         if (mBank)
         {
             Misc::registerScriptOpcodes(extensions);
+            if (!mSource.empty()) Misc::registerSourceWaitOpcodes(extensions);
             context.setExtensions(&extensions);
         }
         Errors errors;
@@ -307,11 +315,12 @@ namespace MWScript
         auto restored = Locals::restore(before.script.mLocals, mId, mDeclarations);
         auto& locals = caller ? caller->mLocals : restored;
         auto context = execution
-            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank, dialogue, sourceNpcStats, referenceState)
+            ? std::make_unique<Context>(locals, result.state.globals, result.presentation, *execution, *content, *resolver, bank, dialogue, sourceNpcStats, referenceState, !mSource.empty())
             : std::make_unique<Context>(locals, result.state.globals, result.presentation);
         Interpreter::Interpreter interpreter;
         Interpreter::installOpcodes(interpreter);
         if (mBank) Misc::installScriptOpcodes(interpreter);
+        if (!mSource.empty()) Misc::installSourceWaitOpcodes(interpreter, !referenceState);
         if (dialogue) Dialogue::installJournalOpcodes(interpreter);
         if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
         if (referenceState) Misc::installDisableOpcodes(interpreter);

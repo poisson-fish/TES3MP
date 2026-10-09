@@ -2,10 +2,12 @@
 #define TES3MP_NATIVE_WORLD_SCRIPT_HPP
 
 #include <apps/openmw/mwscript/worldscript.hpp>
+#include <apps/openmw/mwscript/executioncontext.hpp>
 #include <components/interpreter/interpreter.hpp>
 #include <tes3mp/server_authentication.hpp>
 
 #include <functional>
+#include <optional>
 #include <span>
 
 namespace TES3MP::Native
@@ -32,6 +34,7 @@ namespace TES3MP::Native
             Interpreter::ExecutionTrace trace;
             std::vector<std::string> presentation;
             std::string diagnostic;
+            std::optional<MWScript::ScriptSourceWait> sourceWait;
         };
         using DurableSink = std::function<bool(std::span<const char>)>;
         struct Prepared
@@ -42,9 +45,11 @@ namespace TES3MP::Native
         };
 
         SharedWorldScript(const ESM::Script& script, std::vector<ESM::Global> globals,
-            std::string_view campaignContent, CredentialCrypto& crypto, std::span<const ESM::Script> bank = {});
+            std::string_view campaignContent, CredentialCrypto& crypto, std::span<const ESM::Script> bank = {},
+            const ESM::RefId& source = {});
         const Compiler::Locals& declarations() const { return mRuntime.declarations(); }
         bool bankCapable() const { return mRuntime.bankCapable(); }
+        const ESM::RefId& sourceRecord() const { return mRuntime.sourceRecord(); }
         Interpreter::Program compileResult(std::string_view source, bool physical = false,
             const ESM::RefId& reference = {}, bool restoration = false, bool relocation = false) const
         { return mRuntime.compileResult(source, physical, reference, restoration, relocation); }
@@ -61,13 +66,14 @@ namespace TES3MP::Native
         Prepared prepare(const State& committed, const MWScript::ExecutionContext& execution,
             const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver) const;
         Prepared prepareBank(const State&, const MWScript::ExecutionContext&, const MWWorld::ESMStore&,
-            const MWScript::ReferenceResolver&, MWScript::ScriptState&, MWScript::GlobalScriptDesc&) const;
+            const MWScript::ReferenceResolver&, MWScript::ScriptState&, MWScript::GlobalScriptDesc&,
+            MWScript::ReferenceState* = nullptr) const;
         Result transact(State& committed, uint64_t tick, const DurableSink& persist) const;
 
     private:
         Prepared prepareImpl(const State&, uint64_t, const MWScript::ExecutionContext*,
             const MWWorld::ESMStore*, const MWScript::ReferenceResolver*, MWScript::ScriptState* = nullptr,
-            MWScript::GlobalScriptDesc* = nullptr) const;
+            MWScript::GlobalScriptDesc* = nullptr, MWScript::ReferenceState* = nullptr) const;
         MWScript::WorldScript mRuntime;
         CredentialDigest mIdentity;
     };

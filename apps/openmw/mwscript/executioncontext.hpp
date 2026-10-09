@@ -43,6 +43,16 @@ namespace MWScript
         ScriptContextUnavailable() : std::runtime_error("Script context dependency unavailable") {}
     };
 
+    // A temporary, life-bound source dependency. It is not a death event or
+    // quest receipt; the containing authority must persist it after rollback.
+    class ScriptSourceWait : public ScriptContextUnavailable
+    {
+    public:
+        uint64_t reference, life, respawnTick;
+        ScriptSourceWait(uint64_t reference_, uint64_t life_, uint64_t respawnTick_)
+            : reference(reference_), life(life_), respawnTick(respawnTick_) {}
+    };
+
     class ReferenceResolver
     {
     public:

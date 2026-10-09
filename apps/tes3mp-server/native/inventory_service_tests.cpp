@@ -51,6 +51,7 @@
 #include <components/esm3/formatversion.hpp>
 #include <iostream>
 #include <bit>
+#include <cstring>
 #include <apps/openmw/mwworld/placedrefid.hpp>
 #include <fstream>
 #include <iomanip>
@@ -5595,10 +5596,11 @@ namespace TES3MP::Native::Testing
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
         const bool storyEnable = effectFamily == "story-enable";
+        const bool sourceWaits = effectFamily == "story-source-waits";
         const bool storyRelocationReturn = effectFamily == "story-relocation-return";
         const bool storyRelocation = storyRelocationReturn || effectFamily == "story-relocation";
         const bool storyReturn = storyRelocationReturn || storyEnable || effectFamily == "story-return";
-        const bool storyEncounter = storyReturn || storyRelocation || effectFamily == "story-encounter";
+        const bool storyEncounter = sourceWaits || storyReturn || storyRelocation || effectFamily == "story-encounter";
         const bool dialogueNpc = effectFamily == "dialogue-npc-state";
         const bool personalIntents = storyEncounter || dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
         const bool personalDialogue = personalIntents || effectFamily == "dialogue";
@@ -5860,6 +5862,7 @@ namespace TES3MP::Native::Testing
             }
             if (combat)
             {
+                if (sourceWaits) npc.mNpdt.mHealth = 20;
                 npc.mNpdtType = ESM::NPC::NPC_DEFAULT;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::ShortBlade)] = 100;
                 npc.mNpdt.mSkills[ESM::Skill::refIdToIndex(ESM::Skill::HandToHand)] = 50;
@@ -6298,7 +6301,11 @@ namespace TES3MP::Native::Testing
                     {
                         ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId(name);
                         script.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n"
-                            + (personalDialogue ? std::string{} : body) + "\nend " + name;
+                            + (sourceWaits ? name == "ledger_x73"
+                                ? "set calls to calls + 1\nset phase to phase + GetSecondsPassed\n"
+                                  "set ambient_counter_83 to ambient_counter_83 + 1\nset relay_q19.calls to relay_q19.calls + 7"
+                                : "set calls to calls + 1\nset token to npc_door_actor->GetDisabled"
+                                : personalDialogue ? std::string{} : body) + "\nend " + name;
                         out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
                     }
                 if (personalDialogue)
@@ -6349,6 +6356,14 @@ namespace TES3MP::Native::Testing
                                     ? "PositionCell 200 -32 1 5400 \"NPC Door Contact Test\"\nset ambient_counter_83 to npc_door_actor->GetPos x\n"
                                     : storyEncounter ? "Disable\nset ambient_counter_83 to GetDisabled\n" : "Choice \"Proceed\" 7\n";
                             }
+                            if (sourceWaits)
+                            {
+                                info.mSelects.clear();
+                                info.mResponse = "The source is available.";
+                                info.mResultScript = std::string_view(name) == "passage_k61"
+                                    ? "AddTopic followup_p82"
+                                    : "Journal journey_t37 10";
+                            }
                         }
                         if (dialogueDisposition && std::string_view(name) == "passage_k61")
                         {
@@ -6373,7 +6388,7 @@ namespace TES3MP::Native::Testing
                             info.save(out);
                             out.endRecord("INFO");
                         }
-                        if (personalIntents && std::string_view(name) == "passage_k61")
+                        if (!sourceWaits && personalIntents && std::string_view(name) == "passage_k61")
                         {
                             if (dialogueDisposition) info.mPrev = info.mId;
                             info.mId = ESM::RefId::stringRefId("answer_7");
@@ -9300,7 +9315,8 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (storyRelocationReturn                        ? "native-inventory-90\nmanifest "
+            out << (sourceWaits                                  ? "native-inventory-91\nmanifest "
+                : storyRelocationReturn                        ? "native-inventory-90\nmanifest "
                 : storyRelocation                               ? "native-inventory-89\nmanifest "
                 : storyEnable                                   ? "native-inventory-88\nmanifest "
                 : storyReturn                                   ? "native-inventory-87\nmanifest "
@@ -9375,10 +9391,16 @@ namespace TES3MP::Native::Testing
                     : "\ndestination 60 -240 1 120\n");
             if (melee && !cellActors) out << "processing 1 2\nmelee "
                 << std::quoted(effectFamily == "ai-creature" ? "handtohand" : "weapononehand") << " \"chop\" 1\n";
-            if (lifecycle) out << "respawn " << std::dec << (playerLives ? 20 : boundEquipment ? 90 : 3) << "\n";
-            if (characterCreation) out << "starting_items 1\n\"common_shirt_01\" 1 8\n";
+            if (lifecycle) out << "respawn " << std::dec << (sourceWaits ? 20 : playerLives ? 20 : boundEquipment ? 90 : 3) << "\n";
+            if (characterCreation) out << (sourceWaits
+                ? "starting_items 2\n\"common_shirt_01\" 1 8\n\"iron longsword\" 1 16\n"
+                : "starting_items 1\n\"common_shirt_01\" 1 8\n");
             if (sharedScript) out << "shared_script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\"\n";
-            if (personalDialogue) out << "personal_scripts 2 story 91 scripts 2 script \"ledger_x73\" running 0 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\" "
+            if (sourceWaits) out << "personal_scripts 2 story 91 scripts 2 script \"ledger_x73\" running 1 script \"relay_q19\" running 1 globals 1 \"ambient_counter_83\" "
+                "dialogues 4 \"journey_t37\" \"passage_k61\" \"followup_p82\" \"refusal_x5\" "
+                "story 92 scripts 2 script \"ledger_x73\" running 1 script \"relay_q19\" running 1 globals 1 \"ambient_counter_83\" "
+                "dialogues 4 \"journey_t37\" \"passage_k61\" \"followup_p82\" \"refusal_x5\"\n";
+            else if (personalDialogue) out << "personal_scripts 2 story 91 scripts 2 script \"ledger_x73\" running 0 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\" "
                 "dialogues 4 \"journey_t37\" \"passage_k61\" \"followup_p82\" \"refusal_x5\" "
                 "story 92 scripts 2 script \"ledger_x73\" running 0 script \"relay_q19\" running 0 globals 1 \"ambient_counter_83\" "
                 "dialogues 4 \"journey_t37\" \"passage_k61\" \"followup_p82\" \"refusal_x5\"\n";
@@ -9442,8 +9464,12 @@ namespace TES3MP::Native::Testing
             const auto shirt = ESM::RefId::stringRefId("common_shirt_01");
             const StartingItem starting{id<ItemPrototypeId>(MWWorld::inventoryRecordId(shirt)), 1,
                 uint8_t(MWWorld::InventoryStore::Slot_Shirt)};
+            std::vector<StartingItem> expectedStarters{starting};
+            if (sourceWaits) expectedStarters.push_back({id<ItemPrototypeId>(MWWorld::inventoryRecordId(
+                ESM::RefId::stringRefId("iron longsword"))), 1,
+                uint8_t(MWWorld::InventoryStore::Slot_CarriedRight)});
             auto catalog = host.characterContent(manifest.id(), checkpoint, checkpoint);
-            require(catalog && std::ranges::equal(catalog->startingInventory(), std::span(&starting, 1)),
+            require(catalog && std::ranges::equal(catalog->startingInventory(), expectedStarters),
                 "Configured native starter policy missing from completion catalog");
             std::ifstream descriptorInput(descriptor);
             std::string baseDescriptor((std::istreambuf_iterator<char>(descriptorInput)), std::istreambuf_iterator<char>());
@@ -9491,6 +9517,8 @@ namespace TES3MP::Native::Testing
                 choose(SetCharacterAppearance{appearance});
                 if (index) choose(SetCharacterClass{CustomClassDefinition{"Scholar", {}, ClassSpecialization::Magic,
                     {0, 1}, {2, 3, 4, 5, 6}, {7, 8, 9, 10, 11}}});
+                else if (sourceWaits) choose(SetCharacterClass{CustomClassDefinition{"Fighter", {},
+                    ClassSpecialization::Combat, {0, 5}, {0, 1, 2, 3, 4}, {5, 6, 7, 8, 26}}});
                 else choose(SetCharacterClass{cls->id});
                 choose(SetCharacterBirthsign{*sign}); choose(CompleteCharacterCreation{});
             }
@@ -9514,7 +9542,8 @@ namespace TES3MP::Native::Testing
             auto abandoned = native.prepareCharacterCompletion(authority, id<PlayerId>(1), completed[0], id<ServerTick>(2));
             require(bool(abandoned), "Concrete native completion did not prepare");
             auto preview = service.projectInventory(authority, id<SessionId>(1), id<ServerTick>(2), id<CanonicalRevision>(2), abandoned.get());
-            require(preview && preview->playerInventory.front().stacks.size() == 1, "Completion inventory missing from staged projection");
+            require(preview && preview->playerInventory.front().stacks.size() == expectedStarters.size(),
+                "Completion inventory missing from staged projection");
             require(preview->equipment && preview->equipment->characterBodies
                 && preview->equipment->appearances == std::vector<PublicPlayerAppearance>{{id<PlayerId>(1), *completed[0].appearance()}},
                 "Staged completion did not project only the established public body");
@@ -9642,6 +9671,218 @@ namespace TES3MP::Native::Testing
                         return owner.prepareNativePlayerTick(
                             authority, id<ServerTick>(tick), 1.f / 30, std::move(input), &world, {}, {});
                     };
+                    if (sourceWaits)
+                    {
+                        require(policy->sourceWaits(), "V91 source-wait admission absent");
+                        const auto number = [](const auto& runtime, std::string_view name) {
+                            for (const auto& [key, value] : runtime.runtime.script.mLocals.mVariables)
+                                if (key == name) return value.getFloat();
+                            throw std::runtime_error("Source-wait local missing");
+                        };
+                        const auto bob = [&](const auto& owner) {
+                            const auto values = state(owner);
+                            return *std::ranges::find_if(values, [](const auto& s) {
+                                return s.last.character == 2 && s.last.story == 91;
+                            });
+                        };
+                        const auto read = [](const auto& bytes) {
+                            return readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+                        };
+                        auto begin = prepare(native, 5, 2, 101, request);
+                        require(begin && begin->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                            == CanonicalDurabilityResult::Committed, "B's source-dependent bank did not start");
+                        require(bob(service).runtime.runtime.script.mRunning && bob(service).dialogue.entries.empty(),
+                            "Starting a source wait granted quest credit");
+                        auto establishedRecords = records;
+                        for (size_t i = 0; i < establishedRecords.size(); ++i)
+                        {
+                            establishedRecords[i].characterProfile = completed[i];
+                            establishedRecords[i].savedPlayer = authority.players()[i];
+                        }
+                        auto establishedRegistry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+                            PlayerIdentityRegistry::create(*crypto, storage, establishedRecords));
+                        auto run = std::make_unique<InventoryHost>(descriptor, manifest, *establishedRegistry, *crypto, image(service));
+                        uint64_t tick = 5, deathTick = 0;
+                        std::vector<std::byte> deadImage;
+                        PersonalScripts::Instance suspended;
+                        const auto attack = [&](InventoryService& owner, uint64_t at) {
+                            const auto* player = authority.findPlayer(id<PlayerId>(1));
+                            ClientMeleeAttackCommand command{id<SessionId>(1), SessionGeneration::initial(),
+                                id<CommandSequence>(at), id<CommandId>(at), id<CanonicalRevision>(at),
+                                id<ActorId>(request.speaker), id<ServerTick>(at), CombatRevision::initial(),
+                                CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
+                            ServerCommandProposal input(id<SessionId>(1), SessionGeneration::initial(), command.commandSequence,
+                                command.commandId, command.observedCanonicalRevision,
+                                EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                MeleeAttackCommandProposal(command));
+                            return owner.prepareMeleeAttack(authority, input, id<ServerTick>(at));
+                        };
+                        for (; tick < 605 && !deathTick;)
+                        {
+                            auto& owner = dynamic_cast<InventoryService&>(run->service()); owner.synchronizeCells(authority);
+                            const auto previous = image(owner); const auto before = bob(owner);
+                            const auto core = read(previous);
+                            const bool launch = (!core.combat->swings[0] || !core.combat->swings[0]->pending())
+                                && !core.combat->hitRecoveryTicks[0];
+                            auto input = launch ? attack(owner, tick + 1) : std::unique_ptr<PreparedNativeInventory>{};
+                            if (launch) require(bool(input), "A's source-killing melee input rejected");
+                            const auto sceneBefore = owner.characterBinding().mNavigatingActor->image();
+                            auto pending = owner.prepareNativePlayerTick(authority, id<ServerTick>(++tick), 1.f/30,
+                                std::move(input), &world, {}, {});
+                            require(bool(pending), "Source-death gameplay transaction absent");
+                            std::vector<std::byte> candidate;
+                            require(pending->commit([&](auto bytes) {
+                                candidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                            }) == CanonicalDurabilityResult::Rejected && image(owner) == previous
+                                && owner.characterBinding().mNavigatingActor->image() == sceneBefore,
+                                "Rejected source death/wait leaked gameplay, banks or scene");
+                            const auto proposed = read(candidate);
+                            if (proposed.life->respawnTick)
+                            {
+                                const auto proposedStories = policy->restore(proposed.personalScripts);
+                                const auto& wait = *std::ranges::find_if(proposedStories, [](const auto& s) {
+                                    return s.last.character == 2 && s.last.story == 91;
+                                });
+                                require(proposed.life->deaths.back().killer == 1 && proposed.life->deaths.back().killerKind == 1
+                                    && wait.sourceWait && wait.sourceWait->invocation.sourceReference == request.speaker
+                                    && wait.sourceWait->invocation.sourceLife == 1 && wait.sourceWait->sinceTick == tick
+                                    && wait.sourceWait->respawnTick == proposed.life->respawnTick
+                                    && wait.runtime.tick == before.runtime.tick && wait.last == before.last
+                                    && wait.clockTicks == before.clockTicks
+                                    && number(wait.runtime, "calls") == number(before.runtime, "calls")
+                                    && number(wait.runtime, "phase") == number(before.runtime, "phase")
+                                    && number(wait.members[0], "calls") == number(before.members[0], "calls")
+                                    && wait.dialogue.entries.empty() && wait.eventCursor == before.eventCursor,
+                                    "A's death granted B credit or failed late-bank/clock rollback");
+                                deathTick = tick;
+                            }
+                            require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                == CanonicalDurabilityResult::Committed && image(owner) == candidate,
+                                "Source death/wait did not install the complete accepted candidate");
+                            if (deathTick) { deadImage = image(owner); suspended = bob(owner); }
+                        }
+                        if (!deathTick)
+                        {
+                            const auto failed = read(image(run->service()));
+                            const auto pose = dynamic_cast<InventoryService&>(run->service()).characterBinding().mNavigatingActor->snapshot();
+                            std::cerr << "source kill: npc-health=" << failed.combat->actors[2][8][2]
+                                << " player-health=" << failed.combat->actors[0][8][2]
+                                << " sword-skill=" << failed.combat->actors[0][11 + ESM::Skill::refIdToIndex(ESM::Skill::LongBlade)][0]
+                                << " npc-position=" << pose.mPosition[0] << ',' << pose.mPosition[1] << '\n';
+                        }
+                        require(deathTick && suspended.sourceWait, "A did not kill B's required source");
+                        for (bool wrongLife : {true, false})
+                        {
+                            const auto decoded = read(deadImage);
+                            auto corruptStories = policy->restore(decoded.personalScripts);
+                            auto& blocked = *std::ranges::find_if(corruptStories, [](const auto& s) {
+                                return s.last.character == 2 && s.last.story == 91;
+                            });
+                            if (wrongLife) ++blocked.sourceWait->invocation.sourceLife;
+                            else ++blocked.sourceWait->respawnTick;
+                            const auto corrupt = policy->encode(corruptStories);
+                            require(corrupt.size() == decoded.personalScripts.size(), "Wait corruption changed frame bounds");
+                            auto invalid = deadImage;
+                            const auto offset = decoded.personalScripts.data() - reinterpret_cast<const char*>(deadImage.data());
+                            std::memcpy(invalid.data() + offset, corrupt.data(), corrupt.size());
+                            bool rejected = false;
+                            try { InventoryHost bad(descriptor, manifest, *establishedRegistry, *crypto, invalid); }
+                            catch (const std::invalid_argument&) { rejected = true; }
+                            require(rejected && image(run->service()) == deadImage,
+                                "Recovery installed a wait inconsistent with canonical death/life/deadline history");
+                        }
+                        const auto verifySilent = [&](auto& owner, const CanonicalServerState& players) {
+                            owner.synchronizeCells(players);
+                            const auto views = owner.projectPersonalDialogue(players, id<SessionId>(2),
+                                id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                            require(views.size() == 2 && std::ranges::all_of(views, [](const auto& view) {
+                                return view.response.empty() && view.messages.empty() && view.entries.empty() && view.quests.empty();
+                            }), "Waiting reconnect/restart replayed output or false quest credit");
+                        };
+                        run = std::make_unique<InventoryHost>(descriptor, manifest, *establishedRegistry, *crypto, deadImage);
+                        require(image(run->service()) == deadImage && bob(run->service()).sourceWait == suspended.sourceWait,
+                            "Waiting restart changed canonical banks/dependency/clock");
+                        verifySilent(run->service(), authority);
+                        auto sessions = std::vector(authority.activeSessions().begin(), authority.activeSessions().end());
+                        const auto& old = sessions[1];
+                        sessions[1] = std::get<CanonicalSessionProgress>(createCanonicalSessionProgress(old.sessionId(),
+                            id<SessionGeneration>(2), old.playerId(), old.entityId(), old.highestContiguousFinalizedCommand(),
+                            old.finalizedCommandHistory()));
+                        const auto reconnect = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), sessions));
+                        verifySilent(run->service(), reconnect);
+                        require(image(run->service()) == deadImage, "New session generation changed the durable wait");
+                        const auto deadline = read(deadImage).life->respawnTick;
+                        for (; tick < deadline;)
+                        {
+                            auto& owner = dynamic_cast<InventoryService&>(run->service()); owner.synchronizeCells(authority);
+                            const auto previous = image(owner); const auto sceneBefore = owner.characterBinding().mNavigatingActor->image();
+                            const auto sharedBefore = owner.characterBinding().mSharedScript->restore(read(previous).sharedScript).tick;
+                            auto pending = owner.prepareNativePlayerTick(authority, id<ServerTick>(++tick), 1.f/30,
+                                {}, &world, {}, {});
+                            require(bool(pending), "Waiting/respawn gameplay tick absent");
+                            if (tick == deadline)
+                                require(pending->commit([](auto) { return CanonicalDurabilityResult::Rejected; })
+                                    == CanonicalDurabilityResult::Rejected && image(owner) == previous
+                                    && owner.characterBinding().mNavigatingActor->image() == sceneBefore
+                                    && bob(owner).sourceWait == suspended.sourceWait,
+                                    "Rejected respawn/resume leaked the new life or changed the paused story");
+                            require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                == CanonicalDurabilityResult::Committed, "Waiting/respawn commit failed");
+                            const auto publicImage = image(owner);
+                            require(read(publicImage).tick == tick
+                                && owner.characterBinding().mSharedScript->restore(read(publicImage).sharedScript).tick == sharedBefore + 1,
+                                "A personal source wait stopped the shared world/script clock");
+                            const auto progress = bob(owner);
+                            require(progress.dialogue.entries.empty() && progress.eventCursor == suspended.eventCursor,
+                                "Death/respawn fabricated a quest event or journal credit");
+                            if (tick < deadline)
+                                require(progress.sourceWait == suspended.sourceWait && progress.clockTicks == suspended.clockTicks
+                                    && progress.runtime.tick == suspended.runtime.tick
+                                    && number(progress.runtime, "phase") == number(suspended.runtime, "phase"),
+                                    "System wait advanced affected timers or bytecode");
+                            else
+                                require(!progress.sourceWait && progress.last.sourceLife == 2
+                                    && progress.last.invocation == suspended.sourceWait->invocation.invocation
+                                    && progress.clockTicks == suspended.clockTicks + 1
+                                    && number(progress.runtime, "calls") == number(suspended.runtime, "calls") + 1
+                                    && number(progress.members[0], "calls") == number(suspended.members[0], "calls") + 8
+                                    && std::abs(number(progress.runtime, "phase") - number(suspended.runtime, "phase") - 1.f/30) < .00001f,
+                                    "Correct canonical respawn did not resume the pending occurrence once");
+                        }
+                        const auto resumed = image(run->service());
+                        require(read(resumed).life->generation == 2 && read(resumed).life->deaths == read(deadImage).life->deaths,
+                            "Resume duplicated death history or NPC lives");
+                        run = std::make_unique<InventoryHost>(descriptor, manifest, *establishedRegistry, *crypto, resumed);
+                        require(image(run->service()) == resumed, "Resumed restart changed bank/life/clock receipts");
+                        verifySilent(run->service(), authority);
+                        // A reconstructed old-life dialogue cannot turn the foreign death into quest credit.
+                        auto& owner = dynamic_cast<InventoryService&>(run->service());
+                        std::unique_ptr<PreparedNativeInventory> stale;
+                        auto oldRequest = request; oldRequest.topic = "followup_p82"; oldRequest.revision = 1;
+                        require(!owner.appendDialogueIntent(authority, proposal(2, 102, oldRequest), stale, &world)
+                            && image(owner) == resumed, "Old-life source request granted quest credit after restart");
+                        oldRequest.life = 2;
+                        auto continued = prepare(owner, tick + 1, 2, 102, oldRequest);
+                        require(continued && image(owner) == resumed, "New-life dialogue did not stage from the resumed bank");
+                        const auto outputs = owner.projectPersonalDialogue(authority, id<SessionId>(2),
+                            id<ServerTick>(tick + 1), id<CanonicalRevision>(tick + 1), continued.get());
+                        require(outputs[0].life == 2 && outputs[0].entries.size() == 1 && outputs[0].quests[0].index == 10,
+                            "B could not continue the stock quest against the correct respawned life");
+                        require(continued->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                            == CanonicalDurabilityResult::Committed && bob(owner).eventCursor == suspended.eventCursor + 1,
+                            "Explicit new-life dialogue did not commit exactly one legitimate quest occurrence");
+                        const auto earned = image(owner);
+                        run = std::make_unique<InventoryHost>(descriptor, manifest, *establishedRegistry, *crypto, earned);
+                        run->service().synchronizeCells(authority);
+                        const auto recoveredQuest = run->service().projectPersonalDialogue(authority, id<SessionId>(2),
+                            id<ServerTick>(tick + 1), id<CanonicalRevision>(tick + 1));
+                        require(image(run->service()) == earned && recoveredQuest[0].entries == outputs[0].entries
+                            && recoveredQuest[0].messages.empty() && recoveredQuest[0].response.empty(),
+                            "Legitimate continuation replayed credit/notices on restart");
+                        std::cout << "source waits host: A's stock melee death; coherent wait/clock/bank rollback; "
+                            "failed death and respawn writes; silent reconnect/restart; new-life single resume, no quest credit\n";
+                        return;
+                    }
                     if (storyEncounter)
                     {
                         require(service.hasStoryEncounters(), "V86 encounter policy absent");

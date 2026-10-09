@@ -48,9 +48,11 @@ Native: `build/logs/m5-relocation-return-{state,host-02}.log`;
 V89/V88 regressions: `build/logs/m5-relocation-return-{v89-state,enable-regression}.log`.
 Rendered: `build/m5-relocation-return-{desktop,restart}-01/result.json`.
 
-**Next:** bounded durable source waits under the
-[contract](DECISIONS.md#m5-implementation-contract): foreign NPC death suspends
-B's dependent invocation/clock; persist reference/life/wake reason, resume against
-the correct respawned life, and prove failed-write rollback plus silent recovery
-without false quest credit. Escorts/mutable AI, broader restoration and unchanged
-Seyda Neen/TR proofs remain later work. M5 stays open.
+**V91 durable source waits:** fresh images/capability 41. Foreign NPC death persists
+one dependency/story and pauses the stock clock after bank rollback. Newer canonical
+lives resume once. Rejected death/respawn writes, silent reconnect/restart, stale-life
+rejection and B's legitimate continuation: `build/logs/m5-source-wait-{state,host-09}.log`.
+
+**Next:** attributed life-event cursors and fair opportunities under the
+[contract](DECISIONS.md#m5-implementation-contract). Health/OnDeath, wait UI,
+escorts and unchanged Seyda Neen/TR proofs remain open. M5 stays open.

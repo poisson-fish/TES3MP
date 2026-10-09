@@ -6949,6 +6949,7 @@ int main(int argc, char** argv)
                             || std::string_view(argv[1]) == "story-enable"
                             || std::string_view(argv[1]) == "story-relocation"
                             || std::string_view(argv[1]) == "story-relocation-return"
+                            || std::string_view(argv[1]) == "story-source-waits"
                             || std::string_view(argv[1]) == "dialogue-journal")))
                 || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives"
                     || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))

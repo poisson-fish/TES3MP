@@ -176,6 +176,7 @@ namespace MWScript
         int getPCBounty() const override;
 
         std::string_view getCurrentCellName() const override;
+        virtual float getSecondsPassed() const;
 
         void executeActivation(const MWWorld::Ptr& ptr, const MWWorld::Ptr& actor);
         ///< Execute the activation action for this ptr. If ptr is mActivated, mark activation as handled.

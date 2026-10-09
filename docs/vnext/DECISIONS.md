@@ -256,30 +256,25 @@ Early baselines and other-story choices install silently, without expansion/rest
 V85 scene edits stay closed.
 
 **Terminal encounters (V86–88).** One dry interior, living unscripted NPC and static
-geometry. Source-only stock Disable discovery rolls back/retries the same occurrence;
-charge every attempt. Scope/origins commit with gameplay without new loot/lives.
-Lookup/presentation/Bullet/combat agree; failed queries restore masks. Terminal
-banks/interactions freeze; recovery is silent. V87 returns grounded online living
-bodies beyond quiescent NPC/peer hull boundaries, retaining dormant outcomes.
-V88 runs fixed original-life stock Enable (≤16 instructions/one call); restoration/
-occupancy commit together. Fresh images/capability 41; other banks resume.
-General restoration stays closed.
+geometry. Stock source Disable discovery rolls back/retries the same occurrence,
+charging every attempt. Scope/origins join gameplay without new loot/lives.
+Lookup/presentation/Bullet/combat agree; failed queries restore masks; terminal banks
+freeze. V87 returns grounded bodies beyond quiescent NPC/peer hulls, retaining outcomes.
+V88 fixed original-life Enable (≤16 instructions/one call) commits restoration/occupancy.
+Fresh images/capability 41; silent recovery; general restoration stays closed.
 
 **Source relocation (V89).** Stock source-only Position/PositionCell/GetPos/GetAngle
-share a staged reference. Same interior; coordinates ≤1,000,000, displacement
-≤4,096, rotation ≤360°; existing instruction/call limits. Inert destination/origin/
-banks/progression/receipts commit together. Validate scoped overlap before durability,
-geometry before recovery; borrowed Bullet transforms restore on failure.
-V89 remains occupied. Fresh images/capability 42; ≤37 optional capabilities; silent
-recovery. No new AI/combat/inventory/life writer or mixed removal/relocation.
+share a staged reference within [admission bounds](DEVELOPMENT.md). Inert pose/origin/
+banks/progression/receipts commit together. Validate overlap before durability,
+geometry before recovery; borrowed transforms restore on failure. Occupied scopes,
+fresh images/capability 42, ≤37 optional capabilities; silent recovery. No new writer
+or mixed removal/relocation.
 
 **Relocated return (V90).** Grounded online living bodies clear quiescent original/
 destination NPC and shared peer hull boundaries; require living original source life.
-Occupancy commits with gameplay while destination/origin/completed banks/receipts
-stay dormant. Shared physics/presentation resume the public source without Enable,
-teleport home, renewed inventory/life or merging. Rejection installs nothing;
-uncertainty closes authority; exact recovery is silent. Fresh images/capability 42.
-Escorts/mutable AI remain later; M5 stays open.
+Occupancy commits while outcomes/receipts remain dormant. Preserve source/inventory/life;
+rejection installs nothing, uncertainty closes authority. Fresh images/capability 42;
+silent recovery. Escorts/mutable AI remain later; M5 stays open.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound

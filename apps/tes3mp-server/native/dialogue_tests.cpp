@@ -1577,6 +1577,133 @@ namespace
             "stale-life/version/truncation rejection; silent duplicate/restart and B's independent completion\n";
     }
 
+    void sourceWaits(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        std::vector<ESM::Script> scripts;
+        for (const auto& [name, body] : std::vector<std::pair<std::string, std::string>>{
+            {"ledger_v63", "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
+                "set personal_counter to personal_counter + 1\nset relay_n48.calls to relay_n48.calls + 7"},
+            {"relay_n48", "set calls to calls + 1\nset blocked to speaker_r29->GetDisabled"}})
+        {
+            ESM::Script script; script.blank(); script.mId = id(name);
+            script.mScriptText = "begin " + name + "\nlong calls\nfloat timer\nshort blocked\n" + body + "\nend";
+            scripts.push_back(script);
+        }
+        ESM::Global global; global.blank(); global.mId = id("personal_counter");
+        global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
+        auto primary = std::make_shared<SharedWorldScript>(scripts[0], std::vector{global}, "source-waits-1", crypto,
+            scripts, id("speaker_r29"));
+        auto relay = std::make_shared<SharedWorldScript>(scripts[1], std::vector{global}, "source-waits-1", crypto,
+            scripts, id("speaker_r29"));
+        std::vector<PersonalScripts::Definition> definitions;
+        for (const uint64_t character : {11, 22})
+            definitions.push_back({character, 31, primary, {{relay, character == 22}}, character == 22,
+                records(), PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("chamber_t91")}});
+        PersonalScripts policy(7, definitions, crypto, true, true, true, false, false, false, true);
+        auto state = policy.initial();
+        struct NoFallback final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::runtime_error("Source wait fell through to live world"); }
+        } resolver;
+        const auto number = [](const auto& runtime, std::string_view name) {
+            for (const auto& [key, value] : runtime.runtime.script.mLocals.mVariables)
+                if (key == name) return value.getFloat();
+            throw std::runtime_error("Wait fixture local absent");
+        };
+        PersonalScripts::Source source{41, 1, 0, id("speaker_r29"), true};
+        const std::array<uint64_t, 1> bob{22};
+        auto step = policy.prepareScheduled(state, 1, bob, fixture.content, resolver, &source);
+        if (!step.result.executed) throw std::runtime_error(step.result.diagnostic);
+        require(step.result.executed && step.invocations == 2 && step.state[1].clockTicks == 1
+            && number(step.state[1].runtime, "calls") == 1 && number(step.state[1].members[0], "calls") == 8,
+            "Living source did not use stock bank/query/clock");
+        state.swap(step.state); const auto before = policy.encode(state);
+        source.living = false; source.respawnTick = 20; source.killer = 11; source.killerKind = 1;
+        auto waiting = policy.prepareScheduled(state, 2, bob, fixture.content, resolver, &source);
+        require(waiting.result.outcome == SharedWorldScript::Outcome::Committed && waiting.result.executed
+            && waiting.invocations == 2 && waiting.state[1].sourceWait && !waiting.image.empty()
+            && policy.encode(state) == before && waiting.state[1].last == state[1].last
+            && waiting.state[1].runtime.tick == 1 && waiting.state[1].clockTicks == 1
+            && number(waiting.state[1].runtime, "calls") == 1
+            && number(waiting.state[1].runtime, "timer") == 1.f / 30
+            && number(waiting.state[1].members[0], "calls") == 8
+            && waiting.state[1].runtime.runtime.globals.front().mValue.getInteger() == 1
+            && waiting.state[1].eventCursor == 0 && waiting.state[1].dialogue.quests.empty()
+            && waiting.result.presentation.empty() && waiting.state[1].runtime.runtime.script.mRunning,
+            "Foreign death leaked late bank/clock/progression effects or deactivated a waiting script");
+        const auto& dependency = *waiting.state[1].sourceWait;
+        require(dependency.invocation.sourceReference == 41 && dependency.invocation.sourceLife == 1
+            && dependency.invocation.invocation == 2 && dependency.script == id("relay_n48")
+            && dependency.reason == 1 && dependency.sinceTick == 2 && dependency.respawnTick == 20,
+            "Wait lost its durable invocation/reference/life/wake identity");
+        state.swap(waiting.state); const auto saved = policy.encode(state);
+        PersonalScripts restarted(7, definitions, crypto, true, true, true, false, false, false, true);
+        state = restarted.restore(saved);
+        require(restarted.encode(state) == saved, "Source wait recovery was not exact");
+        auto view = PersonalScripts::view(state[1], *SessionId::fromValue(9), SessionGeneration::initial(),
+            ServerTick::initial(), CanonicalRevision::initial());
+        require(view.messages.empty() && view.response.empty() && view.entries.empty(),
+            "Reconnect/restart replayed notices or invented quest credit");
+        auto offline = restarted.prepareScheduled(state, 9, {}, fixture.content, resolver, &source);
+        require(!offline.result.executed && offline.image.empty() && restarted.encode(state) == saved,
+            "Offline story accrued clock time or changed its dependency");
+        const auto overdueOffline = restarted.prepareScheduled(state, 40, {}, fixture.content, resolver, &source);
+        require(overdueOffline.result.outcome == SharedWorldScript::Outcome::Committed
+            && !overdueOffline.result.executed && overdueOffline.image.empty(),
+            "An inactive overdue respawn blocked shared time or invented a new life");
+        auto paused = restarted.prepareScheduled(state, 10, bob, fixture.content, resolver, &source);
+        require(paused.invocations == 1 && paused.state[1].clockTicks == 1 && paused.state[1].runtime.tick == 1,
+            "Waiting probe executed bytecode or advanced the story clock");
+        state.swap(paused.state);
+        source.living = true; source.respawnTick = 0;
+        auto wrongLife = restarted.prepareScheduled(state, 11, bob, fixture.content, resolver, &source);
+        require(wrongLife.state[1].sourceWait && wrongLife.state[1].runtime.tick == 1,
+            "Same-life resurrection falsely satisfied a respawn dependency");
+        source.life = 2; source.living = false; source.respawnTick = 30;
+        auto repeated = restarted.prepareScheduled(state, 12, bob, fixture.content, resolver, &source);
+        require(repeated.state[1].sourceWait->invocation.sourceLife == 2
+            && repeated.state[1].sourceWait->sinceTick == 2 && repeated.state[1].clockTicks == 1,
+            "Repeated foreign death lost pause duration or pinned an obsolete life");
+        state.swap(repeated.state); source.life = 1;
+        require(restarted.prepareScheduled(state, 13, bob, fixture.content, resolver, &source).result.outcome
+            == SharedWorldScript::Outcome::Rejected, "Regressed canonical life resumed a wait");
+        source.life = 3; source.living = true; source.respawnTick = 0;
+        auto resumed = restarted.prepareScheduled(state, 30, bob, fixture.content, resolver, &source);
+        require(resumed.result.executed && resumed.invocations == 2 && !resumed.state[1].sourceWait
+            && resumed.state[1].last.sourceLife == 3 && resumed.state[1].last.invocation == 2
+            && resumed.state[1].clockTicks == 2 && number(resumed.state[1].runtime, "calls") == 2
+            && number(resumed.state[1].runtime, "timer") == 2.f / 30
+            && number(resumed.state[1].members[0], "calls") == 16
+            && resumed.state[1].dialogue.quests.empty() && resumed.state[1].eventCursor == 0,
+            "New life did not resume the same occurrence once, or wait time became story time/quest credit");
+        state.swap(resumed.state);
+        auto duplicate = restarted.prepareScheduled(state, 30, bob, fixture.content, resolver, &source);
+        require(!duplicate.result.executed && duplicate.image.empty(), "Resumed occurrence replayed");
+        auto malformed = restarted.restore(saved); malformed[1].sourceWait->reason = 2;
+        rejects([&] { restarted.encode(malformed); }, "Unknown wake condition accepted");
+        malformed = restarted.restore(saved); malformed[1].sourceWait->invocation.sourceReference = 42;
+        rejects([&] { restarted.encode(malformed); }, "Different placement accepted a source dependency");
+        rejects([&] { restarted.restore(std::span(saved).first(saved.size() - 1)); }, "Truncated source wait accepted");
+        PersonalScripts previous(7, fixture.definitions, crypto, true, true, true);
+        rejects([&] { previous.restore(saved); }, "Prior policy silently restored source waits");
+        source = {41, 1, 20, id("speaker_r29"), false, 22, 1};
+        const auto own = policy.prepareScheduled(policy.initial(), 2, bob, fixture.content, resolver, &source);
+        require(own.result.outcome == SharedWorldScript::Outcome::Committed && !own.state[1].sourceWait
+            && own.state[1].dialogue.entries.empty() && own.state[1].eventCursor == 0
+            && number(own.state[1].members[0], "blocked") == 0,
+            "Own death was invented as a foreign wait, disable result or quest credit");
+        source.killer = 0; source.killerKind = 0;
+        require(policy.prepareScheduled(policy.initial(), 2, bob, fixture.content, resolver, &source).result.outcome
+            == SharedWorldScript::Outcome::Rejected, "Ambiguous death was invented as a foreign wait");
+        auto unsupported = scripts[0]; unsupported.mScriptText = "begin ledger_v63\nshort credit\nset credit to OnDeath\nend";
+        rejects([&] { SharedWorldScript invalid(unsupported, {global}, "source-waits-1", crypto, scripts, id("speaker_r29")); },
+            "Unattributed death-credit API admitted");
+        std::cout << "source waits: late-bank rollback; durable dependency/paused stock timer; bounded probes; "
+            "foreign/own/ambiguous and stale-life checks; repeated death; correct-life single resume; silent exact recovery, no quest credit\n";
+    }
+
     void stock(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto);
@@ -1596,6 +1723,8 @@ namespace
         auto initial = runtime.initial();
         auto locals = MWScript::Locals::restore(initial.runtime.script.mLocals, initial.runtime.script.mId, runtime.declarations());
         MWScript::InterpreterContext context(&locals, fixture.actor.getPtr());
+        environment.setFrameDuration(.125f);
+        require(context.getSecondsPassed() == .125f, "Stock clock stopped reading the current frame duration");
         require(context.getDialogueState() == nullptr, "Stock caller unexpectedly acquired staged dialogue");
         const auto program = runtime.compileResult("Journal journey_t37 10\nSetJournalIndex journey_t37 5\n"
             "set calls to GetJournalIndex journey_t37");
@@ -1606,6 +1735,7 @@ namespace
         Resolver resolver; resolver.expected = {MWScript::ExecutionContext::Ownership::Character, 7, 31, 1, 11, 41, 3, 1, 54};
         resolver.actor = fixture.actor.getPtr();
         MWScript::InterpreterContext scoped(&locals, resolver.expected, fixture.content, resolver);
+        rejects([&] { (void)scoped.getSecondsPassed(); }, "Unadmitted scoped clock fell through to shared frame time");
         rejects([&] { interpreter.run(runtime.compileResult("FillJournal"), scoped, 4096); },
             "Full stock installer let a scoped caller bypass staged dialogue services");
         MWScript::Stats::installOpcodes(interpreter);
@@ -1652,6 +1782,7 @@ int main(int argc, char** argv)
         else if (filter == "enable") encounter(*crypto, true);
         else if (filter == "relocation") relocation(*crypto);
         else if (filter == "relocation-return") relocation(*crypto, true);
+        else if (filter == "source-waits") sourceWaits(*crypto);
         else if (filter == "substitutions")
             substitutions(*crypto);
         else if (filter == "journal") journal(*crypto);

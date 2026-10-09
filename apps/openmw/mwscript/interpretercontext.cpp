@@ -751,6 +751,12 @@ namespace MWScript
         return getPlayerStats().getBounty();
     }
 
+    float InterpreterContext::getSecondsPassed() const
+    {
+        requireUnscopedService();
+        return MWBase::Environment::get().getFrameDuration();
+    }
+
     std::string_view InterpreterContext::getCurrentCellName() const
     {
         requireUnscopedService();
