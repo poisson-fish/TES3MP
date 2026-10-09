@@ -8,6 +8,8 @@
 #include <MyGUI_Button.h>
 #include <MyGUI_InputManager.h>
 #include <MyGUI_TextBox.h>
+#include <MyGUI_EditBox.h>
+#include <MyGUI_Gui.h>
 
 #include <components/misc/strings/algorithm.hpp>
 #include <components/widgets/imagebutton.hpp>
@@ -21,6 +23,8 @@
 #include "journalbooks.hpp"
 #include "journalviewmodel.hpp"
 #include "windowbase.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
+#include <tes3mp/personal_dialogue.hpp>
 
 namespace
 {
@@ -59,6 +63,8 @@ namespace
         bool mOptionsMode;
         bool mTopicsMode;
         bool mAllQuests;
+        MyGUI::EditBox* mEncounterStatus = nullptr;
+        bool mStatusExpanded = false;
 
         template <typename T>
         T* getWidget(std::string_view name)
@@ -94,6 +100,11 @@ namespace
             , JournalWindow()
         {
             center();
+            mEncounterStatus = MyGUI::Gui::getInstance().createWidget<MyGUI::EditBox>("MW_TextEdit",
+                MyGUI::IntCoord(0, 0, 565, 80), MyGUI::Align::Default, "JournalBooks", "TES3MPEncounterStatus");
+            mEncounterStatus->setEditReadOnly(true);
+            mEncounterStatus->setEditWordWrap(true);
+            mEncounterStatus->setVisible(false);
 
             adviseButtonClick(OptionsBTN, &JournalWindowImpl::notifyOptions);
             adviseButtonClick(PrevPageBTN, &JournalWindowImpl::notifyPrevPage);
@@ -279,7 +290,53 @@ namespace
             mTopicIndexBook.reset();
         }
 
-        void setVisible(bool newValue) override { WindowBase::setVisible(newValue); }
+        ~JournalWindowImpl() override
+        {
+            MyGUI::Gui::getInstance().destroyWidget(mEncounterStatus);
+        }
+
+        void onFrame(float) override
+        {
+            std::string text;
+            auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+            if (multiplayer && multiplayer->ownsPersonalDialogue())
+                for (const auto& view : multiplayer->personalDialogue())
+                    if (view.encounter)
+                    {
+                        const auto& status = *view.encounter;
+                        if (!text.empty()) text += "\n";
+                        text += status.sourceName.empty() ? "Encounter" : status.sourceName;
+                        if (status.waitSince)
+                        {
+                            text += ": waiting for the encounter to return; this death gives you no story credit.";
+                            if (status.respawnTick > view.serverTick.value())
+                                text += " Expected return in " + std::to_string((status.respawnTick - view.serverTick.value()) / 30
+                                    + ((status.respawnTick - view.serverTick.value()) % 30 != 0))
+                                    + " seconds while the area is active.";
+                            else text += " Return time is not yet known.";
+                        }
+                        if (status.reservedLife) text += " Your next encounter is reserved.";
+                    }
+            mEncounterStatus->setCaption(text);
+            mEncounterStatus->setVisible(!text.empty() && mMainWidget->getVisible());
+            if (mStatusExpanded != !text.empty())
+            {
+                mStatusExpanded = !text.empty();
+                center();
+            }
+            if (mStatusExpanded)
+            {
+                mMainWidget->setPosition(mMainWidget->getLeft(), std::max(86, mMainWidget->getTop()));
+                const auto book = mMainWidget->getAbsoluteCoord();
+                mEncounterStatus->setCoord(book.left, book.top - 86, book.width, 80);
+            }
+        }
+
+        void setVisible(bool newValue) override
+        {
+            WindowBase::setVisible(newValue);
+            if (!newValue) mEncounterStatus->setVisible(false);
+        }
 
         void setBookMode()
         {

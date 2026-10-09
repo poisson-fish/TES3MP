@@ -507,6 +507,7 @@ namespace TES3MP::Native
         bool hasActorMotion() const noexcept override { return bool(mBinding.mNavigatingActor); }
         bool ownsPlayerPhysics() const noexcept override { return mBinding.mPlayerPhysics; }
         uint64_t physicalScope(PlayerId, const PreparedNativeInventory* = nullptr) const override;
+        uint64_t sourceOpportunityOwner() const;
         bool hasStoryEncounters() const override { return mBinding.mPersonalScripts && mBinding.mPersonalScripts->encounters(); }
         bool hasStoryRelocations() const override { return mBinding.mPersonalScripts && mBinding.mPersonalScripts->relocations(); }
         std::optional<PlayerPhysicsBaseline> projectPlayerPhysics(const CanonicalServerState&, PlayerId,

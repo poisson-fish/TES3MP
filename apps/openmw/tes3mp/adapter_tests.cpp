@@ -928,6 +928,13 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
             coordinator->frame(.01f);
             const auto firstRequest = lastRequest();
             const auto own = view;
+            // A recovered receipt can reuse a new process's command ID. Its
+            // unchanged revision must not cancel the still-pending occurrence.
+            view.command = firstRequest.commandId.value();
+            view.serverTick = value<ServerTick>(5);
+            view.canonicalRevision = value<CanonicalRevision>(5);
+            send();
+            require(!submit());
             view.story = 72;
             view.revision = 9;
             view.command = 999;
@@ -938,8 +945,8 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
             view = own;
             view.revision = 2;
             view.command = firstRequest.commandId.value();
-            view.serverTick = value<ServerTick>(5);
-            view.canonicalRevision = value<CanonicalRevision>(5);
+            view.serverTick = value<ServerTick>(6);
+            view.canonicalRevision = value<CanonicalRevision>(6);
             view.response.clear();
             send();
             require(submit());
@@ -948,19 +955,19 @@ void teleportPresentation(bool pickupBarrier = false, bool doorProgress = false,
             require(retried.intent.revision == 2 && retried.commandId != firstRequest.commandId);
             // Rejected commands finalize via acknowledgement plus a matching owned view.
             wire->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-                encodeLatestWinsSnapshot(selfSnapshot(generation, false, 6, 6, retried.commandSequence.value())),
+                encodeLatestWinsSnapshot(selfSnapshot(generation, false, 7, 7, retried.commandSequence.value())),
                 TransportChannel::LatestWins);
             const auto receipt = view;
             view.story = 72;
             view.revision = 10;
             view.command = 1000;
-            view.serverTick = value<ServerTick>(6);
-            view.canonicalRevision = value<CanonicalRevision>(6);
+            view.serverTick = value<ServerTick>(7);
+            view.canonicalRevision = value<CanonicalRevision>(7);
             send();
             require(!submit());
             view = receipt;
-            view.serverTick = value<ServerTick>(6);
-            view.canonicalRevision = value<CanonicalRevision>(6);
+            view.serverTick = value<ServerTick>(7);
+            view.canonicalRevision = value<CanonicalRevision>(7);
             send();
             require(submit());
             return;

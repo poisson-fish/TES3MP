@@ -36,22 +36,34 @@ Rendered: `build/m5-encounter-restart-recheck-03/result.json`,
 `build/m5-enable-{desktop-02,restart-01}/result.json`.
 GUI lifetime guard closes removed replicas.
 
-**V89–90 relocation/return:** fresh images/capability 42. Stock source-only
-Position/PositionCell/GetPos/GetAngle retain [bounded admission](DEVELOPMENT.md).
-V89 stays occupied. V90 returns grounded online living bodies beyond quiescent
-original/destination NPC and shared peer hulls, against the living original source life.
-Destination/origin/banks/progression/receipts stay dormant; B retains the original
-opportunity. Rejected writes install nothing; uncertain writes close authority.
-No Enable, teleport home or public inventory/life copies; recovery is silent.
+**V89–90:** capability 42; stock source Position/PositionCell/GetPos/GetAngle
+retain [bounded admission](DEVELOPMENT.md). V89 stays occupied; V90 returns
+grounded bodies beyond original/destination NPC and peer hulls against the living
+original life. Outcomes stay dormant; B keeps its opportunity. Rejection installs
+nothing; uncertainty closes authority; recovery is silent.
 Native: `build/logs/m5-relocation-return-{state,host-02}.log`;
 V89/V88 regressions: `build/logs/m5-relocation-return-{v89-state,enable-regression}.log`.
 Rendered: `build/m5-relocation-return-{desktop,restart}-01/result.json`.
 
-**V91 durable source waits:** fresh images/capability 41. Foreign NPC death persists
-one dependency/story and pauses the stock clock after bank rollback. Newer canonical
-lives resume once. Rejected death/respawn writes, silent reconnect/restart, stale-life
-rejection and B's legitimate continuation: `build/logs/m5-source-wait-{state,host-09}.log`.
+**V91:** foreign death persists a dependency/paused clock after bank rollback;
+newer lives resume once. Rejection/restart/stale-life/continuation:
+`build/logs/m5-source-wait-{state,host-09}.log`.
 
-**Next:** attributed life-event cursors and fair opportunities under the
-[contract](DECISIONS.md#m5-implementation-contract). Health/OnDeath, wait UI,
-escorts and unchanged Seyda Neen/TR proofs remain open. M5 stays open.
+**V92–93:** fresh images/capability 41. Stock OnDeath consumes attributed source-life
+history only with bank/gameplay durability. Own/pre-quest credit, foreign/helper
+exclusion, stale-life rejection and retry/restart pass. V93 retains the oldest
+wait's next canonical opportunity until eligible credit; repeated foreign attacks
+cannot consume B's life. No new loot/lives. Authority-snapshot helper/summon/environment
+checks do not admit live enrollment/summons.
+Native: `build/logs/m5-life-event-{state,host-03,stock}.log`,
+`build/logs/m5-opportunity-{state,host-03}.log`.
+
+**Health/wait UI:** stock source reads retain staged stats and bank/cursor/clock rollback.
+Atomic retry/restart: `build/logs/m5-health-{state-final,host-03}.log`;
+client receipts: `build/logs/m5-wait-adapter.log`.
+Synthetic two-desktop V92–93 waiting/reserved/earned recovery:
+`build/m5-wait-v{92,93}-restart-credit-01/result.json`.
+
+**Next:** bounded escort/departure activities under the
+[contract](DECISIONS.md#m5-implementation-contract), then unchanged Seyda Neen/TR proofs.
+M5 stays open.

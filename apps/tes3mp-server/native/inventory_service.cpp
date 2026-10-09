@@ -2775,6 +2775,8 @@ namespace TES3MP::Native
                 npcTarget = size_t(found - mCombat->npcPlacements.begin()) + 2;
             else if (use.targetId == mBinding.mNavigatingActor->actorId()) npcTarget = 2;
         }
+        if (npcTarget == 2 && player && sourceOpportunityOwner()
+            && sourceOpportunityOwner() != player->playerId().value()) return {};
         const ActorCampaignLife* targetLife = npcTarget == 2 ? (mLife ? &*mLife : nullptr)
             : npcTarget >= 3 && npcTarget - 3 < mNeighborLives.size()
                 ? &mNeighborLives[npcTarget - 3] : nullptr;
@@ -3051,6 +3053,8 @@ namespace TES3MP::Native
             if (found != neighbors.end()) targetIndex = size_t(found - neighbors.begin()) + 3;
         }
         if (attack.targetActorId && !targetIndex) return {};
+        if (targetIndex == 2 && sourceOpportunityOwner()
+            && sourceOpportunityOwner() != player->playerId().value()) return {};
         if (targetIndex && ([&] {
                 const auto& life = targetIndex == 2 ? *mLife : mNeighborLives.at(targetIndex - 3);
                 return attack.sourceServerTick.value() < life.bornTick
@@ -3150,6 +3154,28 @@ namespace TES3MP::Native
                     return story.last.sourceLife > decoded.life->generation;
                 })))
                 throw std::invalid_argument("Story source receipt exceeds canonical life");
+            if (personalState && mBinding.mPersonalScripts->lifeEvents()) for (const auto& story : *personalState)
+            {
+                if (!decoded.life || decoded.life->deaths.size() > PersonalScripts::MaximumLifeEvents
+                    || story.deathCursor > decoded.life->deaths.size())
+                    throw std::invalid_argument("Story cursor exceeds canonical death history");
+                if (story.deathCursor)
+                {
+                    const auto& death = decoded.life->deaths[size_t(story.deathCursor - 1)];
+                    if (death.killerKind != 1 || death.killer != story.last.character || death.tick > story.scheduledTick)
+                        throw std::invalid_argument("Story cursor lacks an eligible causal death");
+                }
+                if (story.reservedLife && (story.reservedLife > decoded.life->generation + bool(decoded.life->respawnTick)
+                    || story.reservedLife < 2 || story.reservedLife - 1 > decoded.life->deaths.size()
+                    || !story.reservationTick || story.reservationTick > decoded.tick))
+                    throw std::invalid_argument("Story reservation exceeds canonical next opportunity");
+                if (story.reservedLife)
+                {
+                    const auto& blocked = decoded.life->deaths[size_t(story.reservedLife - 2)];
+                    if (blocked.tick > story.reservationTick || (blocked.killerKind == 1 && blocked.killer == story.last.character))
+                        throw std::invalid_argument("Story reservation lacks a foreign source occurrence");
+                }
+            }
             if (personalState) for (const auto& story : *personalState) if (story.sourceWait)
             {
                 const auto& wait = *story.sourceWait;
@@ -5319,7 +5345,7 @@ namespace TES3MP::Native
             return story.last.character == session->playerId().value() && story.last.story == request.story;
         });
         if (receipt == currentState.end()) return reject("unowned story");
-        if (receipt->dialogueCommand == proposal.commandId().value())
+        if (receipt->dialogueCommand == proposal.commandId().value() && request.revision != receipt->dialogueRevision)
         {
             if (receipt->dialogueRequest != request) return reject("changed replay");
             if (!prior) candidate = std::make_unique<DialogueTransaction>(*this);
@@ -5793,6 +5819,13 @@ namespace TES3MP::Native
         return state ? PersonalScripts::physicalScope(*state, player.value()) : 1;
     }
 
+    uint64_t InventoryService::sourceOpportunityOwner() const
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->fairOpportunities() || !mLife) return 0;
+        const auto* state = personalState(nullptr);
+        return state ? PersonalScripts::reservationOwner(*state, mLife->generation + bool(mLife->respawnTick)) : 0;
+    }
+
     SharedWorldScript::Result InventoryService::stagePersonalScript(PreparedNativeInventory& candidate,
         const MWScript::ExecutionContext& execution)
     {
@@ -5904,6 +5937,12 @@ namespace TES3MP::Native
             if (instance.last.character == session->playerId().value())
             {
                 auto view = PersonalScripts::view(instance, target, session->sessionGeneration(), tick, revision);
+                if (view.encounter)
+                {
+                    const auto* source = mRuntime.mStore.get<ESM::NPC>().search(mBinding.mContainers.front().mBase);
+                    if (!source || source->mName.size() > 128) throw std::invalid_argument("Story source display name invalid");
+                    view.encounter->sourceName = source->mName;
+                }
                 if (staged)
                     for (const auto& output : staged->dialogueOutputs)
                         if (output.targetSessionId == target && output.story == view.story
@@ -7278,7 +7317,16 @@ namespace TES3MP::Native
             for (size_t i = 0; i < combat->actors.size(); ++i)
                 actorKinds.push_back(aiActorKind(mRuntime.ownerPtr(combatOwner(i))));
         }
+        const auto reservedOwner = sourceOpportunityOwner();
+        const auto opportunityAllows = [&](size_t index, ActorCasterIdentity cause) {
+            if (reservedOwner && cause.kind == 2 && cause.id == before.mActor && index < 2)
+                return mBinding.mPlayers[index].value() == reservedOwner;
+            return index != 2 || !reservedOwner || (cause.kind == 1 && cause.id == reservedOwner)
+                || (cause.kind == 2 && cause.id == before.mActor);
+        };
         const auto recordActorDeath = [&](size_t index, ActorCasterIdentity killer, bool retainMovement = false) {
+            if (!opportunityAllows(index, killer))
+                throw std::invalid_argument("Foreign death violated a reserved source opportunity");
             if (index < 2)
             {
                 if (!mBinding.mPlayerLifecycle) return;
@@ -8118,6 +8166,7 @@ namespace TES3MP::Native
         const auto applyStrike = [&](MagicCasterContext context, const EquipmentRuntime::EquippedWeaponCondition& held,
             const ESM::Weapon& weapon, MWMechanics::NpcStats& attacker, MWMechanics::NpcStats& victim,
             size_t victimIndex, Misc::Rng::Generator& rng) {
+            if (!opportunityAllows(victimIndex, context.identity)) return;
             if (weapon.mEnchant.empty()) return;
             const auto* enchantment = mRuntime.mStore.get<ESM::Enchantment>().search(weapon.mEnchant);
             if (!enchantment || enchantment->mData.mType != ESM::Enchantment::WhenStrikes) return;
@@ -8199,6 +8248,7 @@ namespace TES3MP::Native
             for (const int range : {ESM::RT_Self, ESM::RT_Touch, ESM::RT_Target})
                 for (size_t index = 0; index < combat->actors.size(); ++index)
                 {
+                    if (!opportunityAllows(index, caster)) continue;
                     if (index != victimIndex && combat->actors[index][8][2] <= 0) continue;
                     std::array<float, 3> position{};
                     if (index != victimIndex)
@@ -8923,6 +8973,7 @@ namespace TES3MP::Native
             const size_t defender = request.victim;
             const auto targetScene = victimScene(defender);
             const auto playerAttacker = mBinding.mPlayers[owner];
+            if (!opportunityAllows(defender, {playerAttacker.value(), 1, combat->playerLives[owner].generation})) continue;
             if (combat->actors[defender][8][2] <= 0)
             {
                 if (combat->swings[owner]) combat->swings[owner]->interruption = PlayerSwing::TargetLost;
@@ -9547,6 +9598,7 @@ namespace TES3MP::Native
         const auto aggressiveAgainst = [&](const AiActorContext& source,
             const ActorDisposition& sourceDisposition, const CanonicalPlayerEntityState& player,
             uint64_t retainedTarget) {
+            if (source.index == 2 && reservedOwner && player.playerId().value() != reservedOwner) return false;
             if (mBinding.mAiDecisions && (!source.life || combat->actors[source.index][8][2] <= 0.f
                     || (mBinding.mPlacementCombat
                         && combat->npcPlacements.at(source.index - 2) != source.placement.mActor)
@@ -10335,6 +10387,7 @@ namespace TES3MP::Native
         const auto applyContactEffects = [&](size_t index, const PreparedInstantEffects& effects, int range,
             ActorCasterIdentity identity, MagicUseSourceKind sourceKind, uint64_t source, uint64_t effectSource,
             Misc::Rng::Generator& rng, std::span<const uint64_t> ordinals = {}, uint64_t presentationCommand = 0) {
+            if (!opportunityAllows(index, identity)) return;
             auto victim = loadCombatStats(mRuntime.mStore, combat->actors[index], timedEffects, index, mBinding.mCharacterCreation);
             addTimedResistance(victim, timedEffects, index);
             const auto result = resolveEffects(effects, range,
@@ -12458,6 +12511,8 @@ namespace TES3MP::Native
                     active[count++] = player.value();
             PersonalReferenceResolver resolver;
             std::optional<PersonalScripts::Source> source;
+            std::optional<MWMechanics::NpcStats> sourceStats;
+            std::vector<PersonalScripts::LifeEvent> lifeEvents;
             if (mBinding.mPersonalScripts->sourceWaits())
             {
                 if (!transaction->life || !transaction->combat || transaction->combat->npcPlacements.size() != 1)
@@ -12467,6 +12522,18 @@ namespace TES3MP::Native
                 const auto death = life.respawnTick ? life.deaths.back() : ActorDeathEvent{};
                 source = PersonalScripts::Source{owner.mId.value(), life.generation, life.respawnTick, owner.mBase,
                     !life.respawnTick && transaction->combat->actors[2][8][2] > 0, death.killer, death.killerKind};
+                sourceStats.emplace(loadCombatStats(mRuntime.mStore, transaction->combat->actors[2], transaction->timedEffects, 2));
+                source->stats = &*sourceStats;
+                if (mBinding.mPersonalScripts->lifeEvents())
+                {
+                    if (life.deaths.size() > PersonalScripts::MaximumLifeEvents)
+                        throw std::invalid_argument("Story life-event history capacity exhausted");
+                    lifeEvents.reserve(life.deaths.size());
+                    for (const auto& event : life.deaths)
+                        lifeEvents.push_back({event.life, event.tick, event.killer, event.killerKind, event.killerLife,
+                            event.killerKind == 1 ? event.killer : 0, event.killerKind == 1 ? event.killerLife : 0});
+                    source->events = lifeEvents;
+                }
             }
             auto scripts
                 = mBinding.mPersonalScripts->prepareScheduled(dialogue ? dialogue->state : *mPersonalScriptState,

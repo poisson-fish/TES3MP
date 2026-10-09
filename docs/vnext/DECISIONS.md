@@ -16,12 +16,11 @@ Unsupported behavior rejects.
 **One server authority.** Own actors/objects/resources/time/outcomes. Clients submit
 authenticated intent and present commits. Schedule independently of menus; no NPC leases.
 
-**M3 doors:** stock activation/reversal; session/placement/sequence/tick-bound contact
-expires after ten ticks or reconnect/reversal. Contacts supplement physics until cutover.
+**M3 doors:** stock activation/reversal; authenticated placement contact expires
+after ten ticks or reconnect/reversal, pending physics cutover.
 
-**Presentation is separate.** Clients own UI/visuals/audio. Collision/scripts bind
-gameplay identity. MWScript/Lua use bounded context/semantic serialization.
-Never persist pointers, render objects or sessions.
+**Presentation is separate.** Clients own UI/visuals/audio. Bind gameplay identity
+and bounded script contexts; never persist pointers, rendering or sessions.
 
 ## M4 actor simulation
 
@@ -280,34 +279,29 @@ silent recovery. Escorts/mutable AI remain later; M5 stays open.
 preserve miss/failure costs. Persist before publication; restore content/version-bound
 state atomically. No checkpoint-only acknowledgments or parallel files.
 
-**Borrowed lifetime.** Ptr copies retain weak destruction witnesses; construction
-starts lifetimes, assignment preserves destinations. Check witnesses before
-dereferencing, then ownership. Addresses/serialization cannot authorize installation.
+**Borrowed lifetime.** Ptr copies retain destruction witnesses; assignment preserves
+destinations. Validate lifetime then ownership; addresses cannot authorize installation.
 
-**Inventory.** Session image/dispositions, one intent and actor tick/wear transact
-together; later intents reject in ingress order. Bind roles/placements/domain/record-plugin
-IDs. Recover identity/condition/light-time/charge without rerolls/auto-equip.
+**Inventory.** Commit session state, one intent and actor tick/wear together;
+reject later intents in ingress order. Recover bound identities and item state
+without rerolls/auto-equip.
 
-**Versioned domains.** Retain prior [layouts](../../apps/tes3mp-server/native/inventory_host.hpp).
-Descriptor changes require fresh campaigns or explicit migration; recovery never
-resets, rerolls loot or auto-equips.
+**Versioned domains.** Retain prior [layouts](../../apps/tes3mp-server/native/inventory_host.hpp);
+changed descriptors require fresh campaigns or explicit migration.
 
 **Time/weather (v12+).** Stock calendar/REGN/fallbacks advance ≤4,096 regions at
-30 Hz regardless of occupancy/menus. Bind content/settings/seed RNG/clocks/transitions;
-no wall-clock catch-up or client/legacy-script writers.
+30 Hz independently of menus/occupancy. Bind content/RNG/clocks; no downtime catch-up.
 
-**Streaming (v14).** Bind 1–256 cells; retain canonical state and occupied interior/
-3×3 exterior scenes. Unloaded doors freeze; teleports commit destination/epoch.
-Baselines carry loot/doors/players/gear. Retain inherited movement and supported scripts.
+**Streaming (v14).** Bind 1–256 cells and occupied interior/3×3 exterior scenes.
+Unloaded doors freeze; teleports commit destination/epoch. Baselines retain canonical
+loot/doors/players/gear.
 
 **Leveled actors (v15).** Campaign-seeded stock RNG selects in placement order;
-persist with inventory/doors, never reroll. Marker identity owns unscripted actors;
-clients suppress spawning.
+persist without rerolls. Markers own unscripted actors; clients suppress spawning.
 
-**Transfers/equipment.** Detached Take All witnesses source/revisions and stock
-order/stacking/corpse slots; no disposal/living access. Identity-bound 19 slots use
-format-7 payload mode. Accepted intents invalidate revisions; unavailable effects
-reject. Appearance exposes equipped records only; ground baselines suppress bound placements.
+**Transfers/equipment.** Detached Take All validates revisions and stock stacking/corpse
+slots; no living access/disposal. Identity-bound 19 slots use format 7. Unavailable
+effects reject; equipped appearance and ground suppression follow commits.
 
 **Cross-actor effects (V51).** Absorb benefits bind the original caster life;
 respawn never inherits them. Persist effects, benefits, resources and RNG together.

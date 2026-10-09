@@ -47,7 +47,7 @@ namespace MWScript
         };
 
         WorldScript(const ESM::Script& script, std::vector<ESM::Global> ownedGlobals,
-            std::span<const ESM::Script> bank = {}, const ESM::RefId& source = {});
+            std::span<const ESM::Script> bank = {}, const ESM::RefId& source = {}, bool lifeEvents = false);
         const ESM::RefId& id() const { return mId; }
         const Compiler::Locals& declarations() const { return mDeclarations; }
         bool bankCapable() const { return mBank; }
@@ -74,6 +74,7 @@ namespace MWScript
         std::vector<ESM::Global> mGlobals;
         bool mBank = false;
         ESM::RefId mSource;
+        bool mLifeEvents = false;
         std::vector<std::pair<ESM::RefId, Compiler::Locals>> mMembers;
     };
 }

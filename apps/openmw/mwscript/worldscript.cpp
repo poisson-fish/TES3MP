@@ -178,8 +178,8 @@ namespace MWScript
     }
 
     WorldScript::WorldScript(const ESM::Script& script, std::vector<ESM::Global> ownedGlobals,
-        std::span<const ESM::Script> bank, const ESM::RefId& sourceRecord)
-        : mId(script.mId), mGlobals(std::move(ownedGlobals)), mBank(!bank.empty()), mSource(sourceRecord)
+        std::span<const ESM::Script> bank, const ESM::RefId& sourceRecord, bool lifeEvents)
+        : mId(script.mId), mGlobals(std::move(ownedGlobals)), mBank(!bank.empty()), mSource(sourceRecord), mLifeEvents(lifeEvents)
     {
         require(mId.is<ESM::StringRefId>(), "World script ID must be a content string");
         name(mId.getRefIdString());
@@ -224,11 +224,14 @@ namespace MWScript
         require(!mBank || std::ranges::any_of(members, [&](const auto& entry) { return entry.first == mId; }),
             "Caller lacks bank ownership");
         mMembers = members;
+        require(!mLifeEvents || (mBank && !mSource.empty()), "Life events require a source bank");
         Compiler::Extensions extensions;
         if (mBank)
         {
             Misc::registerScriptOpcodes(extensions);
             if (!mSource.empty()) Misc::registerSourceWaitOpcodes(extensions);
+            if (!mSource.empty()) Stats::registerHealthOpcodes(extensions);
+            if (mLifeEvents) Stats::registerDeathOpcodes(extensions);
             context.setExtensions(&extensions);
         }
         Errors errors;
@@ -321,6 +324,8 @@ namespace MWScript
         Interpreter::installOpcodes(interpreter);
         if (mBank) Misc::installScriptOpcodes(interpreter);
         if (!mSource.empty()) Misc::installSourceWaitOpcodes(interpreter, !referenceState);
+        if (mLifeEvents) Stats::installDeathOpcodes(interpreter);
+        if (!mSource.empty()) Stats::installHealthOpcodes(interpreter);
         if (dialogue) Dialogue::installJournalOpcodes(interpreter);
         if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
         if (referenceState) Misc::installDisableOpcodes(interpreter);

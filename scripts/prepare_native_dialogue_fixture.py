@@ -20,13 +20,18 @@ parser.add_argument('--encounter', action='store_true', help='V86 source-only Di
 parser.add_argument('--return-path', action='store_true', help='Fresh V87 encounter with bounded shared-exploration return')
 parser.add_argument('--enable-source', action='store_true', help='Fresh V88 stock source Enable at safe return')
 parser.add_argument('--relocate-source', action='store_true', help='Fresh V89 inert relocation; --return-path selects V90 dormant destination return')
+parser.add_argument('--life-events', action='store_true', help='Fresh V92 scheduled source health/OnDeath banks and wait UI')
+parser.add_argument('--fair-opportunities', action='store_true', help='Fresh V93 next-life reservation and recovery proof')
 for name in ('base-content', 'stock-config', 'profiles', 'content', 'runtime', 'binary', 'settings'):
     parser.add_argument('--' + name, type=lambda p: Path(p).resolve(), required=True)
 args = parser.parse_args()
+args.life_events |= args.fair_opportunities
+if args.life_events and (args.return_path or args.enable_source or args.relocate_source):
+    raise ValueError('Life-event proof requires the shared single-source scope')
 if args.relocate_source and args.enable_source:
     raise ValueError('Relocation with source Enable is not admitted')
 args.return_path |= args.enable_source
-args.encounter |= args.return_path or args.relocate_source
+args.encounter |= args.return_path or args.relocate_source or args.life_events
 content, runtime = args.content, args.runtime
 content.mkdir()
 shutil.copytree(args.base_content / 'meshes', content / 'meshes')
@@ -61,6 +66,11 @@ if args.encounter:
                     ambient = True
                 if witness and field == b'FNAM':
                     value = b'Encounter Witness\0'
+                if witness and field == b'NPDT' and args.life_events:
+                    if len(value) != 52:
+                        raise ValueError('Life-event fixture needs explicit stock NPC stats')
+                    value = bytearray(value)
+                    struct.pack_into('<H', value, 38, 20)
                 fields += sub(field, value)
                 cursor += 8 + length
             if tag == b'CELL' and not ambient:
@@ -89,8 +99,23 @@ shared = 'dialogue_clock_91'
 text_prefix = '%PCName (%PCRace, %PCClass), %name greets you in %cell. ' if args.substitutions else ''
 blob += script(shared, f'begin {shared}\nend {shared}\n')
 stories = []
-for number, direction in ((91, 'north'), (92, 'south')):
+for number, direction in (((91, 'north'),) if args.life_events else ((91, 'north'), (92, 'south'))):
     bank, topic, quest = f'ledger_{number}', f'{direction}_passage_{number}', f'{direction}_journey_{number}'
+    if args.life_events:
+        relay, credit = f'relay_{number}', f'credit_{number}'
+        blob += record(b'GLOB', string(b'NAME', credit) + sub(b'FNAM', b'l') + sub(b'FLTV', struct.pack('<f', 0)))
+        blob += script(bank, f'begin {bank}\nlong calls\nfloat timer\nfloat health\nfloat ratio\n'
+            f'set calls to calls + 1\nset timer to timer + GetSecondsPassed\n'
+            f'if OnDeath == 1\nset {credit} to {credit} + 1\nendif\n'
+            f'set health to GetHealth\nset ratio to GetHealthGetRatio\nend {bank}\n')
+        blob += script(relay, f'begin {relay}\nlong calls\nfloat health\nfloat ratio\n'
+            f'set calls to calls + 1\nset health to npc_door_actor->GetHealth\n'
+            f'set ratio to npc_door_actor->GetHealthGetRatio\nend {relay}\n')
+        blob += record(b'DIAL', string(b'NAME', topic) + sub(b'DATA', b'\0'))
+        blob += info(f'{direction}_credit', '', '', 0, f'Credited encounters: %{credit}.', 'set calls to calls')
+        stories += [f'story {number} scripts 2 script "{bank}" running 1 script "{relay}" running 1 '
+            f'globals 1 "{credit}" dialogues 1 "{topic}"']
+        continue
     blob += script(bank, f'begin {bank}\nlong calls\nend {bank}\n')
     blob += record(b'DIAL', string(b'NAME', topic) + sub(b'DATA', b'\0'))
     names = [f'{direction}_{suffix}' for suffix in ('high', 'low', 'take', 'wait')]
@@ -128,8 +153,11 @@ subprocess.run([str(binary / 'tes3mp_native_bootstrap.exe'), str(config), str(ru
     *(['npc_door_actor'] * 2 if args.encounter else ['npc_hit_female', 'npc_hit_beast']), '1', '60:-100:1', str(args.settings),
     'player-physics', 'shared_script', shared, 'globals', '0'], check=True, cwd=binary)
 native = (runtime / 'native.txt').read_text().replace('native-inventory-80',
-    'native-inventory-90' if args.relocate_source and args.return_path else 'native-inventory-89' if args.relocate_source else 'native-inventory-88' if args.enable_source else 'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
-native += 'personal_scripts 2 ' + ' '.join(stories) + '\n'
+    'native-inventory-93' if args.fair_opportunities else 'native-inventory-92' if args.life_events else 'native-inventory-90' if args.relocate_source and args.return_path else 'native-inventory-89' if args.relocate_source else 'native-inventory-88' if args.enable_source else 'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
+if args.life_events:
+    native = native.replace('respawn 27000', 'respawn 900')
+    native += 'starting_items 1\n"iron longsword" 1 16\n'
+native += f'personal_scripts {len(stories)} ' + ' '.join(stories) + '\n'
 prior = (runtime / 'manifest.txt').read_text().strip()
 manifest = hashlib.sha256((prior + native).encode()).hexdigest()
 for name in ('native.txt', 'server-content.cfg', 'client-content.cfg'):
@@ -153,5 +181,5 @@ for i, role in enumerate(('Alice', 'Bob')):
     (user / 'openmw.cfg').write_text((config / 'openmw.cfg').read_text()+'\n'+(runtime / 'client-content.cfg').read_text())
 (runtime / 'players.txt').write_text('\n'.join(rows)+'\n', newline='\n')
 shutil.copyfile(args.profiles, runtime / 'profiles.json')
-print('Prepared fresh ' + ('V90 relocation return' if args.relocate_source and args.return_path else 'V89 relocation encounter' if args.relocate_source else 'V88 Enable encounter' if args.enable_source else 'V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
-      + ': ' + ('disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))
+print('Prepared fresh ' + ('V93 reserved life' if args.fair_opportunities else 'V92 life events' if args.life_events else 'V90 relocation return' if args.relocate_source and args.return_path else 'V89 relocation encounter' if args.relocate_source else 'V88 Enable encounter' if args.enable_source else 'V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
+      + ': ' + ('stock health/OnDeath and durable waits' if args.life_events else 'disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))

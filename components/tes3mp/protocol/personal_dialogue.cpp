@@ -98,6 +98,12 @@ namespace TES3MP
     }
     bool validPersonalDialogue(const ReliablePersonalDialogue& v) noexcept
     {
+        if (v.encounter)
+        {
+            const auto& e = *v.encounter;
+            if (!e.reference || !e.life || (!e.waitSince && !e.reservedLife)
+                || bool(e.waitSince) != bool(e.respawnTick) || !textValid(e.sourceName, 128)) return false;
+        }
         if (!v.story || bool(v.speaker) != bool(v.life) || bool(v.revision) != bool(v.command)
             || !textValid(v.topic, 128) || !textValid(v.response, 4096) || v.choices.size() > 8 || v.quests.size() > 16
             || v.entries.size() > 64 || v.topics.size() > 16 || v.messages.size() > 8)
@@ -169,7 +175,7 @@ namespace TES3MP
     {
         if (!validPersonalDialogue(v))
             return {};
-        Writer w(2);
+        Writer w(v.encounter ? 3 : 2);
         for (auto n : { v.targetSessionId.value(), v.targetSessionGeneration.value(), v.serverTick.value(),
                  v.canonicalRevision.value(), v.story, v.revision, v.speaker, v.life, v.command })
             w.word(n);
@@ -204,6 +210,12 @@ namespace TES3MP
         w.word(v.messages.size());
         for (const auto& m : v.messages)
             w.string(m);
+        if (v.encounter)
+        {
+            const auto& e = *v.encounter;
+            for (auto n : {e.reference, e.life, e.waitSince, e.respawnTick, e.reservedLife}) w.word(n);
+            w.string(e.sourceName);
+        }
         if (w.bytes.size() > MaximumPersonalDialogueBytes)
             return {};
         return std::move(w.bytes);
@@ -211,7 +223,8 @@ namespace TES3MP
     std::optional<ReliablePersonalDialogue> decodeReliablePersonalDialogue(std::span<const std::byte> bytes)
     try
     {
-        Reader r(bytes, MaximumPersonalDialogueBytes, 2);
+        const bool status = !bytes.empty() && bytes[0] == std::byte{3};
+        Reader r(bytes, MaximumPersonalDialogueBytes, status ? 3 : 2);
         ReliablePersonalDialogue v{ r.strong<SessionId>(), r.strong<SessionGeneration>(), r.strong<ServerTick>(),
             r.strong<CanonicalRevision>() };
         v.story = r.word();
@@ -236,6 +249,8 @@ namespace TES3MP
             v.topics.push_back(r.string(128));
         for (size_t n = r.count(8); n--;)
             v.messages.push_back(r.string(256));
+        if (status)
+            v.encounter = DialogueEncounterStatus{r.word(), r.word(), r.word(), r.word(), r.word(), r.string(128)};
         if (!r.bytes.empty() || !validPersonalDialogue(v))
             return {};
         return v;

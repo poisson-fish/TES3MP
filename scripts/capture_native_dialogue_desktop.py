@@ -27,6 +27,10 @@ def read_json(path, limit):
 
 
 def capture(args):
+    if args.life_events:
+        expected = 93 if args.fair_opportunities else 92
+        if not (args.runtime / "native.txt").read_text().startswith(f"native-inventory-{expected}\n"):
+            raise ValueError(f"Life-event proof requires a fresh V{expected} campaign")
     relocation_version = 90 if args.return_path else 89
     if args.relocate_source and not (args.runtime / "native.txt").read_text().startswith(f"native-inventory-{relocation_version}\n"):
         raise ValueError(f"Relocation proof requires a fresh V{relocation_version} campaign")
@@ -51,6 +55,8 @@ def capture(args):
     result = dict(success=False, checks=[], synthetic=True, impairment="100ms +/-25ms, 10% loss/reorder")
     result["source_enable"] = args.enable_source
     result["source_relocation"] = args.relocate_source
+    result["life_events"] = args.life_events
+    result["fair_opportunities"] = args.fair_opportunities
     if args.encounter:
         result["impairment"] = "direct"
     save = args.runtime / (settings["player_identity_file"] + ".world-v2")
@@ -176,7 +182,10 @@ def capture(args):
                     if confirmed["result"] != 0:
                         raise RuntimeError("Character choice rejected")
             wait(lambda: all((s := latest(r, "native_player_sample")) and s.get("physics") for r in paths), "both rendered players", 90)
-            if args.encounter:
+            if args.life_events:
+                from native_story_wait_capture import verify_waits
+                verify_waits(result, previous, evidence, command, wait, view, screenshot, latest, args.fair_opportunities)
+            elif args.encounter:
                 from native_story_encounter_capture import verify_encounter
                 verify_encounter(result, previous, evidence, command, wait, view, screenshot, latest, args.return_path, args.relocate_source)
             else:
@@ -288,14 +297,17 @@ if __name__ == "__main__":
     parser.add_argument("--return-path", action="store_true")
     parser.add_argument("--enable-source", action="store_true")
     parser.add_argument("--relocate-source", action="store_true")
+    parser.add_argument("--life-events", action="store_true")
+    parser.add_argument("--fair-opportunities", action="store_true")
     parser.add_argument("--substitutions", action="store_true")
     parser.add_argument("--disposition", action="store_true")
     parser.add_argument("--speaker-name", default="", help="Expected winning speaker display name")
     parser.add_argument("--no-screenshots", action="store_true",
                         help="Validate semantic evidence without native-window capture; this remains synthetic")
     args = parser.parse_args()
+    args.life_events |= args.fair_opportunities
     if args.relocate_source and args.enable_source:
         parser.error("Relocation with source Enable is not admitted")
     args.return_path |= args.enable_source
-    args.encounter |= args.return_path or args.relocate_source
+    args.encounter |= args.return_path or args.relocate_source or args.life_events
     capture(args)

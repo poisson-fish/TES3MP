@@ -214,6 +214,13 @@ namespace MWScript
                 MWWorld::Ptr ptr = R()(runtime);
                 Interpreter::Type_Float value = 0.f;
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (mIndex == 0 && context.getExecutionContext())
+                {
+                    runtime.push(context.health(ptr, false));
+                    return;
+                }
+
                 if (mIndex == 0 && ptr.getClass().hasItemHealth(ptr))
                 {
                     // health is a special case
@@ -368,6 +375,13 @@ namespace MWScript
             void execute(Interpreter::Runtime& runtime) override
             {
                 MWWorld::Ptr ptr = R()(runtime);
+
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (mIndex == 0 && context.getExecutionContext())
+                {
+                    runtime.push(context.health(ptr, true));
+                    return;
+                }
 
                 if (!ptr.getClass().isActor())
                 {
@@ -1109,17 +1123,8 @@ namespace MWScript
             {
                 MWWorld::Ptr ptr = R()(runtime);
 
-                Interpreter::Type_Integer value = 0;
-                if (ptr.getClass().isActor())
-                {
-                    auto& stats = ptr.getClass().getCreatureStats(ptr);
-                    value = stats.hasDied();
-
-                    if (value)
-                        stats.clearHasDied();
-                }
-
-                runtime.push(value);
+                runtime.push(Interpreter::Type_Integer(
+                    static_cast<InterpreterContext&>(runtime.getContext()).onDeath(ptr)));
             }
         };
 
@@ -1431,6 +1436,34 @@ namespace MWScript
         {
             interpreter.installSegment5<OpModDisposition<ImplicitRef>>(Compiler::Stats::opcodeModDisposition);
             interpreter.installSegment5<OpModDisposition<ExplicitRef>>(Compiler::Stats::opcodeModDispositionExplicit);
+        }
+
+        void registerHealthOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerFunction("gethealth", 'f', "", Compiler::Stats::opcodeGetDynamic,
+                Compiler::Stats::opcodeGetDynamicExplicit);
+            extensions.registerFunction("gethealthgetratio", 'f', "", Compiler::Stats::opcodeGetDynamicGetRatio,
+                Compiler::Stats::opcodeGetDynamicGetRatioExplicit);
+        }
+
+        void installHealthOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpGetDynamic<ImplicitRef>>(Compiler::Stats::opcodeGetDynamic, 0);
+            interpreter.installSegment5<OpGetDynamic<ExplicitRef>>(Compiler::Stats::opcodeGetDynamicExplicit, 0);
+            interpreter.installSegment5<OpGetDynamicGetRatio<ImplicitRef>>(Compiler::Stats::opcodeGetDynamicGetRatio, 0);
+            interpreter.installSegment5<OpGetDynamicGetRatio<ExplicitRef>>(Compiler::Stats::opcodeGetDynamicGetRatioExplicit, 0);
+        }
+
+        void registerDeathOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerFunction("ondeath", 'l', "", Compiler::Stats::opcodeOnDeath,
+                Compiler::Stats::opcodeOnDeathExplicit);
+        }
+
+        void installDeathOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpOnDeath<ImplicitRef>>(Compiler::Stats::opcodeOnDeath);
+            interpreter.installSegment5<OpOnDeath<ExplicitRef>>(Compiler::Stats::opcodeOnDeathExplicit);
         }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)

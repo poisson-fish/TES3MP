@@ -5596,7 +5596,10 @@ namespace TES3MP::Native::Testing
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
         const bool storyEnable = effectFamily == "story-enable";
-        const bool sourceWaits = effectFamily == "story-source-waits";
+        const bool healthReads = effectFamily == "story-health";
+        const bool fairOpportunities = healthReads || effectFamily == "story-opportunities";
+        const bool lifeEvents = fairOpportunities || effectFamily == "story-life-events";
+        const bool sourceWaits = lifeEvents || effectFamily == "story-source-waits";
         const bool storyRelocationReturn = effectFamily == "story-relocation-return";
         const bool storyRelocation = storyRelocationReturn || effectFamily == "story-relocation";
         const bool storyReturn = storyRelocationReturn || storyEnable || effectFamily == "story-return";
@@ -6301,11 +6304,19 @@ namespace TES3MP::Native::Testing
                     {
                         ESM::Script script; script.blank(); script.mId = ESM::RefId::stringRefId(name);
                         script.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n"
+                            + (lifeEvents ? "long deaths\n" : "")
+                            + (healthReads ? "float health\nfloat ratio\n" : "")
                             + (sourceWaits ? name == "ledger_x73"
                                 ? "set calls to calls + 1\nset phase to phase + GetSecondsPassed\n"
-                                  "set ambient_counter_83 to ambient_counter_83 + 1\nset relay_q19.calls to relay_q19.calls + 7"
-                                : "set calls to calls + 1\nset token to npc_door_actor->GetDisabled"
-                                : personalDialogue ? std::string{} : body) + "\nend " + name;
+                                  "set ambient_counter_83 to ambient_counter_83 + 1\nset relay_q19.calls to relay_q19.calls + 7\n"
+                                  + std::string(lifeEvents ? "if OnDeath == 1\nset deaths to deaths + 1\nendif\n" : "")
+                                : "set calls to calls + 1\nset token to npc_door_actor->GetDisabled\n"
+                                  + std::string(lifeEvents ? "set deaths to npc_door_actor->OnDeath\n" : "")
+                                : personalDialogue ? std::string{} : body)
+                            + (healthReads ? name == "ledger_x73"
+                                ? "set health to GetHealth\nset ratio to GetHealthGetRatio\n"
+                                : "set health to npc_door_actor->GetHealth\nset ratio to npc_door_actor->GetHealthGetRatio\n" : "")
+                            + "\nend " + name;
                         out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
                     }
                 if (personalDialogue)
@@ -9315,7 +9326,9 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (sourceWaits                                  ? "native-inventory-91\nmanifest "
+            out << (fairOpportunities                            ? "native-inventory-93\nmanifest "
+                : lifeEvents                                    ? "native-inventory-92\nmanifest "
+                : sourceWaits                                  ? "native-inventory-91\nmanifest "
                 : storyRelocationReturn                        ? "native-inventory-90\nmanifest "
                 : storyRelocation                               ? "native-inventory-89\nmanifest "
                 : storyEnable                                   ? "native-inventory-88\nmanifest "
@@ -9705,13 +9718,13 @@ namespace TES3MP::Native::Testing
                         uint64_t tick = 5, deathTick = 0;
                         std::vector<std::byte> deadImage;
                         PersonalScripts::Instance suspended;
-                        const auto attack = [&](InventoryService& owner, uint64_t at) {
-                            const auto* player = authority.findPlayer(id<PlayerId>(1));
-                            ClientMeleeAttackCommand command{id<SessionId>(1), SessionGeneration::initial(),
+                        const auto attack = [&](InventoryService& owner, uint64_t at, uint64_t attacker = 1) {
+                            const auto* player = authority.findPlayer(id<PlayerId>(attacker));
+                            ClientMeleeAttackCommand command{id<SessionId>(attacker), SessionGeneration::initial(),
                                 id<CommandSequence>(at), id<CommandId>(at), id<CanonicalRevision>(at),
-                                id<ActorId>(request.speaker), id<ServerTick>(at), CombatRevision::initial(),
-                                CombatRevision::initial(), MeleeAttackType::Chop, 1.f};
-                            ServerCommandProposal input(id<SessionId>(1), SessionGeneration::initial(), command.commandSequence,
+                                id<ActorId>(request.speaker), id<ServerTick>(at), id<CombatRevision>(at),
+                                id<CombatRevision>(at), MeleeAttackType::Chop, 1.f};
+                            ServerCommandProposal input(id<SessionId>(attacker), SessionGeneration::initial(), command.commandSequence,
                                 command.commandId, command.observedCanonicalRevision,
                                 EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
                                 MeleeAttackCommandProposal(command));
@@ -9737,6 +9750,17 @@ namespace TES3MP::Native::Testing
                                 && owner.characterBinding().mNavigatingActor->image() == sceneBefore,
                                 "Rejected source death/wait leaked gameplay, banks or scene");
                             const auto proposed = read(candidate);
+                            if (healthReads && !proposed.life->respawnTick)
+                            {
+                                const auto stories = policy->restore(proposed.personalScripts);
+                                const auto& b = *std::ranges::find_if(stories, [](const auto& s) {
+                                    return s.last.character == 2 && s.last.story == 91;
+                                });
+                                const auto& h = proposed.combat->actors[2][8];
+                                require(number(b.runtime, "health") == h[2] && number(b.members[0], "health") == h[2]
+                                    && std::abs(number(b.runtime, "ratio") - h[2] / (h[0] + h[1])) < .00001f,
+                                    "Scheduled health read differs from the staged gameplay actor");
+                            }
                             if (proposed.life->respawnTick)
                             {
                                 const auto proposedStories = policy->restore(proposed.personalScripts);
@@ -9771,6 +9795,24 @@ namespace TES3MP::Native::Testing
                                 << " npc-position=" << pose.mPosition[0] << ',' << pose.mPosition[1] << '\n';
                         }
                         require(deathTick && suspended.sourceWait, "A did not kill B's required source");
+                        if (fairOpportunities)
+                        {
+                            const auto decoded = read(deadImage);
+                            auto stories = policy->restore(decoded.personalScripts);
+                            auto& b = *std::ranges::find_if(stories, [](const auto& s) {
+                                return s.last.character == 2 && s.last.story == 91;
+                            });
+                            b.reservedLife = 1; // An authored starting life cannot be a replacement opportunity.
+                            const auto corrupt = policy->encode(stories);
+                            auto invalid = deadImage;
+                            const auto offset = decoded.personalScripts.data() - reinterpret_cast<const char*>(deadImage.data());
+                            std::memcpy(invalid.data() + offset, corrupt.data(), corrupt.size());
+                            bool rejected = false;
+                            try { InventoryHost bad(descriptor, manifest, *establishedRegistry, *crypto, invalid); }
+                            catch (const std::invalid_argument&) { rejected = true; }
+                            require(rejected && image(run->service()) == deadImage,
+                                "Recovery installed a reservation without a foreign source origin");
+                        }
                         for (bool wrongLife : {true, false})
                         {
                             const auto decoded = read(deadImage);
@@ -9862,7 +9904,10 @@ namespace TES3MP::Native::Testing
                         require(!owner.appendDialogueIntent(authority, proposal(2, 102, oldRequest), stale, &world)
                             && image(owner) == resumed, "Old-life source request granted quest credit after restart");
                         oldRequest.life = 2;
-                        auto continued = prepare(owner, tick + 1, 2, 102, oldRequest);
+                        // A fresh process starts command IDs again at 101 in this
+                        // fixture; current revision/life must admit the new occurrence.
+                        const auto continuationCommand = healthReads ? 101 : 102;
+                        auto continued = prepare(owner, tick + 1, 2, continuationCommand, oldRequest);
                         require(continued && image(owner) == resumed, "New-life dialogue did not stage from the resumed bank");
                         const auto outputs = owner.projectPersonalDialogue(authority, id<SessionId>(2),
                             id<ServerTick>(tick + 1), id<CanonicalRevision>(tick + 1), continued.get());
@@ -9879,7 +9924,98 @@ namespace TES3MP::Native::Testing
                         require(image(run->service()) == earned && recoveredQuest[0].entries == outputs[0].entries
                             && recoveredQuest[0].messages.empty() && recoveredQuest[0].response.empty(),
                             "Legitimate continuation replayed credit/notices on restart");
-                        std::cout << "source waits host: A's stock melee death; coherent wait/clock/bank rollback; "
+                        if (lifeEvents)
+                        {
+                            ++tick; // The dialogue continuation also committed a scheduled step.
+                            auto& resumedOwner = dynamic_cast<InventoryService&>(run->service());
+                            require(policy->lifeEvents() && !bob(resumedOwner).deathCursor
+                                && !number(bob(resumedOwner).runtime, "deaths"), "Foreign death credited B on restart");
+                            if (fairOpportunities)
+                            {
+                                require(policy->fairOpportunities() && resumedOwner.sourceOpportunityOwner() == 2
+                                    && bob(resumedOwner).reservedLife == 2, "Wake/restart lost B's next opportunity");
+                                for (unsigned attempt = 0; attempt < 30; ++attempt)
+                                {
+                                    const auto previous = image(resumedOwner);
+                                    require(!attack(resumedOwner, tick + 1) && image(resumedOwner) == previous,
+                                        "Repeated foreign attack entered B's reserved source life");
+                                    auto advance = resumedOwner.prepareNativePlayerTick(authority, id<ServerTick>(++tick),
+                                        1.f/30, {}, &world, {}, {});
+                                    require(advance && advance->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                        == CanonicalDurabilityResult::Committed, "Reserved world tick failed");
+                                    require(read(image(resumedOwner)).life->deaths.size() == 1
+                                        && resumedOwner.sourceOpportunityOwner() == 2, "Foreign attempts consumed or released the reserved life");
+                                }
+                            }
+                            bool credited = false;
+                            for (const auto limit = tick + 400; tick < limit && !credited;)
+                            {
+                                auto& current = dynamic_cast<InventoryService&>(run->service()); current.synchronizeCells(authority);
+                                const auto previous = image(current); const auto frame = read(previous);
+                                const bool launch = (!frame.combat->swings[1] || !frame.combat->swings[1]->pending())
+                                    && !frame.combat->hitRecoveryTicks[1];
+                                auto input = launch ? attack(current, tick + 1, 2) : nullptr;
+                                auto pending = current.prepareNativePlayerTick(authority, id<ServerTick>(++tick),
+                                    1.f/30, std::move(input), &world, {}, {});
+                                require(bool(pending), "B's eligible source combat tick absent");
+                                std::vector<std::byte> candidate;
+                                require(pending->commit([&](auto bytes) {
+                                    candidate.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected;
+                                }) == CanonicalDurabilityResult::Rejected && image(current) == previous
+                                    && bob(current).deathCursor == 0,
+                                    "Rejected own-death write consumed the cursor or installed credit");
+                                const auto proposed = read(candidate);
+                                if (proposed.life->respawnTick)
+                                {
+                                    const auto stories = policy->restore(proposed.personalScripts);
+                                    const auto& b = *std::ranges::find_if(stories, [](const auto& s) {
+                                        return s.last.character == 2 && s.last.story == 91;
+                                    });
+                                    require(proposed.life->generation == 2 && proposed.life->deaths.back().killer == 2
+                                        && b.deathCursor == 2 && number(b.runtime, "deaths") == 1
+                                        && number(b.members[0], "deaths") == 0 && !b.reservedLife,
+                                        "Own stock OnDeath lost life attribution, duplicated bank credit, or retained the spent reservation");
+                                    if (healthReads) require(number(b.runtime, "health") == proposed.combat->actors[2][8][2]
+                                        && number(b.members[0], "health") == number(b.runtime, "health"),
+                                        "Own death lost canonical health in the bank transaction");
+                                    credited = true;
+                                }
+                                require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                    == CanonicalDurabilityResult::Committed && image(current) == candidate,
+                                    "Retry did not commit the exact own-death/cursor candidate");
+                            }
+                            require(credited, "B could not earn an eligible source death");
+                            const auto committed = image(run->service());
+                            {
+                                const auto decoded = read(committed);
+                                auto stories = policy->restore(decoded.personalScripts);
+                                auto& b = *std::ranges::find_if(stories, [](const auto& s) {
+                                    return s.last.character == 2 && s.last.story == 91;
+                                });
+                                b.deathCursor = 1; // A's foreign life, despite otherwise valid story bounds.
+                                const auto corrupt = policy->encode(stories);
+                                auto invalid = committed;
+                                const auto offset = decoded.personalScripts.data() - reinterpret_cast<const char*>(committed.data());
+                                std::memcpy(invalid.data() + offset, corrupt.data(), corrupt.size());
+                                bool rejected = false;
+                                try { InventoryHost bad(descriptor, manifest, *establishedRegistry, *crypto, invalid); }
+                                catch (const std::invalid_argument&) { rejected = true; }
+                                require(rejected && image(run->service()) == committed,
+                                    "Recovery installed a cursor credited to another character's death");
+                            }
+                            run = std::make_unique<InventoryHost>(descriptor, manifest, *establishedRegistry, *crypto, committed);
+                            require(image(run->service()) == committed && bob(run->service()).deathCursor == 2
+                                && number(bob(run->service()).runtime, "deaths") == 1, "Cursor/credit restart was not exact");
+                            auto& current = dynamic_cast<InventoryService&>(run->service()); current.synchronizeCells(authority);
+                            auto duplicate = current.prepareNativePlayerTick(authority, id<ServerTick>(++tick),
+                                1.f/30, {}, &world, {}, {});
+                            require(duplicate && duplicate->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                == CanonicalDurabilityResult::Committed && bob(current).deathCursor == 2
+                                && number(bob(current).runtime, "deaths") == 1, "Restart replayed an already consumed OnDeath");
+                            std::cout << "life events host: foreign rollback; own stock melee/OnDeath; rejected writes/exact retry; "
+                                "restart without duplicate credit" << (fairOpportunities ? "; repeated foreign attacks cannot consume B's reserved life" : "") << '\n';
+                        }
+                        if (!lifeEvents) std::cout << "source waits host: A's stock melee death; coherent wait/clock/bank rollback; "
                             "failed death and respawn writes; silent reconnect/restart; new-life single resume, no quest credit\n";
                         return;
                     }

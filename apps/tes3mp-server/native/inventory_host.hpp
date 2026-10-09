@@ -8,6 +8,12 @@
 
 namespace TES3MP::Native
 {
+    // V92 adds bounded attributed stock OnDeath cursors to V91 source banks.
+    // V93 reserves the oldest wait's next canonical life until eligible credit;
+    // combat admission/impacts and NPC targeting protect it without new loot/lives.
+    // Both require fresh images, retain capability 41 and silent recovery.
+    // Source health/ratio reads and journal wait/reservation status are admitted;
+    // live parties/summons remain closed.
     // V91 persists one foreign-death source wait per story with unchanged banks,
     // pending invocation and a paused 30 Hz story clock. Named source queries
     // resume only on a newer living canonical life; no death-credit API.

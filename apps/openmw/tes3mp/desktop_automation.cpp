@@ -1369,7 +1369,17 @@ namespace TES3MP::OpenMWAdapter
             }
             mOutput << "],\"messages\":[";
             for (size_t i = 0; i < view.messages.size(); ++i) { if (i) mOutput << ','; json(view.messages[i]); }
-            mOutput << "]}\n"; mOutput.flush(); ++mEvidenceEvents;
+            mOutput << "],\"encounter\":";
+            if (view.encounter)
+            {
+                const auto& e = *view.encounter;
+                mOutput << "{\"reference\":" << e.reference << ",\"life\":" << e.life
+                    << ",\"wait_since\":" << e.waitSince << ",\"respawn_tick\":" << e.respawnTick
+                    << ",\"reserved_life\":" << e.reservedLife << ",\"source_name\":";
+                json(e.sourceName); mOutput << '}';
+            }
+            else mOutput << "null";
+            mOutput << "}\n"; mOutput.flush(); ++mEvidenceEvents;
         }
         return result;
     }

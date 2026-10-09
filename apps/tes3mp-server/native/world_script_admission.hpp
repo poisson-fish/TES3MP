@@ -12,7 +12,7 @@ namespace TES3MP::Native
 {
     inline std::shared_ptr<const SharedWorldScript> admitSharedWorldScript(const Loadout& loadout,
         ESM::RefId id, std::span<const ESM::RefId> owned, CredentialCrypto& crypto,
-        std::span<const ESM::Script> bank = {}, const ESM::RefId& source = {})
+        std::span<const ESM::Script> bank = {}, const ESM::RefId& source = {}, bool lifeEvents = false)
     {
         if (owned.size() > MWScript::WorldScript::MaximumGlobals)
             throw std::invalid_argument("Shared global ownership budget exceeded");
@@ -30,7 +30,7 @@ namespace TES3MP::Native
             if (!global) throw std::invalid_argument("Shared global absent from winning content");
             globals.push_back(*global);
         }
-        return std::make_shared<const SharedWorldScript>(*script, std::move(globals), loadout.contentFingerprint(), crypto, bank, source);
+        return std::make_shared<const SharedWorldScript>(*script, std::move(globals), loadout.contentFingerprint(), crypto, bank, source, lifeEvents);
     }
 }
 #endif

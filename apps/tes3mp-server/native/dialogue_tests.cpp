@@ -14,11 +14,16 @@
 #include <apps/openmw/mwscript/referencestate.hpp>
 #include <apps/openmw/mwscript/statsextensions.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <apps/openmw/mwworld/class.hpp>
+#include <apps/openmw/mwworld/worldmodel.hpp>
 #include <apps/openmw/mwworld/cell.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/tes3mp/engine_coordinator.hpp>
 #include <components/compiler/extensions.hpp>
+#include <components/compiler/opcodes.hpp>
 #include <components/esm3/loadnpc.hpp>
+#include <components/esm3/npcstate.hpp>
+#include <components/esm3/readerscache.hpp>
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <components/esm3/loadclas.hpp>
@@ -1704,6 +1709,259 @@ namespace
             "foreign/own/ambiguous and stale-life checks; repeated death; correct-life single resume; silent exact recovery, no quest credit\n";
     }
 
+    void healthReads(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        std::vector<ESM::Script> scripts;
+        for (const auto& [name, body] : std::vector<std::pair<std::string, std::string>>{
+            {"ledger_v63", "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
+                "if OnDeath == 1\nset credit to credit + 1\nendif"},
+            {"relay_n48", "set calls to calls + 1\nset health to GetHealth\n"
+                "set explicithealth to speaker_r29->GetHealth\nset ratio to GetHealthGetRatio\n"
+                "set explicitratio to speaker_r29->GetHealthGetRatio"}})
+        {
+            ESM::Script script; script.blank(); script.mId = id(name);
+            script.mScriptText = "begin " + name + "\nlong calls\nlong credit\nfloat timer\n"
+                "float health\nfloat explicithealth\nfloat ratio\nfloat explicitratio\n" + body + "\nend";
+            scripts.push_back(script);
+        }
+        ESM::Global global; global.blank(); global.mId = id("personal_counter");
+        global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
+        auto primary = std::make_shared<SharedWorldScript>(scripts[0], std::vector{global}, "health-1", crypto,
+            scripts, id("speaker_r29"), true);
+        auto relay = std::make_shared<SharedWorldScript>(scripts[1], std::vector{global}, "health-1", crypto,
+            scripts, id("speaker_r29"), true);
+        std::vector<PersonalScripts::Definition> definitions{{22, 31, primary, {{relay, true}}, true,
+            records(), PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("chamber_t91")}}};
+        PersonalScripts policy(7, definitions, crypto, true, true, true, false, false, false, true, true, true);
+        struct NoFallback final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::runtime_error("Health query fell through to live world"); }
+        } resolver;
+        const auto number = [](const auto& runtime, std::string_view name) {
+            for (const auto& [key, value] : runtime.runtime.script.mLocals.mVariables)
+                if (key == name) return value.getFloat();
+            throw std::runtime_error("Health fixture local absent");
+        };
+        const std::array<uint64_t, 1> bob{22};
+        MWMechanics::NpcStats stats(fixture.content);
+        stats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 15), MWWorld::TimeStamp{});
+        std::vector<PersonalScripts::LifeEvent> events;
+        PersonalScripts::Source source{41, 1, 0, id("speaker_r29"), true, 0, 0, events, &stats};
+        const auto initial = policy.initial(); const auto initialImage = policy.encode(initial);
+        auto living = policy.prepareScheduled(initial, 1, bob, fixture.content, resolver, &source);
+        if (!living.result.executed) throw std::runtime_error(living.result.diagnostic);
+        require(number(living.state[0].members[0], "health") == 15
+            && number(living.state[0].members[0], "explicithealth") == 15
+            && number(living.state[0].members[0], "ratio") == .5f
+            && number(living.state[0].members[0], "explicitratio") == .5f
+            && policy.encode(initial) == initialImage, "Health used record defaults or a different scope");
+        require(policy.prepareScheduled(initial, 1, bob, fixture.content, resolver, &source).image == living.image,
+            "Health retry differed before durability");
+        stats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 0), MWWorld::TimeStamp{});
+        events = {{1, 2, 22, 1, 1, 22, 1}, {2, 4, 11, 1, 1, 11, 1}};
+        source = {41, 2, 20, id("speaker_r29"), false, 11, 1, events, &stats};
+        auto wait = policy.prepareScheduled(living.state, 4, bob, fixture.content, resolver, &source);
+        require(wait.result.executed && wait.state[0].sourceWait && wait.state[0].deathCursor == 0
+            && wait.state[0].clockTicks == 1 && primary->encode(wait.state[0].runtime) == primary->encode(living.state[0].runtime)
+            && wait.state[0].members[0].tick == living.state[0].members[0].tick
+            && number(wait.state[0].members[0], "calls") == number(living.state[0].members[0], "calls")
+            && number(wait.state[0].members[0], "health") == 15 && number(wait.state[0].members[0], "ratio") == .5f
+            && wait.state[0].reservedLife == 3,
+            "Foreign health fabricated zero or leaked prior cursor/local/timer writes");
+        PersonalScripts restarted(7, definitions, crypto, true, true, true, false, false, false, true, true, true);
+        auto restored = restarted.restore(wait.image);
+        require(restarted.encode(restored) == wait.image, "Health wait restart changed the candidate");
+        auto waitingView = PersonalScripts::view(restored[0], *SessionId::fromValue(9), SessionGeneration::initial(),
+            *ServerTick::fromValue(4), CanonicalRevision::initial());
+        require(waitingView.encounter && waitingView.encounter->reference == 41 && waitingView.encounter->life == 2
+            && waitingView.encounter->waitSince == 4 && waitingView.encounter->respawnTick == 20
+            && waitingView.encounter->reservedLife == 3 && waitingView.response.empty() && waitingView.messages.empty(),
+            "Recovery lost wait/reservation status or replayed notices");
+        const auto frame = encodeReliablePersonalDialogue(waitingView);
+        require(decodeReliablePersonalDialogue(frame) == waitingView, "Wait status wire round trip changed identities");
+        for (size_t n = 0; n < frame.size(); ++n)
+            require(!decodeReliablePersonalDialogue(std::span(frame).first(n)), "Truncated status frame accepted");
+        waitingView.encounter->reference = 0;
+        require(encodeReliablePersonalDialogue(waitingView).empty(), "Unbound wait status encoded");
+        auto paused = restarted.prepareScheduled(restored, 10, bob, fixture.content, resolver, &source);
+        require(paused.invocations == 2 && paused.state[0].clockTicks == 1
+            && paused.state[0].sourceWait == restored[0].sourceWait, "Health wait accrued bytecode/time");
+        stats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 24), MWWorld::TimeStamp{});
+        source = {41, 3, 0, id("speaker_r29"), true, 0, 0, events, &stats};
+        auto wake = restarted.prepareScheduled(restored, 20, bob, fixture.content, resolver, &source);
+        require(wake.result.executed && !wake.state[0].sourceWait && wake.state[0].deathCursor == 1
+            && wake.state[0].clockTicks == 2 && wake.state[0].reservedLife == 3
+            && number(wake.state[0].runtime, "credit") == 1 && number(wake.state[0].members[0], "health") == 24
+            && number(wake.state[0].members[0], "ratio") == .8f,
+            "Health wake lost pre-quest credit, reserved life or current stats");
+        require(restarted.prepareScheduled(restored, 20, bob, fixture.content, resolver, &source).image == wake.image,
+            "Health wake retry consumed a different cursor");
+        restored = restarted.restore(wake.image);
+        const auto reservedView = PersonalScripts::view(restored[0], *SessionId::fromValue(9), SessionGeneration::initial(),
+            *ServerTick::fromValue(20), CanonicalRevision::initial());
+        require(reservedView.encounter && !reservedView.encounter->waitSince && !reservedView.encounter->respawnTick
+            && reservedView.encounter->reservedLife == 3 && decodeReliablePersonalDialogue(encodeReliablePersonalDialogue(reservedView)) == reservedView,
+            "Wake released recoverable reservation status");
+        require(!restarted.prepareScheduled(restored, 20, bob, fixture.content, resolver, &source).result.executed,
+            "Committed health occurrence replayed");
+        stats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 0), MWWorld::TimeStamp{});
+        events.push_back({3, 21, 22, 1, 1, 22, 1}); source = {41, 3, 40, id("speaker_r29"), false, 22, 1, events, &stats};
+        auto own = restarted.prepareScheduled(restored, 21, bob, fixture.content, resolver, &source);
+        require(own.result.executed && !own.state[0].sourceWait && !own.state[0].reservedLife
+            && own.state[0].deathCursor == 3 && number(own.state[0].runtime, "credit") == 2
+            && number(own.state[0].members[0], "health") == stats.getHealth().getCurrent()
+            && number(own.state[0].members[0], "ratio") == stats.getHealth().getRatio(false),
+            "Own death fabricated living health or became a foreign wait");
+        source.stats = nullptr;
+        require(restarted.prepareScheduled(restored, 21, bob, fixture.content, resolver, &source).result.outcome
+            == SharedWorldScript::Outcome::Rejected, "Missing health snapshot used record defaults");
+        source.stats = &stats; source.living = true; source.respawnTick = 0; source.life = 4;
+        require(restarted.prepareScheduled(restored, 22, bob, fixture.content, resolver, &source).result.outcome
+            == SharedWorldScript::Outcome::Rejected, "Incoherent health/life snapshot admitted");
+        for (const auto text : {"SetHealth 0", "ModHealth 1", "set health to GetMagicka"})
+        {
+            auto unsupported = scripts[0]; unsupported.mScriptText = "begin ledger_v63\nfloat health\n"
+                + std::string(text) + "\nend";
+            rejects([&] { SharedWorldScript invalid(unsupported, {global}, "health-1", crypto, scripts,
+                id("speaker_r29"), true); }, "Health admission widened to resource writes/other stats");
+        }
+        std::cout << "health: stock implicit/explicit current/ratio; staged modifiers; own/foreign death; "
+            "late-bank cursor rollback; exact retry/restart; paused clock; reserved wake; unavailable snapshots reject\n";
+    }
+
+    void lifeEvents(CredentialCrypto& crypto, bool fair = false)
+    {
+        Fixture fixture(crypto, {}, true);
+        std::vector<ESM::Script> scripts;
+        for (const auto& [name, body] : std::vector<std::pair<std::string, std::string>>{
+            {"ledger_v63", "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
+                "if OnDeath == 1\nset credit to credit + 1\nset personal_counter to personal_counter + 1\nendif"},
+            {"relay_n48", "set calls to calls + 1\nset credit to speaker_r29->OnDeath\n"
+                "set blocked to speaker_r29->GetDisabled"}})
+        {
+            ESM::Script script; script.blank(); script.mId = id(name);
+            script.mScriptText = "begin " + name + "\nlong calls\nlong credit\nfloat timer\nshort blocked\n" + body + "\nend";
+            scripts.push_back(script);
+        }
+        ESM::Global global; global.blank(); global.mId = id("personal_counter");
+        global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
+        auto primary = std::make_shared<SharedWorldScript>(scripts[0], std::vector{global}, "life-events-1", crypto,
+            scripts, id("speaker_r29"), true);
+        auto relay = std::make_shared<SharedWorldScript>(scripts[1], std::vector{global}, "life-events-1", crypto,
+            scripts, id("speaker_r29"), true);
+        std::vector<PersonalScripts::Definition> definitions;
+        for (const uint64_t character : {11, 22})
+            definitions.push_back({character, 31, primary, {{relay, true}}, true,
+                records(), PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("chamber_t91")}});
+        PersonalScripts policy(7, definitions, crypto, true, true, true, false, false, false, true, true, fair);
+        auto mixed = definitions;
+        mixed[0].dialogues[1].mInfo.front().mResultScript += "\nDisable";
+        rejects([&] { PersonalScripts invalid(7, mixed, crypto, true, true, true, false, false, false, true, true, fair); },
+            "Terminal scene result could strand a live opportunity reservation");
+        struct NoFallback final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::runtime_error("Life events fell through to live world"); }
+        } resolver;
+        const auto credit = [](const SharedWorldScript::State& runtime) {
+            for (const auto& [key, value] : runtime.runtime.script.mLocals.mVariables)
+                if (key == "credit") return value.getInteger();
+            throw std::runtime_error("Life-event credit local absent");
+        };
+        const std::array<uint64_t, 1> bob{22};
+        std::vector<PersonalScripts::LifeEvent> events{{1, 1, 22, 1, 1, 22, 1}};
+        PersonalScripts::Source source{41, 1, 20, id("speaker_r29"), false, 22, 1, events};
+        const auto initial = policy.initial(); const auto initialImage = policy.encode(initial);
+        auto own = policy.prepareScheduled(initial, 2, bob, fixture.content, resolver, &source);
+        if (!own.result.executed) throw std::runtime_error(own.result.diagnostic);
+        require(own.state[1].deathCursor == 1 && credit(own.state[1].runtime) == 1
+            && credit(own.state[1].members[0]) == 0 && own.state[0].deathCursor == 0
+            && !own.state[1].sourceWait && own.state[1].eventCursor == 0
+            && own.state[1].runtime.runtime.globals[0].mValue.getInteger() == 1
+            && policy.encode(initial) == initialImage, "Own death was lost, duplicated across members, or published before commit");
+        auto retry = policy.prepareScheduled(initial, 2, bob, fixture.content, resolver, &source);
+        require(retry.image == own.image, "Rejected-write retry consumed a different occurrence");
+        auto state = policy.restore(own.image);
+        require(policy.encode(state) == own.image, "Death cursor restart was not exact");
+        auto again = policy.prepareScheduled(state, 3, bob, fixture.content, resolver, &source);
+        require(again.state[1].deathCursor == 1 && credit(again.state[1].runtime) == 1
+            && !again.state[1].sourceWait, "Committed own failure replayed or became a foreign wait");
+        require(!policy.prepareScheduled(again.state, 3, bob, fixture.content, resolver, &source).result.executed,
+            "Same-tick death occurrence replayed");
+        source.life = 2; source.living = true; source.respawnTick = 0;
+        auto prequest = policy.prepareScheduled(initial, 21, bob, fixture.content, resolver, &source);
+        require(prequest.state[1].deathCursor == 1 && credit(prequest.state[1].runtime) == 1,
+            "Eligible pre-quest history was discarded on respawn or story start");
+        source.life = 1; source.living = false; source.respawnTick = 20;
+        require(policy.prepareScheduled(prequest.state, 22, bob, fixture.content, resolver, &source).result.outcome
+            == SharedWorldScript::Outcome::Rejected, "Stale canonical source life accepted");
+        events[0] = {1, 1, 11, 1, 1, 11, 1}; source.killer = 11;
+        auto foreign = policy.prepareScheduled(initial, 2, bob, fixture.content, resolver, &source);
+        if (!foreign.result.executed) throw std::runtime_error("Foreign life event: " + foreign.result.diagnostic);
+        require(foreign.result.executed && foreign.state[1].sourceWait && foreign.state[1].deathCursor == 0
+            && credit(foreign.state[1].runtime) == 0 && foreign.state[1].clockTicks == 0,
+            "Foreign killer/proximity granted credit or leaked bank effects");
+        if (fair)
+        {
+            require(foreign.state[1].reservedLife == 2 && foreign.state[1].reservationTick == 2
+                && PersonalScripts::reservationOwner(foreign.state, 2) == 22, "B's next life was not reserved");
+            state = policy.restore(foreign.image);
+            source.life = 2; source.living = true; source.respawnTick = 0;
+            auto wake = policy.prepareScheduled(state, 20, bob, fixture.content, resolver, &source);
+            require(!wake.state[1].sourceWait && wake.state[1].reservedLife == 2
+                && PersonalScripts::reservationOwner(policy.restore(wake.image), 2) == 22,
+                "Wake/restart released the opportunity before credit");
+            events.push_back({2, 21, 11, 1, 1, 11, 1}); source.events = events;
+            source.living = false; source.respawnTick = 40;
+            require(policy.prepareScheduled(wake.state, 21, bob, fixture.content, resolver, &source).result.outcome
+                == SharedWorldScript::Outcome::Rejected, "Repeated foreign death bypassed reservation validation");
+            events.back() = {2, 21, 22, 1, 1, 22, 1}; source.killer = 22;
+            auto earned = policy.prepareScheduled(wake.state, 21, bob, fixture.content, resolver, &source);
+            require(earned.result.executed && earned.state[1].deathCursor == 2 && !earned.state[1].reservedLife
+                && credit(earned.state[1].runtime) == 1, "Eligible committed death did not release the reservation once");
+            auto queue = foreign.state;
+            queue[0].reservedLife = 2; queue[0].reservationTick = 3; queue[0].scheduledTick = 3;
+            require(PersonalScripts::reservationOwner(queue, 2) == 22, "Younger waiter displaced the oldest opportunity");
+            queue[0].reservationTick = 2;
+            require(PersonalScripts::reservationOwner(queue, 2) == 11, "Reservation tie break depends on iteration order");
+        }
+        events = {{1, 1, 22, 1, 1, 22, 1, true}}; source = {41, 1, 20, id("speaker_r29"), false, 22, 1, events};
+        auto helper = policy.prepareScheduled(initial, 2, bob, fixture.content, resolver, &source);
+        require(helper.result.executed && helper.state[1].sourceWait && !helper.state[1].deathCursor
+            && !credit(helper.state[1].runtime), "Help-only death advanced the helper's story");
+        events[0] = {1, 1, 99, 2, 1, 22, 1}; source.killer = 99; source.killerKind = 2;
+        auto summon = policy.prepareScheduled(initial, 2, bob, fixture.content, resolver, &source);
+        require(summon.result.executed && summon.state[1].deathCursor == 1 && credit(summon.state[1].runtime) == 1,
+            "Authority-supplied summon root ownership lost causal credit");
+        events[0] = {1, 1}; source.killer = source.killerKind = 0;
+        auto environmental = policy.prepareScheduled(initial, 2, bob, fixture.content, resolver, &source);
+        require(environmental.result.executed && environmental.state[1].sourceWait && !environmental.state[1].deathCursor,
+            "Environmental death invented a participant");
+        events = {{1, 1, 22, 1, 1, 22, 1}, {2, 21, 11, 1, 1, 11, 1}};
+        source = {41, 2, 40, id("speaker_r29"), false, 11, 1, events};
+        auto late = policy.prepareScheduled(initial, 22, bob, fixture.content, resolver, &source);
+        require(late.result.executed && late.state[1].sourceWait && !late.state[1].deathCursor
+            && !credit(late.state[1].runtime) && !late.state[1].clockTicks,
+            "Later foreign dependency leaked an earlier cursor read or local/global credit");
+        source.life = 3; source.living = true; source.respawnTick = 0;
+        auto resumed = policy.prepareScheduled(policy.restore(late.image), 40, bob, fixture.content, resolver, &source);
+        require(resumed.result.executed && resumed.state[1].deathCursor == 1 && credit(resumed.state[1].runtime) == 1,
+            "Late-bank rollback/restart permanently consumed the eligible pre-quest event");
+        auto next = policy.prepareScheduled(policy.restore(resumed.image), 41, bob, fixture.content, resolver, &source);
+        require(next.result.executed && credit(next.state[1].runtime) == 1, "Restart duplicated pre-quest credit");
+        auto invalid = policy.restore(resumed.image); invalid[1].deathCursor = PersonalScripts::MaximumLifeEvents + 1;
+        rejects([&] { policy.encode(invalid); }, "Unbounded cursor accepted");
+        rejects([&] { policy.restore(std::span(resumed.image).first(resumed.image.size() - 1)); }, "Truncated cursor accepted");
+        source.reference = 42;
+        require(policy.prepareScheduled(initial, 42, bob, fixture.content, resolver, &source).result.outcome
+            == SharedWorldScript::Outcome::Rejected, "Different placement supplied death history");
+        std::cout << "life events: stock implicit/explicit OnDeath; own/foreign/pre-quest/helper/summon/environment; "
+            "whole-bank cursor rollback; retry/exact restart; no duplicate credit; stale placement/life; bounded history"
+            << (fair ? "; durable oldest-wait reservation, retain on wake, release on credit" : "") << '\n';
+    }
+
     void stock(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto);
@@ -1718,7 +1976,19 @@ namespace
             int getJournalIndex(const ESM::RefId& quest) const override
             { require(quest == id("journey_t37"), "Stock GetJournalIndex ID changed"); return index; }
         } journal;
+        ESM::ReadersCache readers(1);
+        MWWorld::WorldModel model(fixture.content, readers, 1);
+        struct Registration
+        {
+            MWWorld::WorldModel& model;
+            MWWorld::LiveCellRefBase& reference;
+            ~Registration() { model.deregisterLiveCellRef(reference); }
+        } registration{model, *fixture.actor.getPtr().getBase()};
         MWBase::Environment environment; environment.setJournal(journal);
+        environment.setESMStore(fixture.content); environment.setWorldModel(model);
+        ESM::NpcState savedActor; savedActor.blank(); savedActor.mHasCustomState = true;
+        savedActor.mCreatureStats.mMissingACDT = false;
+        fixture.actor.getPtr().getClass().readAdditionalState(fixture.actor.getPtr(), savedActor);
         const auto& runtime = *fixture.definitions.front().script;
         auto initial = runtime.initial();
         auto locals = MWScript::Locals::restore(initial.runtime.script.mLocals, initial.runtime.script.mId, runtime.declarations());
@@ -1739,6 +2009,16 @@ namespace
         rejects([&] { interpreter.run(runtime.compileResult("FillJournal"), scoped, 4096); },
             "Full stock installer let a scoped caller bypass staged dialogue services");
         MWScript::Stats::installOpcodes(interpreter);
+        auto& stockStats = fixture.actor.getPtr().getClass().getCreatureStats(fixture.actor.getPtr());
+        const Interpreter::Program deathProgram{{(uint32_t(0x32) << 26) | Compiler::Stats::opcodeOnDeath}};
+        stockStats.notifyDied();
+        interpreter.run(deathProgram, context, 4096);
+        require(!stockStats.hasDied(), "Stock OnDeath stopped consuming the engine death flag");
+        stockStats.notifyDied();
+        rejects([&] { interpreter.run(deathProgram, scoped, 4096); },
+            "Full stock installer bypassed attributed cursor ownership");
+        require(stockStats.hasDied(), "Rejected scoped OnDeath consumed the stock death flag");
+        stockStats.clearHasDied();
         rejects([&] { interpreter.run(runtime.compileResult("ModDisposition 17"), scoped, 4096); },
             "Full stock installer bypassed staged NPC result ownership");
         MWScript::Misc::installOpcodes(interpreter);
@@ -1783,6 +2063,9 @@ int main(int argc, char** argv)
         else if (filter == "relocation") relocation(*crypto);
         else if (filter == "relocation-return") relocation(*crypto, true);
         else if (filter == "source-waits") sourceWaits(*crypto);
+        else if (filter == "health") healthReads(*crypto);
+        else if (filter == "life-events") lifeEvents(*crypto);
+        else if (filter == "opportunities") lifeEvents(*crypto, true);
         else if (filter == "substitutions")
             substitutions(*crypto);
         else if (filter == "journal") journal(*crypto);

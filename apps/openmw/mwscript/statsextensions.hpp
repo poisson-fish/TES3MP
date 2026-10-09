@@ -18,6 +18,10 @@ namespace MWScript
     {
         void registerDispositionResultOpcode(Compiler::Extensions& extensions);
         void installDispositionResultOpcode(Interpreter::Interpreter& interpreter);
+        void registerDeathOpcodes(Compiler::Extensions& extensions);
+        void installDeathOpcodes(Interpreter::Interpreter& interpreter);
+        void registerHealthOpcodes(Compiler::Extensions& extensions);
+        void installHealthOpcodes(Interpreter::Interpreter& interpreter);
         void installOpcodes(Interpreter::Interpreter& interpreter);
     }
 }

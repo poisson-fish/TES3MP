@@ -104,8 +104,8 @@ namespace TES3MP::Native
 
     SharedWorldScript::SharedWorldScript(const ESM::Script& script, std::vector<ESM::Global> globals,
         std::string_view campaignContent, CredentialCrypto& crypto, std::span<const ESM::Script> bank,
-        const ESM::RefId& source)
-        : mRuntime(script, std::move(globals), bank, source)
+        const ESM::RefId& source, bool lifeEvents)
+        : mRuntime(script, std::move(globals), bank, source, lifeEvents)
     {
         require(!campaignContent.empty() && campaignContent.size() <= 256);
         // Bind source, ownership/defaults, limits and the content/campaign identity.
@@ -117,6 +117,8 @@ namespace TES3MP::Native
         append("context-free-world-script-1;8192;2048;4096;64;16;128;8;256;32768");
         append(campaignContent); append(script.mScriptText);
         if (!source.empty()) { append("source-wait-query-1;30hz;getdisabled;no-death-credit"); append(source.getRefIdString()); }
+        if (lifeEvents) append("attributed-ondeath-1;source-life;commit-only");
+        if (!source.empty()) append("scoped-health-1;staged-current;stock-ratio;foreign-wait");
         if (!bank.empty())
         {
             append("owned-script-bank-1;4");

@@ -6,23 +6,23 @@ Follow [AGENTS.md](../../AGENTS.md): code/tests/`git status`, one writer,
 focused checks/fixes, reviewed diffs/current evidence. Commit when authorized;
 report executed checks only.
 
-Evidence: ignored `build/`. Never track assets/credentials/saves/local content paths.
+Evidence: ignored `build/`; never track assets/credentials/saves/local paths.
 
 ## Dependency and migration rules
 
-Keep `components/tes3mp` independently buildable behind owned interfaces; forbid
-OpenMW/rendering/OpenXR/OS/public transport-library types. Preserve dependency checks.
+Keep `components/tes3mp` independently buildable; exclude engine/rendering/OpenXR/OS/public
+transport types. Preserve owned interfaces/dependency checks.
 
-`apps/tes3mp-server` uses OpenMW through owned commands/IDs/results/snapshots/persistence
-and explicit CMake dependencies. Broad probes cannot prove production headless boundaries.
+`apps/tes3mp-server` owns OpenMW commands/IDs/results/snapshots/persistence and explicit
+CMake dependencies. Broad probes cannot prove production headless boundaries.
 
 Separate engine context/presentation; share single-player logic. Null UI/listeners
 must preserve gameplay. Plain items cannot prove scripts/constants.
 
-After replacement/failure proof, remove obsolete code/build entries/schemas/configuration/hooks/assertions;
+After replacement/failure proof, remove obsolete code/build/schema/config/hooks/assertions;
 redirect tests. Never share migration writers or polish retired gameplay.
 
-Update touched proof/JSON inputs; repair baseline provenance/compare patches only for specific checks.
+Update touched proof/JSON; repair provenance/compare patches only for specific checks.
 
 ## Narrow verification
 
@@ -91,23 +91,29 @@ V90 returns grounded online living bodies beyond quiescent original/destination
 NPC (≥256) and peer (≥128) hulls, enlarged by radii plus 32; living original life
 required. Occupancy commits while outcomes/receipts remain dormant.
 Filters: `relocation-return`, `story-relocation-return`; capture: `--relocate-source --return-path`.
-V91: fresh images/capability 41; same single-NPC interior. One durable foreign-death
-dependency/story: pending invocation, script/instruction, reference/life/reason/deadline
-and paused clock. Stock named GetDisabled discovers waits; GetSecondsPassed advances
-one 30 Hz step only after bank success. Wake probes use the sixteen-call budget;
-newer living canonical lives resume once. Own enabled-state queries retain consequences.
-No health/OnDeath APIs, targeted StartScript, calendar arithmetic or wait UI.
-Filters: `source-waits`, `story-source-waits`; recovery is silent.
+V91–93: fresh images/capability 41; same single-NPC interior. One foreign-death
+dependency/story preserves pending context/script/instruction/reference/life/deadline,
+banks and paused clock. GetDisabled discovers waits; GetSecondsPassed advances
+30 Hz only after bank success. Sixteen-call wake budget; newer living lives resume.
+V92 stock OnDeath: ≤256 source-life events, character/story cursor, pre-quest history,
+whole-bank rollback, commit-only consumption. Helpers receive no credit; host admission
+uses canonical player killers. Snapshots test summon/environment attribution;
+live enrollment/summons stay closed. V93 reserves the oldest wait's next life
+(ties: character/story), retains it on wake/offline/restart and releases on credit.
+Combat admission/impacts and NPC targeting protect one canonical opportunity without copies.
+Recovery validates cursor/reservation origins against death history.
+Filters: `source-waits`, `life-events`, `opportunities`; host: `story-` prefix.
+Source-only stock GetHealth/GetHealthGetRatio use staged stats; foreign deaths defer
+the bank. Journal wait/reservation status recovers silently. Health/scene writes,
+targeted StartScript and calendar arithmetic stay closed.
 V77 requires established characters; V78 requires capabilities 6/36.
-Desktop captures emit race/head/hair/sex as `player_appearance_sample`.
-Compare profiles through join/reentry/reconnect/restart; creation has no body.
-Wire/native fixtures remain synthetic.
+Desktop captures emit race/head/hair/sex as `player_appearance_sample`;
+compare join/reentry/reconnect/restart. Creation has no body; wire/native fixtures are synthetic.
 
 `build_windows.bat -Target server`, `client` and `desktop-evidence` initialize MSVC
 and log to `build/logs`; inspect build cost first. Builds do not prove gameplay.
-Wrappers `protocol`, `server-logic`, `adapter-tests`, `contracts`, `standalone` run
-groups; `baseline`, `checks`, `full`, unfiltered unittest discovery and default
-standalone presets are not narrow defaults. Linux/macOS presets: root CMakePresets.json.
+Group wrappers and `baseline`/`checks`/`full`, unfiltered discovery and default
+standalone presets are broad gates. Linux/macOS presets: root CMakePresets.json.
 
 ## Documentation contract
 

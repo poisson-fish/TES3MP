@@ -48,6 +48,12 @@ namespace TES3MP
         int32_t day = 0, month = 0, dayOfMonth = 0;
         bool operator==(const DialogueEntry&) const = default;
     };
+    struct DialogueEncounterStatus
+    {
+        uint64_t reference = 0, life = 0, waitSince = 0, respawnTick = 0, reservedLife = 0;
+        std::string sourceName;
+        bool operator==(const DialogueEncounterStatus&) const = default;
+    };
     // Full personal progression is recoverable. Response/messages are transient:
     // only the transaction that executes an occurrence may publish them.
     struct ReliablePersonalDialogue
@@ -62,6 +68,7 @@ namespace TES3MP
         std::vector<DialogueQuest> quests;
         std::vector<DialogueEntry> entries;
         std::vector<std::string> topics, messages;
+        std::optional<DialogueEncounterStatus> encounter;
         bool operator==(const ReliablePersonalDialogue&) const = default;
     };
     inline constexpr size_t MaximumPersonalDialogueBytes = 32768;

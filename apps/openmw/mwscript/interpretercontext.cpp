@@ -288,6 +288,27 @@ namespace MWScript
         else MWBase::Environment::get().getWorld()->disable(reference);
     }
 
+    bool InterpreterContext::onDeath(const MWWorld::Ptr& reference) const
+    {
+        if (mExecution)
+        {
+            if (!mReferenceState) throw std::invalid_argument("OnDeath lacks staged life events");
+            return mReferenceState->onDeath(*mExecution, reference);
+        }
+        if (!reference.getClass().isActor()) return false;
+        auto& stats = reference.getClass().getCreatureStats(reference);
+        const bool died = stats.hasDied();
+        if (died) stats.clearHasDied();
+        return died;
+    }
+
+    float InterpreterContext::health(const MWWorld::Ptr& reference, bool ratio) const
+    {
+        if (!mExecution || !mReferenceState)
+            throw std::invalid_argument("Health read lacks staged actor state");
+        return mReferenceState->health(*mExecution, reference, ratio);
+    }
+
     bool InterpreterContext::disabled(const MWWorld::Ptr& reference) const
     {
         if (mExecution)

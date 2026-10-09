@@ -963,8 +963,27 @@ namespace TES3MP::OpenMWAdapter
             clickItem(*view, *stack);
             containerWindow()->getItemView()->eventBackgroundClicked();
         }
+        else if (action == "journal")
+        {
+            wm->pushGuiMode(MWGui::GM_Journal);
+        }
+        else if (action == "encounterstatus")
+        {
+            auto* status = MyGUI::Gui::getInstance().findWidget<MyGUI::EditBox>("TES3MPEncounterStatus", false);
+            if (!status || !wm->containsMode(MWGui::GM_Journal))
+                throw std::runtime_error("Encounter status requires the live journal window");
+            mOutput << "{\"event\":\"traversal_encounterstatus\",\"sequence\":" << sequence
+                << ",\"visible\":" << (status->getVisible() ? "true" : "false")
+                << ",\"text\":\"";
+            for (unsigned char c : status->getCaption().asUTF8())
+                if (c < 32) mOutput << "\\u00" << std::hex << std::setw(2) << std::setfill('0') << unsigned(c) << std::dec;
+                else { if (c == '"' || c == '\\') mOutput << '\\'; mOutput << char(c); }
+            mOutput << "\"}\n";
+            mOutput.flush(); ++mEvidenceEvents;
+        }
         else if (action == "close")
         {
+            if (wm->containsMode(MWGui::GM_Journal)) wm->removeGuiMode(MWGui::GM_Journal);
             if (wm->containsMode(MWGui::GM_Container)) wm->removeGuiMode(MWGui::GM_Container);
             if (wm->containsMode(MWGui::GM_Inventory)) wm->removeGuiMode(MWGui::GM_Inventory);
             if (wm->isConsoleMode()) wm->toggleConsole();

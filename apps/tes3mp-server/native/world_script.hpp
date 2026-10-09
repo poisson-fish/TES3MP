@@ -46,7 +46,7 @@ namespace TES3MP::Native
 
         SharedWorldScript(const ESM::Script& script, std::vector<ESM::Global> globals,
             std::string_view campaignContent, CredentialCrypto& crypto, std::span<const ESM::Script> bank = {},
-            const ESM::RefId& source = {});
+            const ESM::RefId& source = {}, bool lifeEvents = false);
         const Compiler::Locals& declarations() const { return mRuntime.declarations(); }
         bool bankCapable() const { return mRuntime.bankCapable(); }
         const ESM::RefId& sourceRecord() const { return mRuntime.sourceRecord(); }

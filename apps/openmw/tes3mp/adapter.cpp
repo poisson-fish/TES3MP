@@ -309,8 +309,7 @@ namespace TES3MP::OpenMWAdapter
                     if (std::ranges::find(mPersonalDialogueDirty, view.story) == mPersonalDialogueDirty.end())
                         mPersonalDialogueDirty.push_back(view.story);
                     if (mPendingPersonal && view.story == mPendingPersonal->intent.story
-                        && (view.command == mPendingPersonal->commandId.value()
-                            || view.revision > mPendingPersonal->intent.revision))
+                        && view.revision > mPendingPersonal->intent.revision)
                         mPendingPersonal.reset();
                 }
                 for (const auto& dialogue : advanced.dialogueChoiceResults)

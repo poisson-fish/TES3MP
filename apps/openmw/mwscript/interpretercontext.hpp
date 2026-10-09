@@ -100,6 +100,8 @@ namespace MWScript
         void modDisposition(const MWWorld::Ptr& actor, int value) const;
         void enable(const MWWorld::Ptr& reference) const;
         void disable(const MWWorld::Ptr& reference) const;
+        bool onDeath(const MWWorld::Ptr& reference) const;
+        float health(const MWWorld::Ptr& reference, bool ratio) const;
         bool disabled(const MWWorld::Ptr& reference) const;
         void position(const MWWorld::Ptr&, const std::array<float, 3>&, float, const ESM::RefId&) const;
         const ESM::Position& position(const MWWorld::Ptr&) const;

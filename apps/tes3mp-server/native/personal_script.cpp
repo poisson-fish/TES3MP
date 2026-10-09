@@ -38,6 +38,8 @@ namespace TES3MP::Native
         constexpr uint64_t EncounterRelocationReturnMagic = 0x4354535054335354;
         constexpr uint64_t IntentMagic = 0x3754535054335354;
         constexpr uint64_t SourceWaitMagic = 0x4454535054335354;
+        constexpr uint64_t LifeEventMagic = 0x4554535054335354;
+        constexpr uint64_t OpportunityMagic = 0x4654535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
             if (!value)
@@ -331,7 +333,8 @@ namespace TES3MP::Native
     }
 
     PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
-        bool scheduled, bool banks, bool intents, bool returns, bool enables, bool relocations, bool sourceWaits)
+        bool scheduled, bool banks, bool intents, bool returns, bool enables, bool relocations, bool sourceWaits,
+        bool lifeEvents, bool fairOpportunities)
         : mCampaign(campaign)
         , mDefinitions(std::move(definitions))
         , mScheduled(scheduled)
@@ -341,6 +344,8 @@ namespace TES3MP::Native
         , mEnables(enables)
         , mRelocations(relocations)
         , mSourceWaits(sourceWaits)
+        , mLifeEvents(lifeEvents)
+        , mFairOpportunities(fairOpportunities)
     {
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         size_t scripts = 0;
@@ -354,6 +359,8 @@ namespace TES3MP::Native
         require(!mEnables || mReturns);
         require(!mRelocations || (mEncounters && !mEnables));
         require(!mSourceWaits || (mEncounters && mBanks && !mReturns && !mRelocations));
+        require(!mLifeEvents || mSourceWaits);
+        require(!mFairOpportunities || mLifeEvents);
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
@@ -418,8 +425,9 @@ namespace TES3MP::Native
                     }
                     identities.push_back(info.mId);
                     if (dialogue.mType == ESM::Dialogue::Topic)
-                        mResults[i].push_back({dialogue.mId, info.mId, entry.script->compileResult(info.mResultScript, mEncounters,
-                            mEncounters ? entry.encounter->record : ESM::RefId{}, false, mRelocations)});
+                        mResults[i].push_back({dialogue.mId, info.mId, entry.script->compileResult(info.mResultScript,
+                            mEncounters && !mLifeEvents, mEncounters && !mLifeEvents ? entry.encounter->record : ESM::RefId{},
+                            false, mRelocations)});
                 }
             }
         }
@@ -455,6 +463,16 @@ namespace TES3MP::Native
         if (mRelocations && mReturns)
         {
             constexpr std::string_view limits = "safe-relocation-return-1;origin-and-destination-hulls;living-origin-life;retain-dormant-pose";
+            binding.insert(binding.end(), limits.begin(), limits.end());
+        }
+        if (mLifeEvents)
+        {
+            constexpr std::string_view limits = "attributed-life-cursor-1;256;prequest;causal-owner;no-helper-credit;commit-only;no-terminal-scenes";
+            binding.insert(binding.end(), limits.begin(), limits.end());
+        }
+        if (mFairOpportunities)
+        {
+            constexpr std::string_view limits = "next-source-opportunity-1;oldest-wait-character-story;retain-until-credit;one-canonical-life";
             binding.insert(binding.end(), limits.begin(), limits.end());
         }
         if (mDialogues)
@@ -520,6 +538,13 @@ namespace TES3MP::Native
             value.entries.push_back({e.topic.toString(), e.info.toString(), e.text,
                 e.stamp.day, e.stamp.month, e.stamp.dayOfMonth});
         for (const auto& t : state.dialogue.topics) value.topics.push_back(t.toString());
+        if (state.sourceWait || state.reservedLife)
+        {
+            const auto& context = state.sourceWait ? state.sourceWait->invocation : state.last;
+            value.encounter = DialogueEncounterStatus{context.sourceReference, context.sourceLife,
+                state.sourceWait ? state.sourceWait->sinceTick : 0,
+                state.sourceWait ? state.sourceWait->respawnTick : 0, state.reservedLife};
+        }
         return value;
     }
 
@@ -527,9 +552,16 @@ namespace TES3MP::Native
     {
         const auto& expected = mDefinitions.at(index);
         const auto& last = state.last;
+        require(!mLifeEvents || !state.encounterLife); // Mixing terminal scenes and life opportunities is not admitted.
         require(!mSourceWaits || !last.sourceReference
             || (last.sourceReference == expected.encounter->reference && last.sourceLife));
         require(mSourceWaits ? state.clockTicks <= state.scheduledTick : !state.clockTicks && !state.sourceWait);
+        require(mLifeEvents ? state.deathCursor <= MaximumLifeEvents && state.deathCursor <= last.sourceLife
+            : !state.deathCursor);
+        require(mFairOpportunities ? (bool(state.reservedLife) == bool(state.reservationTick)
+                && (!state.reservedLife || (state.reservedLife > state.deathCursor
+                    && state.reservedLife <= MaximumLifeEvents && state.reservationTick <= state.scheduledTick)))
+            : !state.reservedLife && !state.reservationTick);
         if (state.sourceWait)
         {
             const auto& wait = *state.sourceWait;
@@ -566,7 +598,7 @@ namespace TES3MP::Native
             && (mBanks ? last.invocation >= state.runtime.tick : last.invocation == state.runtime.tick)
             && last.causalEvent <= state.eventCursor
             && (!last.causalEvent || last.causalEvent == state.eventCursor)
-            && (last.invocation || (!last.causalEvent && !state.eventCursor && !state.scheduledTick))
+            && (last.invocation || (!last.causalEvent && !state.eventCursor && (!state.scheduledTick || state.sourceWait)))
             && (mScheduled || !state.scheduledTick));
         if (mIntents)
         {
@@ -651,7 +683,7 @@ namespace TES3MP::Native
             }));
         std::vector<char> bytes;
         word(bytes,
-            mSourceWaits     ? SourceWaitMagic
+            mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
                 : mRelocations ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables   ? EncounterEnableMagic
                 : mReturns   ? EncounterReturnMagic
@@ -682,6 +714,8 @@ namespace TES3MP::Native
             }
             if (mDialogues) progression(bytes, state[i], mIntents);
             if (mSourceWaits) sourceWait(bytes, state[i]);
+            if (mLifeEvents) word(bytes, state[i].deathCursor);
+            if (mFairOpportunities) { word(bytes, state[i].reservedLife); word(bytes, state[i].reservationTick); }
             if (mIntents)
             {
                 conversation(bytes, state[i]);
@@ -710,7 +744,7 @@ namespace TES3MP::Native
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
         require(input.word()
-            == (mSourceWaits     ? SourceWaitMagic
+            == (mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
                 : mRelocations ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables      ? EncounterEnableMagic
                 : mReturns      ? EncounterReturnMagic
@@ -742,6 +776,8 @@ namespace TES3MP::Native
             }
             if (mDialogues) progression(preflight, nullptr, mIntents);
             if (mSourceWaits) sourceWait(preflight, nullptr);
+            if (mLifeEvents) require(preflight.word() <= MaximumLifeEvents);
+            if (mFairOpportunities) { require(preflight.word() <= MaximumLifeEvents); preflight.take(8); }
             if (mIntents)
             {
                 conversation(preflight, nullptr);
@@ -786,6 +822,8 @@ namespace TES3MP::Native
             }
             if (mDialogues) progression(input, &entry, mIntents);
             if (mSourceWaits) sourceWait(input, &entry);
+            if (mLifeEvents) entry.deathCursor = input.word();
+            if (mFairOpportunities) { entry.reservedLife = input.word(); entry.reservationTick = input.word(); }
             if (mIntents)
             {
                 conversation(input, &entry);
@@ -1245,7 +1283,9 @@ namespace TES3MP::Native
                 return state.last.character == character && state.last.story == request.story;
             });
             require(found != before.end());
-            if (command == found->dialogueCommand)
+            // Command IDs restart with a client process. The observed durable
+            // revision distinguishes a new occurrence from an old receipt retry.
+            if (command == found->dialogueCommand && request.revision != found->dialogueRevision)
             {
                 require(request == found->dialogueRequest);
                 rejected.result.outcome = SharedWorldScript::Outcome::Committed;
@@ -1300,6 +1340,16 @@ namespace TES3MP::Native
         }
     }
 
+    uint64_t PersonalScripts::reservationOwner(const State& state, uint64_t life)
+    {
+        const Instance* first = nullptr;
+        for (const auto& entry : state)
+            if (entry.reservedLife && entry.reservedLife <= life
+                && (!first || std::tuple(entry.reservationTick, entry.last.character, entry.last.story)
+                    < std::tuple(first->reservationTick, first->last.character, first->last.story))) first = &entry;
+        return first ? first->last.character : 0;
+    }
+
     PersonalScripts::Prepared PersonalScripts::prepareScheduled(const State& before, uint64_t worldTick,
         std::span<const uint64_t> activeCharacters, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, const Source* source) const
@@ -1323,22 +1373,60 @@ namespace TES3MP::Native
             require(!mSourceWaits || (source && source->reference == mDefinitions.front().encounter->reference
                 && source->record == mDefinitions.front().encounter->record && source->life
                 && (source->living ? !source->respawnTick : bool(source->respawnTick))));
+            if (mLifeEvents)
+            {
+                require(source->events.size() <= MaximumLifeEvents && source->life <= MaximumLifeEvents + 1
+                    && source->events.size() == source->life - (source->living ? 1 : 0));
+                uint64_t previousTick = 0;
+                for (size_t e = 0; e < source->events.size(); ++e)
+                {
+                    const auto& event = source->events[e];
+                    require(event.life == e + 1 && event.tick > previousTick && event.tick <= worldTick
+                        && (event.killer ? event.killerLife && (event.killerKind == 1 || event.killerKind == 2)
+                            : !event.killerKind && !event.killerLife && !event.owner && !event.ownerLife && !event.helper)
+                        && bool(event.owner) == bool(event.ownerLife)
+                        && (event.killerKind != 1 || (event.owner == event.killer && event.ownerLife == event.killerLife))
+                        && (!event.helper || event.owner));
+                    previousTick = event.tick;
+                    if (mFairOpportunities)
+                    {
+                        const auto owner = reservationOwner(before, event.life);
+                        require(!owner || event.killerKind != 1 || event.owner == owner);
+                    }
+                }
+                if (!source->living) require(source->events.back().killer == source->killer
+                    && source->events.back().killerKind == source->killerKind);
+            }
             struct SourceResolver final : MWScript::ReferenceResolver, MWScript::ReferenceState
             {
                 const Source& source;
                 MWWorld::ManualRef reference;
-                SourceResolver(const Source& value, const MWWorld::ESMStore& store)
-                    : source(value), reference(store, value.record) {}
+                bool events;
+                uint64_t cursor = 0;
+                SourceResolver(const Source& value, const MWWorld::ESMStore& store, bool lifeEvents)
+                    : source(value), reference(store, value.record), events(lifeEvents) {}
+                bool ownDeath(uint64_t character) const
+                {
+                    if (source.living) return false;
+                    return events ? source.events.back().owner == character && !source.events.back().helper
+                        : source.killerKind == 1 && source.killer == character;
+                }
+                bool eligible(uint64_t character) const
+                {
+                    return std::ranges::any_of(source.events, [&](const auto& event) {
+                        return event.life > cursor && event.owner == character && !event.helper;
+                    });
+                }
                 MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool) const override
                 {
                     require(execution.physicalScope == 1 && execution.sourceReference == source.reference
                         && execution.sourceLife == source.life && (id.empty() || id == source.record));
-                    if (!source.living)
+                    if (!source.living && !events)
                     {
                         require(source.killer && (source.killerKind == 1 || source.killerKind == 2));
-                        // Own consequences remain queryable. Only GetDisabled is
-                        // admitted: death does not change the canonical enabled
-                        // flag. Health/existence/death-credit reads stay closed.
+                        // Own consequences remain queryable; a foreign death
+                        // defers source reads. Death does not change the canonical
+                        // enabled flag. Attributed OnDeath requires the event policy.
                         if (source.killerKind != 1 || source.killer != execution.character)
                             throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
                     }
@@ -1349,10 +1437,37 @@ namespace TES3MP::Native
                 void disable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
                 { throw std::invalid_argument("Scheduled source writes not admitted"); }
                 bool disabled(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
-                { require(ptr == resolve(execution, source.record, false)); return !ptr.getRefData().isEnabled(); }
+                {
+                    require(ptr == resolve(execution, source.record, false));
+                    if (!source.living && !ownDeath(execution.character))
+                        throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
+                    return !ptr.getRefData().isEnabled();
+                }
+                bool onDeath(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
+                {
+                    require(events && ptr == resolve(execution, source.record, false));
+                    for (const auto& event : source.events)
+                        if (event.life > cursor && event.owner == execution.character && !event.helper)
+                        { cursor = event.life; return true; }
+                    if (!source.living && !ownDeath(execution.character))
+                        throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
+                    return false;
+                }
+                float health(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, bool ratio) const override
+                {
+                    require(ptr == resolve(execution, source.record, false) && source.stats);
+                    const auto& health = source.stats->getHealth();
+                    require(std::isfinite(health.getCurrent()) && std::isfinite(health.getModified())
+                        && source.living == (health.getCurrent() > 0));
+                    if (!source.living && !ownDeath(execution.character))
+                        throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
+                    const float value = ratio ? health.getRatio(false) : health.getCurrent();
+                    require(std::isfinite(value));
+                    return value;
+                }
             };
             std::unique_ptr<SourceResolver> sourceResolver;
-            if (mSourceWaits) sourceResolver = std::make_unique<SourceResolver>(*source, content);
+            if (mSourceWaits) sourceResolver = std::make_unique<SourceResolver>(*source, content, mLifeEvents);
             for (const auto& entry : before) require(entry.scheduledTick <= worldTick);
             prepared.state = before;
             bool processed = false;
@@ -1367,21 +1482,22 @@ namespace TES3MP::Native
                 ++execution.invocation; execution.causalEvent = 0; execution.sourceReference = execution.sourceLife = 0;
                 if (mSourceWaits)
                 {
+                    sourceResolver->cursor = current.deathCursor;
                     require(source->life >= current.last.sourceLife);
                     execution.sourceReference = source->reference; execution.sourceLife = source->life;
                     if (current.sourceWait)
                     {
                         const auto& wait = *current.sourceWait;
                         require(source->life >= wait.invocation.sourceLife);
-                        const bool ownDeath = !source->living && source->killerKind == 1
-                            && source->killer == execution.character;
-                        if (!ownDeath && (!source->living || source->life == wait.invocation.sourceLife))
+                        const bool ownDeath = sourceResolver->ownDeath(execution.character);
+                        if (!ownDeath && !sourceResolver->eligible(execution.character)
+                            && (!source->living || source->life == wait.invocation.sourceLife))
                         {
                             auto& state = prepared.state[i];
                             if (!source->living)
                             {
-                                require(source->killer && (source->killerKind == 1 || source->killerKind == 2)
-                                    && (source->killerKind != 1 || source->killer != execution.character));
+                                require(mLifeEvents || (source->killer && (source->killerKind == 1 || source->killerKind == 2)
+                                    && (source->killerKind != 1 || source->killer != execution.character)));
                                 state.sourceWait->invocation.sourceLife = source->life;
                                 state.sourceWait->respawnTick = source->respawnTick;
                             }
@@ -1401,8 +1517,14 @@ namespace TES3MP::Native
                     const auto& dependency = *result.sourceWait;
                     require(dependency.reference == source->reference && dependency.life == source->life);
                     auto& state = prepared.state[i];
+                    const auto since = state.sourceWait ? state.sourceWait->sinceTick : worldTick;
                     state.sourceWait = Instance::SourceWait{execution, result.script, result.trace.instruction,
-                        worldTick, dependency.respawnTick};
+                        since, dependency.respawnTick};
+                    if (mFairOpportunities && !state.reservedLife)
+                    {
+                        require(source->life < MaximumLifeEvents);
+                        state.reservedLife = source->life + 1; state.reservationTick = worldTick;
+                    }
                     state.scheduledTick = worldTick; processed = true;
                     prepared.invocations += invocation.invocations;
                     continue;
@@ -1421,6 +1543,10 @@ namespace TES3MP::Native
                 prepared.state[i].scheduledTick = worldTick;
                 if (mSourceWaits)
                 {
+                    if (mLifeEvents) prepared.state[i].deathCursor = sourceResolver->cursor;
+                    if (mFairOpportunities && prepared.state[i].reservedLife
+                        && prepared.state[i].deathCursor >= prepared.state[i].reservedLife)
+                    { prepared.state[i].reservedLife = 0; prepared.state[i].reservationTick = 0; }
                     require(prepared.state[i].clockTicks != UINT64_MAX);
                     ++prepared.state[i].clockTicks;
                 }
