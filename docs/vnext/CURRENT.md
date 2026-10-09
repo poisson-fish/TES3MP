@@ -24,18 +24,17 @@ clients install private views silently. Stats accepted,
 acceptance remains open. NPC relationships/atomic recovery:
 `build/logs/m5-npc-state{,-host}.log`; journal: `build/logs/m5-journal-host.log`.
 
-**V86–88 encounter base:** capability 41/fresh images; one dry interior,
-one living unscripted NPC, static geometry. Stock Disable discovers private scope
-through rollback/retry; origins/banks/progression/receipts share gameplay durability.
-Lookup, visibility, Bullet collision and combat preserve B's opportunity without
-new inventories/lives/loot. Grounded separated bodies can return; fixed stock
-Enable restores only the original life. Completed stories stay frozen.
-Native: `build/logs/m5-encounter-{state,host,wire,stock}.log`,
-`build/logs/m5-return-{state,host-08}.log`, `build/logs/m5-enable-{state,host-02,stock}.log`.
-Rendered: `build/m5-encounter-{desktop-05,restart-01}/result.json`,
-`build/m5-return-{desktop,restart}-01/result.json`,
+**V86–88:** capability 41; one dry interior/NPC. Stock Disable discovers private
+scope through rollback/retry. Lookup/visibility/Bullet/combat agree without copied
+loot/lives. Grounded separated bodies return; fixed Enable restores the original
+life. Outcomes stay frozen; recovery is silent.
+Native: `build/logs/m5-encounter-state-recheck-01.log`,
+`build/logs/m5-encounter-{host,wire,stock}.log`,
+`build/logs/m5-return-host-recheck-03.log`, `build/logs/m5-enable-{state,host-02,stock}.log`.
+Rendered: `build/m5-encounter-restart-recheck-03/result.json`,
+`build/m5-return-{desktop,restart}-recheck-02/result.json`,
 `build/m5-enable-{desktop-02,restart-01}/result.json`.
-Recovery is silent; the stock GUI lifetime guard closes removed replicas.
+GUI lifetime guard closes removed replicas.
 
 **V89–90 relocation/return:** fresh images/capability 42. Stock source-only
 Position/PositionCell/GetPos/GetAngle retain [bounded admission](DEVELOPMENT.md).

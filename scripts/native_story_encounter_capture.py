@@ -44,7 +44,7 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
         result["checks"].append(dict(role=role, phase=label, removed=removed,
                                      rendered_npc=bool(rendered), origin_collision=expected, probe=row))
 
-    def recover(role):
+    def recover(role, label):
         old = {s: view(role, s) for s in (91, 92)}
         starts = {s: len(evidence.rows(role, "personal_dialogue_presented")) for s in old}
         status_count = len(evidence.rows(role, "phase8_desktop_status"))
@@ -65,8 +65,8 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
                         for k in ("revision", "quests", "choices", "command")):
                     raise RuntimeError("Recovery changed progression or replayed notifications")
         wait(lambda: stopped(role), role + " stopped after resume")
-        probe(role, private(role), "reconnect")
-        result["checks"].append(dict(role=role, reconnect=True, silent=True))
+        probe(role, private(role), label)
+        result["checks"].append(dict(role=role, phase=label, reconnect=True, silent=True))
 
     for role in roles:
         command(role, "close")
@@ -141,7 +141,7 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
              "B retained unfinished opportunity")
         command("Bob", "dialogueclose")
     for role in roles:
-        recover(role)
+        recover(role, "shared-reconnect" if result["returned"] else "private-reconnect")
     if return_path and not previous:
         completed = view("Alice", 91)
         p = position("Alice")
@@ -173,10 +173,12 @@ def verify_encounter(result, previous, evidence, command, wait, view, screenshot
             result["checks"][-1]["private_destination"] = [200, -32, 1]
             result["checks"][-1]["destination_dormant"] = True
         for role in roles:
-            recover(role)
+            recover(role, "shared-reconnect")
     for role in roles:
         transients = [v for v in evidence.rows(role, "personal_dialogue_presented") if v["response"] or v["messages"]]
         expected = 0 if previous else 2 if role == "Alice" else 1
         if len(transients) != expected or len({(v["story"], v["revision"]) for v in transients}) != expected:
             raise RuntimeError("Repeated or missing encounter notification")
+        result["checks"].append(dict(role=role, notifications=len(transients),
+                                     expected_notifications=expected, unique_notifications=True))
     result["final_views"] = {r: {s: view(r, s) for s in (91, 92)} for r in roles}
