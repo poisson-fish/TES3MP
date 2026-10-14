@@ -2652,7 +2652,7 @@
       "files": [
         {
           "path": "CMakeLists.txt",
-          "sha256": "bb49869f597a04094d189b9888cb86daef4e914caf03639dbf7425046b108575"
+          "sha256": "7ade4272d1c758435a05ffba0afcc46fcbacefc00e8f431ad67e89027a6cafd7"
         },
         {
           "path": "CMakePresets.json",
