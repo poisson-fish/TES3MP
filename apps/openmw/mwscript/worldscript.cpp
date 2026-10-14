@@ -129,10 +129,12 @@ namespace MWScript
             const std::vector<ESM::Global>& mGlobals;
             const std::vector<std::pair<ESM::RefId, Compiler::Locals>>& mMembers;
             ESM::RefId mReference;
+            bool mAllowPlayer = false;
         public:
             CompilerContext(const std::vector<ESM::Global>& globals,
-                const std::vector<std::pair<ESM::RefId, Compiler::Locals>>& members, const ESM::RefId& reference = {})
-                : mGlobals(globals), mMembers(members), mReference(reference) {}
+                const std::vector<std::pair<ESM::RefId, Compiler::Locals>>& members, const ESM::RefId& reference = {},
+                bool allowPlayer = false)
+                : mGlobals(globals), mMembers(members), mReference(reference), mAllowPlayer(allowPlayer) {}
             bool canDeclareLocals() const override { return true; }
             char getGlobalType(const std::string& id) const override
             { const auto* found = find(mGlobals, id); return found ? type(found->mValue) : ' '; }
@@ -143,7 +145,7 @@ namespace MWScript
                 return {' ', false};
             }
             bool isId(const ESM::RefId& id) const override
-            { return (!mReference.empty() && (id == mReference || id == "player"))
+            { return (!mReference.empty() && (id == mReference || (mAllowPlayer && id == "player")))
                 || std::ranges::any_of(mMembers, [&](const auto& entry) { return entry.first == id; }); }
         };
         class Errors final : public Compiler::ErrorHandler
@@ -232,6 +234,7 @@ namespace MWScript
             Misc::registerScriptOpcodes(extensions);
             if (!mSource.empty()) Misc::registerSourceWaitOpcodes(extensions);
             if (!mSource.empty()) Stats::registerHealthOpcodes(extensions);
+            if (!mSource.empty()) Transformation::registerPositionOpcodes(extensions, false);
             if (mLifeEvents) Stats::registerDeathOpcodes(extensions);
             context.setExtensions(&extensions);
         }
@@ -347,7 +350,7 @@ namespace MWScript
     {
         require(mBank && text.size() <= MaximumSourceBytes && text.find('\0') == std::string_view::npos,
             "Dialogue result source exceeds bounds or lacks bank");
-        CompilerContext context(mGlobals, mMembers, physical ? reference : ESM::RefId{});
+        CompilerContext context(mGlobals, mMembers, physical ? reference : ESM::RefId{}, physical);
         Compiler::Extensions extensions;
         Misc::registerScriptOpcodes(extensions);
         Compiler::Dialogue::registerExtensions(extensions);

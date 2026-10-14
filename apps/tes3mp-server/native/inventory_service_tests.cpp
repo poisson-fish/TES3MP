@@ -5596,12 +5596,13 @@ namespace TES3MP::Native::Testing
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
         const bool storyEnable = effectFamily == "story-enable";
-        const bool healthReads = effectFamily == "story-health";
+        const bool npcBanks = effectFamily == "story-npc-banks";
+        const bool healthReads = npcBanks || effectFamily == "story-health";
         const bool fairOpportunities = healthReads || effectFamily == "story-opportunities";
         const bool lifeEvents = fairOpportunities || effectFamily == "story-life-events";
         const bool sourceWaits = lifeEvents || effectFamily == "story-source-waits";
-        const bool storyActivity = effectFamily == "story-activities" || effectFamily == "story-departure";
-        const bool escortActivity = effectFamily == "story-activities";
+        const bool storyActivity = npcBanks || effectFamily == "story-activities" || effectFamily == "story-departure";
+        const bool escortActivity = npcBanks || effectFamily == "story-activities";
         const bool storyRelocationReturn = effectFamily == "story-relocation-return";
         const bool storyRelocation = storyRelocationReturn || effectFamily == "story-relocation";
         const bool storyReturn = storyRelocationReturn || storyEnable || effectFamily == "story-return";
@@ -6308,6 +6309,7 @@ namespace TES3MP::Native::Testing
                         script.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n"
                             + (lifeEvents ? "long deaths\n" : "")
                             + (healthReads ? "float health\nfloat ratio\n" : "")
+                            + (npcBanks ? "float posx\nfloat posy\nfloat yaw\n" : "")
                             + (sourceWaits ? name == "ledger_x73"
                                 ? "set calls to calls + 1\nset phase to phase + GetSecondsPassed\n"
                                   "set ambient_counter_83 to ambient_counter_83 + 1\nset relay_q19.calls to relay_q19.calls + 7\n"
@@ -6318,6 +6320,9 @@ namespace TES3MP::Native::Testing
                             + (healthReads ? name == "ledger_x73"
                                 ? "set health to GetHealth\nset ratio to GetHealthGetRatio\n"
                                 : "set health to npc_door_actor->GetHealth\nset ratio to npc_door_actor->GetHealthGetRatio\n" : "")
+                            + (npcBanks ? name == "ledger_x73"
+                                ? "set posx to GetPos x\nset posy to GetPos y\nset yaw to GetAngle z\n"
+                                : "set posx to npc_door_actor->GetPos x\nset posy to npc_door_actor->GetPos y\nset yaw to npc_door_actor->GetAngle z\n" : "")
                             + "\nend " + name;
                         out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
                     }
@@ -6371,7 +6376,7 @@ namespace TES3MP::Native::Testing
                                     ? "PositionCell 200 -32 1 5400 \"NPC Door Contact Test\"\nset ambient_counter_83 to npc_door_actor->GetPos x\n"
                                     : storyEncounter ? "Disable\nset ambient_counter_83 to GetDisabled\n" : "Choice \"Proceed\" 7\n";
                             }
-                            if (sourceWaits)
+                            if (sourceWaits && !npcBanks)
                             {
                                 info.mSelects.clear();
                                 info.mResponse = "The source is available.";
@@ -9330,7 +9335,7 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (storyActivity ? "native-inventory-94\nmanifest " : fairOpportunities                            ? "native-inventory-93\nmanifest "
+            out << (npcBanks ? "native-inventory-95\nmanifest " : storyActivity ? "native-inventory-94\nmanifest " : fairOpportunities                            ? "native-inventory-93\nmanifest "
                 : lifeEvents                                    ? "native-inventory-92\nmanifest "
                 : sourceWaits                                  ? "native-inventory-91\nmanifest "
                 : storyRelocationReturn                        ? "native-inventory-90\nmanifest "
@@ -9688,7 +9693,7 @@ namespace TES3MP::Native::Testing
                         return owner.prepareNativePlayerTick(
                             authority, id<ServerTick>(tick), 1.f / 30, std::move(input), &world, {}, {});
                     };
-                    if (sourceWaits)
+                    if (sourceWaits && !npcBanks)
                     {
                         require(policy->sourceWaits(), "V91 source-wait admission absent");
                         const auto number = [](const auto& runtime, std::string_view name) {
@@ -10025,7 +10030,14 @@ namespace TES3MP::Native::Testing
                     }
                     if (storyActivity)
                     {
-                        require(policy->activities() && policy->relocations(), "V94 activity policy absent");
+                        require(policy->activities() && policy->relocations()
+                            && (!npcBanks || (policy->npcBanks() && policy->sourceWaits() && policy->lifeEvents() && policy->fairOpportunities())),
+                            "V94/V95 activity/bank policy absent");
+                        const auto number = [](const auto& runtime, std::string_view name) {
+                            for (const auto& [key, value] : runtime.runtime.script.mLocals.mVariables)
+                                if (key == name) return value.getFloat();
+                            throw std::runtime_error("Activity bank local missing");
+                        };
                         auto established = records;
                         for (size_t i = 0; i < 2; ++i) {
                             established[i].characterProfile = completed[i]; established[i].savedPlayer = authority.players()[i];
@@ -10054,13 +10066,24 @@ namespace TES3MP::Native::Testing
                             "Package type, unfinished progress or B's starting opportunity changed");
                         auto& resumed = dynamic_cast<InventoryService&>(run->service()); resumed.synchronizeCells(authority);
                         const auto initialActivity = alice(resumed);
+                        if (npcBanks)
+                            require(initialActivity.clockTicks == 4 && initialActivity.scheduledTick == 5
+                                && number(initialActivity.runtime, "posx") == initialActivity.relocation->position[0]
+                                && number(initialActivity.runtime, "posy") == initialActivity.relocation->position[1]
+                                && number(initialActivity.members[0], "posx") == initialActivity.relocation->position[0]
+                                && number(initialActivity.members[0], "posy") == initialActivity.relocation->position[1]
+                                && number(initialActivity.runtime, "health") > 0 && number(initialActivity.runtime, "ratio") == 1.f
+                                && number(initialActivity.members[0], "health") == number(initialActivity.runtime, "health"),
+                                "Relocated/escorting NPC bank did not read its own private pose and living stats");
                         std::vector<CanonicalSessionProgress> remaining;
                         for (const auto& session : authority.activeSessions()) if (session.playerId() == id<PlayerId>(2)) remaining.push_back(session);
                         const auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), remaining));
                         auto suspended = resumed.prepareNativePlayerTick(disconnected, id<ServerTick>(6), 1.f/30, {}, &world, {}, {});
                         require(suspended && suspended->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
-                            && alice(resumed).activity == initialActivity.activity && alice(resumed).relocation == initialActivity.relocation,
-                            "Disconnect advanced or reset solo activity");
+                            && alice(resumed).activity == initialActivity.activity && alice(resumed).relocation == initialActivity.relocation
+                            && (!npcBanks || (alice(resumed).clockTicks == initialActivity.clockTicks
+                                && state(resumed)[1].clockTicks == 4)),
+                            "Disconnect advanced or reset solo activity/bank");
                         const auto beforeStep = image(resumed);
                         auto step = resumed.prepareNativePlayerTick(authority, id<ServerTick>(7), 1.f/30, {}, &world, {}, {});
                         require(step && step->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; })
@@ -10072,8 +10095,11 @@ namespace TES3MP::Native::Testing
                         if (alice(resumed).activity->steps != initialActivity.activity->steps + 1)
                             std::cerr << "Activity steps before=" << initialActivity.activity->steps << " after=" << alice(resumed).activity->steps
                                 << " tick=" << alice(resumed).activity->tick << " completed=" << alice(resumed).activity->completed << '\n';
-                        require(alice(resumed).activity->steps == initialActivity.activity->steps + 1,
-                            "Reconnect caught up offline ticks or retried the package twice");
+                        require(alice(resumed).activity->steps == initialActivity.activity->steps + 1
+                            && (!npcBanks || (alice(resumed).clockTicks == initialActivity.clockTicks + 1
+                                && number(alice(resumed).runtime, "posx") == alice(resumed).relocation->position[0]
+                                && number(alice(resumed).members[0], "posx") == alice(resumed).relocation->position[0])),
+                            "Reconnect caught up offline ticks or retried the package/bank twice");
                         auto uncertain = resumed.prepareNativePlayerTick(authority, id<ServerTick>(8), 1.f/30, {}, &world, {}, {});
                         require(uncertain && uncertain->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Failed; })
                             == CanonicalDurabilityResult::Failed && resumed.inventoryImage().empty(), "Uncertain AI step left authority open");
@@ -10092,8 +10118,17 @@ namespace TES3MP::Native::Testing
                         const float arrivalTolerance = escortActivity ? std::max({extent[0], extent[1], extent[2]}) : extent[2] + 64;
                         require(arrived.activity->completed && std::hypot(arrived.relocation->position[0] - 320,
                                 arrived.relocation->position[1] + 32) <= arrivalTolerance
-                            && arrived.dialogue.quests.front().mState == 10 && !state(current)[1].activity,
-                            "A did not reach its destination, arrival awarded progression, or B lost its opportunity");
+                            && arrived.dialogue.quests.front().mState == 10 && !state(current)[1].activity
+                            && (!npcBanks || (arrived.clockTicks == 3 + arrived.activity->steps
+                                && std::abs(number(arrived.runtime, "phase") - float(arrived.clockTicks) / 30.f) <= 1e-4f
+                                && number(arrived.runtime, "posx") == arrived.relocation->position[0]
+                                && number(arrived.runtime, "posy") == arrived.relocation->position[1]
+                                && number(arrived.members[0], "posx") == arrived.relocation->position[0]
+                                && number(arrived.members[0], "posy") == arrived.relocation->position[1]
+                                && number(arrived.runtime, "health") > 0 && number(arrived.runtime, "ratio") == 1.f
+                                && number(arrived.runtime, "deaths") == 0
+                                && number(state(current)[1].runtime, "posx") == current.characterBinding().mNavigatingActor->snapshot().mPosition[0])),
+                            "A did not reach its destination, arrival awarded progression, or B lost its opportunity/public pose");
                         const auto gearA = current.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
                         const auto gearB = current.projectInventory(authority, id<SessionId>(2), id<ServerTick>(tick), id<CanonicalRevision>(tick));
                         require(gearA && gearA->equipment && gearB && gearB->equipment
@@ -10145,9 +10180,14 @@ namespace TES3MP::Native::Testing
                                 "B's retained stock activity could not advance");
                         }
                         require(state(bobOwner)[1].activity->completed && alice(bobOwner).activity == arrived.activity
-                            && alice(bobOwner).relocation == arrived.relocation, "B could not finish independently or A's destination reset");
-                        std::cout << "story activity host: stock " << (escortActivity ? "AiEscort player" : "AiTravel")
-                            << "; A reaches destination, B retains and completes original opportunity; rejected/uncertain start/step writes; "
+                            && alice(bobOwner).relocation == arrived.relocation
+                            && (!npcBanks || (number(state(bobOwner)[1].runtime, "posx") == state(bobOwner)[1].relocation->position[0]
+                                && number(state(bobOwner)[1].members[0], "posx") == state(bobOwner)[1].relocation->position[0]
+                                && number(alice(bobOwner).runtime, "posx") == arrived.relocation->position[0])),
+                            "B could not finish independently or A's destination/bank reset");
+                        std::cout << (npcBanks ? "story npc banks host: stock AiEscort player + private bank/member continuation, GetSecondsPassed, GetPos/GetAngle, GetHealth/GetHealthGetRatio; "
+                            : (std::string("story activity host: stock ") + (escortActivity ? "AiEscort player" : "AiTravel") + "; "))
+                            << "A reaches destination, B retains and completes original opportunity; rejected/uncertain start/step writes; "
                             "disconnect suspension, exact mid-route/arrival/two-scope restart; no duplicate life/public loot or completion rewards\n";
                         return;
                     }

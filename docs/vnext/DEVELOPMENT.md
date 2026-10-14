@@ -116,6 +116,11 @@ two 60 Hz substeps/30 Hz commit. Freezes walk speed at quiescent admission;
 temporary effects/paralysis/levitation/overencumbrance reject. Offline owners
 suspend; arrival retains private destination without auto-credit/loot.
 Filters: `activities`, `story-activities`, `story-departure`.
+V95 (`native-inventory-95`, capabilities 41–42): composes V89–94; admits read-only
+source-bank GetPos/GetAngle (rejects `player` and Position/PositionCell in banks),
+steps private NPC banks against private relocated/activity pose and detached spawn
+stats after activity substeps, and enforces fair-opportunity reservations on
+relocation/travel. Filters: `npc-banks`, `story-npc-banks`, `script-banks`.
 Desktop captures emit `player_appearance_sample` across join/reentry/reconnect/restart.
 
 ## Documentation contract

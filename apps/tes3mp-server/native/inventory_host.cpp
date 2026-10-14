@@ -99,7 +99,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 94; ++candidate)
+            for (unsigned candidate = 3; candidate <= 95; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -1168,8 +1168,9 @@ namespace TES3MP::Native
                         if (!record) throw std::invalid_argument("Personal bank script absent from winning content");
                         records.push_back(*record);
                     }
+                    const bool npcBanks = start.text.starts_with("native-inventory-95\n");
                     const bool lifeEvents = start.text.starts_with("native-inventory-92\n")
-                        || start.text.starts_with("native-inventory-93\n");
+                        || start.text.starts_with("native-inventory-93\n") || npcBanks;
                     const bool sourceWaits = start.text.starts_with("native-inventory-91\n") || lifeEvents;
                     const auto source = sourceWaits ? start.binding.mContainers.at(0).mBase : ESM::RefId{};
                     auto script = admitSharedWorldScript(loadout, entry.script, entry.globals, crypto, records, source, lifeEvents);
@@ -1209,6 +1210,7 @@ namespace TES3MP::Native
                     for (auto player : start.binding.mPlayers)
                     { definition.character = player.value(); definitions.push_back(definition); }
                 }
+                const bool npcBanks = start.text.starts_with("native-inventory-95\n");
                 start.binding.mPersonalScripts
                     = std::make_shared<const PersonalScripts>(campaign, std::move(definitions), crypto,
                         start.personalScheduling, start.personalBanks,
@@ -1216,16 +1218,19 @@ namespace TES3MP::Native
                             || start.text.starts_with("native-inventory-87\n") || start.text.starts_with("native-inventory-88\n")
                             || start.text.starts_with("native-inventory-89\n") || start.text.starts_with("native-inventory-90\n")
                             || start.text.starts_with("native-inventory-91\n") || start.text.starts_with("native-inventory-92\n")
-                            || start.text.starts_with("native-inventory-93\n") || start.text.starts_with("native-inventory-94\n")),
+                            || start.text.starts_with("native-inventory-93\n") || start.text.starts_with("native-inventory-94\n")
+                            || npcBanks),
                         (start.text.starts_with("native-inventory-87\n") || start.text.starts_with("native-inventory-88\n")
                             || start.text.starts_with("native-inventory-90\n")),
                         start.text.starts_with("native-inventory-88\n"),
                         (start.text.starts_with("native-inventory-89\n") || start.text.starts_with("native-inventory-90\n")
-                            || start.text.starts_with("native-inventory-94\n")),
+                            || start.text.starts_with("native-inventory-94\n") || npcBanks),
                         start.text.starts_with("native-inventory-91\n") || start.text.starts_with("native-inventory-92\n")
-                            || start.text.starts_with("native-inventory-93\n"),
-                        start.text.starts_with("native-inventory-92\n") || start.text.starts_with("native-inventory-93\n"),
-                        start.text.starts_with("native-inventory-93\n"), start.text.starts_with("native-inventory-94\n"));
+                            || start.text.starts_with("native-inventory-93\n") || npcBanks,
+                        start.text.starts_with("native-inventory-92\n") || start.text.starts_with("native-inventory-93\n") || npcBanks,
+                        start.text.starts_with("native-inventory-93\n") || npcBanks,
+                        start.text.starts_with("native-inventory-94\n") || npcBanks,
+                        npcBanks);
             }
             if (start.binding.mSummons)
             {

@@ -121,6 +121,8 @@ namespace TES3MP::Native
             uint64_t killer = 0, killerKind = 0;
             std::span<const LifeEvent> events;
             const MWMechanics::CreatureStats* stats = nullptr; // Transaction-owned, never serialized.
+            ESM::Position position{};
+            const MWMechanics::CreatureStats* privateStats = nullptr; // Detached living stats for private scopes.
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -140,7 +142,8 @@ namespace TES3MP::Native
         };
         PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false,
             bool banks = false, bool intents = false, bool returns = false, bool enables = false, bool relocations = false,
-            bool sourceWaits = false, bool lifeEvents = false, bool fairOpportunities = false, bool activities = false);
+            bool sourceWaits = false, bool lifeEvents = false, bool fairOpportunities = false, bool activities = false,
+            bool npcBanks = false);
         uint64_t campaign() const { return mCampaign; }
         bool scheduled() const { return mScheduled; }
         bool banks() const { return mBanks; }
@@ -154,6 +157,7 @@ namespace TES3MP::Native
         bool lifeEvents() const { return mLifeEvents; }
         bool fairOpportunities() const { return mFairOpportunities; }
         bool activities() const { return mActivities; }
+        bool npcBanks() const { return mNpcBanks; }
         static uint64_t reservationOwner(const State&, uint64_t life);
         static const Instance::Relocation* relocation(const State&, uint64_t character);
         static uint64_t physicalScope(const State&, uint64_t character);
@@ -195,7 +199,7 @@ namespace TES3MP::Native
         bool mEnables = false;
         bool mRelocations = false;
         bool mSourceWaits = false;
-        bool mLifeEvents = false, mFairOpportunities = false, mActivities = false;
+        bool mLifeEvents = false, mFairOpportunities = false, mActivities = false, mNpcBanks = false;
         std::vector<Interpreter::Program> mRestorations;
         struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
         std::vector<std::vector<ResultProgram>> mResults;

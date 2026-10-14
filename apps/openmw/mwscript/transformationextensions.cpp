@@ -826,11 +826,14 @@ namespace MWScript
             }
         };
 
-        void registerPositionOpcodes(Compiler::Extensions& extensions)
+        void registerPositionOpcodes(Compiler::Extensions& extensions, bool allowMutation)
         {
             using namespace Compiler::Transformation;
-            extensions.registerInstruction("position", "ffffz", opcodePosition, opcodePositionExplicit);
-            extensions.registerInstruction("positioncell", "ffffczz", opcodePositionCell, opcodePositionCellExplicit);
+            if (allowMutation)
+            {
+                extensions.registerInstruction("position", "ffffz", opcodePosition, opcodePositionExplicit);
+                extensions.registerInstruction("positioncell", "ffffczz", opcodePositionCell, opcodePositionCellExplicit);
+            }
             extensions.registerFunction("getpos", 'f', "c", opcodeGetPos, opcodeGetPosExplicit);
             extensions.registerFunction("getangle", 'f', "c", opcodeGetAngle, opcodeGetAngleExplicit);
         }

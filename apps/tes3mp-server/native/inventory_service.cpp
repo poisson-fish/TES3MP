@@ -6401,6 +6401,67 @@ namespace TES3MP::Native
                 native->personalScripts->state = std::move(stories);
                 native->personalScripts->image = mBinding.mPersonalScripts->encode(native->personalScripts->state);
             }
+            if (mBinding.mPersonalScripts->scheduled())
+            {
+                std::array<uint64_t, 2> active{};
+                size_t count = 0;
+                for (size_t i = 0; i < mBinding.mPlayers.size(); ++i)
+                    if ((!mBinding.mCharacterCreation || mBinding.mCharacters[i])
+                        && std::ranges::any_of(inputPlayers.activeSessions(),
+                            [&](const auto& session) { return session.playerId() == mBinding.mPlayers[i]; }))
+                        active[count++] = mBinding.mPlayers[i].value();
+                PersonalReferenceResolver resolver;
+                std::optional<PersonalScripts::Source> source;
+                std::optional<MWMechanics::NpcStats> sourceStats, privateSourceStats;
+                std::vector<PersonalScripts::LifeEvent> lifeEvents;
+                if (mBinding.mPersonalScripts->sourceWaits())
+                {
+                    if (!native->life || !native->combat || native->combat->npcPlacements.size() != 1)
+                        throw std::invalid_argument("Story wait source snapshot absent");
+                    const auto& life = *native->life;
+                    const auto& owner = mBinding.mContainers.front();
+                    const auto death = life.respawnTick ? life.deaths.back() : ActorDeathEvent{};
+                    source = PersonalScripts::Source{owner.mId.value(), life.generation, life.respawnTick, owner.mBase,
+                        !life.respawnTick && native->combat->actors[2][8][2] > 0, death.killer, death.killerKind};
+                    const auto frame = native->actor ? native->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
+                    std::copy(frame.mPosition.begin(), frame.mPosition.end(), source->position.pos);
+                    source->position.rot[2] = frame.mYaw;
+                    sourceStats.emplace(loadCombatStats(mRuntime.mStore, native->combat->actors[2], native->timedEffects, 2));
+                    privateSourceStats.emplace(loadCombatStats(mRuntime.mStore, life.spawnStats, {}, 2));
+                    source->stats = &*sourceStats;
+                    source->privateStats = &*privateSourceStats;
+                    if (mBinding.mPersonalScripts->lifeEvents())
+                    {
+                        if (life.deaths.size() > PersonalScripts::MaximumLifeEvents)
+                            throw std::invalid_argument("Story life-event history capacity exhausted");
+                        lifeEvents.reserve(life.deaths.size());
+                        for (const auto& event : life.deaths)
+                            lifeEvents.push_back({event.life, event.tick, event.killer, event.killerKind, event.killerLife,
+                                event.killerKind == 1 ? event.killer : 0, event.killerKind == 1 ? event.killerLife : 0});
+                        source->events = lifeEvents;
+                    }
+                }
+                auto scripts
+                    = mBinding.mPersonalScripts->prepareScheduled(*personalState(transaction.get()),
+                        tick.value(), std::span(active).first(count), mRuntime.mStore, resolver, source ? &*source : nullptr);
+                if (scripts.result.outcome != SharedWorldScript::Outcome::Committed)
+                {
+                    const auto& result = scripts.result;
+                    std::fprintf(stderr, "personal schedule rejected: script=%.128s world-tick=%llu occurrence=%llu instruction=%d executed=%zu reason=%.256s\n",
+                        result.script.toDebugString().c_str(), static_cast<unsigned long long>(tick.value()),
+                        static_cast<unsigned long long>(result.invocationTick), result.trace.instruction,
+                        result.trace.executed, result.diagnostic.c_str());
+                    throw std::invalid_argument(result.diagnostic);
+                }
+                if (scripts.result.executed)
+                {
+                    if (native->personalInvocations + scripts.invocations
+                        > PersonalScripts::MaximumInvocationsPerTransaction)
+                        throw std::invalid_argument("Dialogue and scheduled invocation budget exceeded");
+                    native->personalInvocations += scripts.invocations;
+                    native->personalScripts = std::move(scripts);
+                }
+            }
         }
         // V87 returns a dormant terminal encounter to shared exploration only
         // from a grounded, living, authenticated body clear of every shared hull.
@@ -12603,7 +12664,8 @@ namespace TES3MP::Native
                 throw std::invalid_argument(transaction->sharedScript->result.diagnostic);
             }
         }
-        if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->scheduled())
+        if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->scheduled()
+            && !(mPreparingPersonalState && mBinding.mPersonalScripts->activities()))
         {
             std::array<uint64_t, 2> active{};
             size_t count = 0;
@@ -12613,7 +12675,7 @@ namespace TES3MP::Native
                     active[count++] = player.value();
             PersonalReferenceResolver resolver;
             std::optional<PersonalScripts::Source> source;
-            std::optional<MWMechanics::NpcStats> sourceStats;
+            std::optional<MWMechanics::NpcStats> sourceStats, privateSourceStats;
             std::vector<PersonalScripts::LifeEvent> lifeEvents;
             if (mBinding.mPersonalScripts->sourceWaits())
             {
@@ -12624,8 +12686,13 @@ namespace TES3MP::Native
                 const auto death = life.respawnTick ? life.deaths.back() : ActorDeathEvent{};
                 source = PersonalScripts::Source{owner.mId.value(), life.generation, life.respawnTick, owner.mBase,
                     !life.respawnTick && transaction->combat->actors[2][8][2] > 0, death.killer, death.killerKind};
+                const auto frame = transaction->actor ? transaction->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
+                std::copy(frame.mPosition.begin(), frame.mPosition.end(), source->position.pos);
+                source->position.rot[2] = frame.mYaw;
                 sourceStats.emplace(loadCombatStats(mRuntime.mStore, transaction->combat->actors[2], transaction->timedEffects, 2));
+                privateSourceStats.emplace(loadCombatStats(mRuntime.mStore, life.spawnStats, {}, 2));
                 source->stats = &*sourceStats;
+                source->privateStats = &*privateSourceStats;
                 if (mBinding.mPersonalScripts->lifeEvents())
                 {
                     if (life.deaths.size() > PersonalScripts::MaximumLifeEvents)

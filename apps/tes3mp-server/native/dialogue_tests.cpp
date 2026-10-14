@@ -38,6 +38,7 @@
 #include <components/interpreter/defines.hpp>
 #include <components/interpreter/installopcodes.hpp>
 #include <iostream>
+#include <numbers>
 #include <sstream>
 
 namespace
@@ -2055,6 +2056,134 @@ namespace
             << (fair ? "; durable oldest-wait reservation, retain on wake, release on credit" : "") << '\n';
     }
 
+    void npcBanks(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        std::vector<ESM::Script> scripts;
+        for (const auto& [name, body] : std::vector<std::pair<std::string, std::string>>{
+            {"ledger_v63", "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
+                "if OnDeath == 1\nset credit to credit + 1\nset personal_counter to personal_counter + 1\nendif\n"
+                "set posx to GetPos x\nset posy to speaker_r29->GetPos y\nset yaw to GetAngle z"},
+            {"relay_n48", "set calls to calls + 1\nset health to GetHealth\n"
+                "set ratio to speaker_r29->GetHealthGetRatio\nset blocked to speaker_r29->GetDisabled"}})
+        {
+            ESM::Script script; script.blank(); script.mId = id(name);
+            script.mScriptText = "begin " + name + "\nlong calls\nlong credit\nfloat timer\n"
+                "float posx\nfloat posy\nfloat yaw\nfloat health\nfloat ratio\nshort blocked\n" + body + "\nend";
+            scripts.push_back(script);
+        }
+        ESM::Global global; global.blank(); global.mId = id("personal_counter");
+        global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
+        for (const auto* forbidden : {"Position 200 -32 1 0", "PositionCell 200 -32 1 0 room_e87", "set v to player->GetPos x"})
+        {
+            auto invalidScript = scripts[0];
+            invalidScript.mScriptText = "begin ledger_v63\nfloat v\n" + std::string(forbidden) + "\nend";
+            rejects([&] { SharedWorldScript invalid(invalidScript, {global}, "npc-banks-1", crypto, scripts, id("speaker_r29"), true); },
+                "Scheduled source bank admitted position mutation or foreign reference");
+        }
+        auto primary = std::make_shared<SharedWorldScript>(scripts[0], std::vector{global}, "npc-banks-1", crypto,
+            scripts, id("speaker_r29"), true);
+        auto relay = std::make_shared<SharedWorldScript>(scripts[1], std::vector{global}, "npc-banks-1", crypto,
+            scripts, id("speaker_r29"), true);
+        std::vector<PersonalScripts::Definition> definitions;
+        for (const uint64_t character : {11, 22})
+        {
+            auto dialogues = records();
+            dialogues[1].mInfo.front().mSelects.clear();
+            dialogues[1].mInfo.front().mResponse = "Passage.";
+            dialogues[1].mInfo.front().mResultScript = character == 11
+                ? "set calls to calls + 1\nJournal journey_t37 20\nspeaker_r29->AiEscort player 0 200 -32 1\nMessageBox \"Escort started\""
+                : "set calls to calls + 1\nJournal journey_t37 20\nPositionCell 200 -32 1 5400 room_e87\nMessageBox \"Relocated\"";
+            definitions.push_back({character, 31, primary, {{relay, true}}, true,
+                dialogues, PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("room_e87")}});
+        }
+        PersonalScripts policy(7, definitions, crypto, true, true, true, false, false, true, true, true, true, true, true);
+        Resolver resolver; resolver.actor = fixture.actor.getPtr();
+        MWWorld::ManualRef player(fixture.content, id("speaker_r29")); resolver.player = player.getPtr();
+        struct NoFallback final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::runtime_error("NPC bank fell through to live world"); }
+        } scheduledResolver;
+        const auto number = [](const auto& runtime, std::string_view name) {
+            for (const auto& [key, value] : runtime.runtime.script.mLocals.mVariables)
+                if (key == name) return value.getFloat();
+            throw std::runtime_error("NPC bank local absent");
+        };
+        const auto integer = [](const auto& runtime, std::string_view name) {
+            for (const auto& [key, value] : runtime.runtime.script.mLocals.mVariables)
+                if (key == name) return value.getInteger();
+            throw std::runtime_error("NPC bank integer local absent");
+        };
+        MWMechanics::NpcStats publicStats(fixture.content), privateStats(fixture.content);
+        publicStats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 15), MWWorld::TimeStamp{});
+        privateStats.setHealth(MWMechanics::DynamicStat<float>(20, 0, 20), MWWorld::TimeStamp{});
+        ESM::Position publicPose{};
+        publicPose.pos[0] = 64.f; publicPose.pos[1] = -64.f; publicPose.pos[2] = 1.f; publicPose.rot[2] = .5f;
+        std::vector<PersonalScripts::LifeEvent> events;
+        PersonalScripts::Source source{41, 1, 0, id("speaker_r29"), true, 0, 0, events, &publicStats, publicPose, &privateStats};
+        const std::array<uint64_t, 2> both{11, 22};
+        const auto initial = policy.initial();
+        auto publicTick = policy.prepareScheduled(initial, 1, both, fixture.content, scheduledResolver, &source);
+        require(publicTick.result.executed && number(publicTick.state[0].runtime, "posx") == 64.f
+            && number(publicTick.state[0].runtime, "posy") == -64.f && std::abs(number(publicTick.state[0].runtime, "yaw") - (.5f * 180.f / float(std::numbers::pi))) < 1e-4f
+            && number(publicTick.state[0].members[0], "health") == 15.f && number(publicTick.state[0].members[0], "ratio") == .5f,
+            "Public scheduled bank did not read public pose and health");
+        const auto runIntent = [&](const PersonalScripts::State& before, uint64_t character, uint64_t life, int choice = -1) {
+            const auto& instance = before[character == 11 ? 0 : 1];
+            resolver.expected = instance.last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = instance.eventCursor + 1;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = life; resolver.sourceLife = life;
+            return policy.prepareIntent(before, character, 101 + character,
+                {31, 41, life, instance.dialogueRevision, "passage_k61", choice},
+                "Room", fixture.content, resolver, 16, nullptr, {}, nullptr, JournalDate);
+        };
+        auto aliceEscort = runIntent(publicTick.state, 11, 1);
+        require(aliceEscort.result.executed && aliceEscort.state[0].encounterLife == 1 && aliceEscort.state[0].activity
+            && aliceEscort.state[0].relocation && PersonalScripts::physicalScope(aliceEscort.state, 11) == 2
+            && PersonalScripts::physicalScope(aliceEscort.state, 22) == 1,
+            "Escort dialogue did not move A into private scope");
+        aliceEscort.state[0].relocation->position = {140.f, -20.f, 1.f};
+        aliceEscort.state[0].relocation->yaw = 1.5707963f;
+        aliceEscort.state[0].activity->actorImage = {'s', 'c', 'o', 'p', 'e', 'd'};
+        // Foreign kill of shared NPC in public scope 1 puts B into sourceWait + reservedLife=2, while A's private bank continues!
+        publicStats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 0), MWWorld::TimeStamp{});
+        events = {{1, 2, 11, 1, 1, 11, 1}};
+        source = {41, 1, 20, id("speaker_r29"), false, 11, 1, events, &publicStats, publicPose, &privateStats};
+        auto splitTick = policy.prepareScheduled(aliceEscort.state, 2, both, fixture.content, scheduledResolver, &source);
+        require(splitTick.result.executed && !splitTick.state[0].sourceWait && splitTick.state[0].clockTicks == 2
+            && number(splitTick.state[0].runtime, "posx") == 140.f && number(splitTick.state[0].runtime, "posy") == -20.f
+            && std::abs(number(splitTick.state[0].runtime, "yaw") - 90.f) < 1e-3f
+            && number(splitTick.state[0].members[0], "health") == 20.f && number(splitTick.state[0].members[0], "ratio") == 1.f
+            && integer(splitTick.state[0].runtime, "credit") == 0 && splitTick.state[0].deathCursor == 0
+            && splitTick.state[1].sourceWait && splitTick.state[1].reservedLife == 2,
+            "Private NPC bank stopped on public death, read public pose/dead health, or consumed post-departure public death");
+        auto restored = policy.restore(splitTick.image);
+        require(policy.encode(restored) == splitTick.image, "Composed NPC bank state did not round-trip");
+        // Respawn in life 2: B holds reservation for life 2, so A (if still in scope 1) would be blocked, and B can relocate in life 2 and clear reservation.
+        publicStats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 18), MWWorld::TimeStamp{});
+        source = {41, 2, 0, id("speaker_r29"), true, 0, 0, events, &publicStats, publicPose, &privateStats};
+        auto wakeTick = policy.prepareScheduled(restored, 20, both, fixture.content, scheduledResolver, &source);
+        require(wakeTick.result.executed && !wakeTick.state[1].sourceWait && wakeTick.state[1].reservedLife == 2
+            && wakeTick.state[0].clockTicks == 3, "Wake tick did not resume B or continue A's private bank");
+        auto contested = wakeTick.state; contested[0] = publicTick.state[0];
+        require(runIntent(contested, 11, 2).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Non-owner relocated or started activity on a reserved life");
+        auto bobRelocated = runIntent(wakeTick.state, 22, 2);
+        require(bobRelocated.result.executed && bobRelocated.state[1].encounterLife == 2
+            && !bobRelocated.state[1].reservedLife && !bobRelocated.state[1].reservationTick
+            && PersonalScripts::physicalScope(bobRelocated.state, 22) == 3,
+            "Reserved owner could not start private activity/relocation or leaked reservation");
+        events = {{1, 2, 22, 1, 1, 22, 1}};
+        source = {41, 2, 0, id("speaker_r29"), true, 0, 0, events, &publicStats, publicPose, &privateStats};
+        auto bobPrivateTick = policy.prepareScheduled(bobRelocated.state, 21, both, fixture.content, scheduledResolver, &source);
+        require(bobPrivateTick.result.executed && bobPrivateTick.state[1].deathCursor == 1
+            && integer(bobPrivateTick.state[1].runtime, "credit") == 1
+            && number(bobPrivateTick.state[1].runtime, "posx") == 200.f,
+            "Relocated private bank did not read relocated pose or pre-departure life credit");
+        std::cout << "npc banks: composed relocation/activity/wait/life-event/opportunity policy; private pose/health/timer continuation across public death; exact recovery\n";
+    }
+
     void stock(CredentialCrypto& crypto)
     {
         Fixture fixture(crypto);
@@ -2154,6 +2283,7 @@ int main(int argc, char** argv)
         else if (filter == "encounter") encounter(*crypto);
         else if (filter == "enable") encounter(*crypto, true);
         else if (filter == "activities") activities(*crypto);
+        else if (filter == "npc-banks") npcBanks(*crypto);
         else if (filter == "relocation") relocation(*crypto);
         else if (filter == "relocation-return") relocation(*crypto, true);
         else if (filter == "source-waits") sourceWaits(*crypto);
