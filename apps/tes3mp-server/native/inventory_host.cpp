@@ -1221,8 +1221,8 @@ namespace TES3MP::Native
                             || start.text.starts_with("native-inventory-93\n") || start.text.starts_with("native-inventory-94\n")
                             || npcBanks),
                         (start.text.starts_with("native-inventory-87\n") || start.text.starts_with("native-inventory-88\n")
-                            || start.text.starts_with("native-inventory-90\n")),
-                        start.text.starts_with("native-inventory-88\n"),
+                            || start.text.starts_with("native-inventory-90\n") || npcBanks),
+                        start.text.starts_with("native-inventory-88\n") || npcBanks,
                         (start.text.starts_with("native-inventory-89\n") || start.text.starts_with("native-inventory-90\n")
                             || start.text.starts_with("native-inventory-94\n") || npcBanks),
                         start.text.starts_with("native-inventory-91\n") || start.text.starts_with("native-inventory-92\n")

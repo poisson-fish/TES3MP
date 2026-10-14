@@ -63,14 +63,18 @@ Synthetic two-desktop V92–93 waiting/reserved/earned recovery:
 `build/m5-wait-v{92,93}-restart-credit-01/result.json`.
 
 **V94–95:** stock escort/travel; A/B independently arrive. V95 (`native-inventory-95`)
-composes relocation, activities, source-wait clocks, OnDeath and fair-opportunity
-reservations so a private story's NPC bank, timer, health/pose reads and pre-departure
-life-cursor continue while public deaths/respawns leave the private scope untouched.
+unifies V85–95 (Disable/Enable/safe returns, relocation, activities, source-wait clocks,
+OnDeath and fair-opportunity reservations) so a private story's NPC bank, timer,
+health/pose reads, safe returns and pre-departure life-cursor coexist while public
+deaths/respawns leave the private scope untouched.
 Durable scopes, offline suspension and failed writes/restart preserve original lives/loot.
 Native: `build/logs/m5-{activity-host,departure-host}-final.log`,
-`build/logs/m5-activity-state-final.log`, `build/logs/m5-npc-bank-{state,script}.log`.
+`build/logs/m5-activity-state-final.log`, `build/logs/m5-npc-bank-{state,script}.log`,
+`build/logs/m5-quest-audit.log`.
 
-**Next:** source CellChanged/MenuMode/activation, then provenance-based ring transfers.
+**Next:** batch-admit bank GetJournalIndex/CellChanged/MenuMode/GetPCSleep, then
+OnActivate/Activate/foreign-NPC ModDisposition, provenance item opcodes
+(GetItemCount/AddItem/RemoveItem), and multi-cell scripted-NPC binding.
 Unchanged Seyda Neen/TR (Duel of Riddles) completion remains blocked. Source/result
 preflights: `build/logs/m5-{seyda,tr}-quest-preflight.log`;
 routines: `build/logs/m5-seyda-content-preflight-final.log`.

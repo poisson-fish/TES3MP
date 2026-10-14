@@ -10031,7 +10031,8 @@ namespace TES3MP::Native::Testing
                     if (storyActivity)
                     {
                         require(policy->activities() && policy->relocations()
-                            && (!npcBanks || (policy->npcBanks() && policy->sourceWaits() && policy->lifeEvents() && policy->fairOpportunities())),
+                            && (!npcBanks || (policy->npcBanks() && policy->returns() && policy->enables()
+                                && policy->sourceWaits() && policy->lifeEvents() && policy->fairOpportunities())),
                             "V94/V95 activity/bank policy absent");
                         const auto number = [](const auto& runtime, std::string_view name) {
                             for (const auto& [key, value] : runtime.runtime.script.mLocals.mVariables)

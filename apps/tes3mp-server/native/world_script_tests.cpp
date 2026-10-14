@@ -578,6 +578,61 @@ namespace
         }
         std::cout << "Quest completion remains open; no journal/reward/source life was executed or copied\n";
     }
+
+    void questAudit(CredentialCrypto& crypto)
+    {
+        const auto id = [](std::string_view name) { return ESM::RefId::stringRefId(name); };
+        ESM::Global eldaleDead; eldaleDead.blank(); eldaleDead.mId = id("TR_m1_HT_EldaleDead");
+        eldaleDead.mValue.setType(ESM::VT_Short); eldaleDead.mValue.setInteger(0);
+        ESM::Script fargoth; fargoth.blank(); fargoth.mId = id("fargothScript");
+        fargoth.mScriptText = "begin fargothScript\nshort ring\nend fargothScript\n";
+        ESM::Script hortDeath; hortDeath.blank(); hortDeath.mId = id("TR_m0_TelvanniHortDeathSc");
+        hortDeath.mScriptText = "begin TR_m0_TelvanniHortDeathSc\nshort stop\nset stop to 1\nStopScript TR_m0_TelvanniHortDeathSc\nend\n";
+        ESM::Script eldale; eldale.blank(); eldale.mId = id("TR_m1_T_EldaleSc");
+        eldale.mScriptText = "begin TR_m1_T_EldaleSc\nshort doOnce\nfloat timer\nfloat health\nfloat ratio\nfloat px\nfloat yaw\n"
+            "if ( OnDeath == 1 )\nset TR_m1_HT_EldaleDead to 1\nStartScript TR_m0_TelvanniHortDeathSc\nendif\n"
+            "set timer to timer + GetSecondsPassed\nset health to GetHealth\nset ratio to GetHealthGetRatio\n"
+            "set px to GetPos x\nset yaw to GetAngle z\n"
+            "if ( GetDisabled == 1 )\nset doOnce to 1\nendif\nend TR_m1_T_EldaleSc\n";
+        const std::vector<ESM::Script> bank{eldale, hortDeath, fargoth};
+        SharedWorldScript admittedBank(eldale, {eldaleDead}, "quest-audit-v95", crypto, bank, id("TR_m1_T_Eldale"), true);
+        (void)admittedBank.compileResult(
+            "if ( GetJournalIndex \"TR_M1_GS_MQ_4\" >= 10 )\nSetJournalIndex \"TR_M1_GS_MQ_4\" 20\nendif\n"
+            "Journal TR_M1_GS_MQ_4 10\nAddTopic \"puzzling riddles\"\nChoice \"Answer one\" 1 \"Answer two\" 2\nModDisposition 10\n"
+            "TR_m1_T_Eldale->PositionCell 200 -32 1 0 \"Eldale\"\nTR_m1_T_Eldale->AiTravel 200 -32 1\n"
+            "TR_m1_T_Eldale->AiEscort player 0 200 -32 1\nTR_m1_T_Eldale->Disable\n",
+            true, id("TR_m1_T_Eldale"), false, true, true);
+        (void)admittedBank.compileResult("Enable", true, id("TR_m1_T_Eldale"), true);
+
+        const auto makeBankScript = [&](std::string_view body) {
+            ESM::Script candidate = eldale;
+            candidate.mScriptText = "begin TR_m1_T_EldaleSc\nshort state\nfloat timer\n" + std::string(body) + "\nend\n";
+            return candidate;
+        };
+        for (const auto* query : {
+            "if ( GetJournalIndex \"TR_M1_GS_MQ_4\" >= 10 )\nset state to 1\nendif",
+            "if ( CellChanged == 0 )\nreturn\nendif",
+            "if ( MenuMode == 1 )\nreturn\nendif",
+            "if ( GetPCSleep == 1 )\nreturn\nendif",
+            "if ( OnActivate == 1 )\nActivate\nendif"})
+            rejects([&] {
+                auto candidate = makeBankScript(query);
+                SharedWorldScript blocked(candidate, {eldaleDead}, "quest-audit-v95", crypto,
+                    std::vector<ESM::Script>{candidate, hortDeath}, id("TR_m1_T_Eldale"), true);
+            }, "Unadmitted Batch-1/2 state, cell, menu, or activation opcode compiled in source bank");
+        for (const auto* resultOp : {
+            "\"arrille\"->ModDisposition 40",
+            "if ( player->GetItemCount \"ring_keley\" >= 1 )\nset doOnce to 1\nendif",
+            "player->AddItem \"gold_001\" 100",
+            "player->RemoveItem \"ring_keley\" 1"})
+            rejects([&] { (void)admittedBank.compileResult(resultOp, true, id("TR_m1_T_Eldale"), false, true, true); },
+                "Unadmitted Batch-2/3 foreign-NPC or provenance item opcode compiled in dialogue result");
+        std::cout << "quest audit: V95 admits source-bank OnDeath/StartScript/StopScript/GetSecondsPassed/GetDisabled/GetPos/GetAngle/GetHealth "
+            "and result Journal/SetJournalIndex/GetJournalIndex/AddTopic/Choice/ModDisposition/Disable/Enable/Position/PositionCell/AiTravel/AiEscort; "
+            "remaining quest batches isolated to (1) bank GetJournalIndex/CellChanged/MenuMode/GetPCSleep, "
+            "(2) OnActivate/Activate/foreign-ModDisposition, "
+            "(3) provenance GetItemCount/AddItem/RemoveItem\n";
+    }
 }
 
 int main(int argc, char** argv)
@@ -590,6 +645,7 @@ int main(int argc, char** argv)
         if (filter == "content" && argc == 3) content(*crypto, argv[2]);
         else if (filter == "quest-content" && argc == 3) questContent(*crypto, argv[2], false);
         else if (filter == "tr-quest-content" && argc == 3) questContent(*crypto, argv[2], true);
+        else if (filter == "quest-audit" && argc == 2) questAudit(*crypto);
         else if (filter == "shared" && argc == 2) shared(*crypto);
         else if (filter == "rollback") rollback(*crypto);
         else if (filter == "recovery") recovery(*crypto);

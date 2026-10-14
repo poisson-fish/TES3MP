@@ -6509,7 +6509,7 @@ namespace TES3MP::Native
                     && invocations >= PersonalScripts::MaximumInvocationsPerTransaction) continue;
                 if ((mBinding.mPersonalScripts->enables() || pose) && std::ranges::any_of(*stories, [&](const auto& story) {
                     return story.last.character == player.value() && story.encounterLife
-                        && story.encounterLife != native->life->generation;
+                        && (story.activity || story.encounterLife != native->life->generation);
                 })) continue;
                 auto returned = mBinding.mPersonalScripts->prepareReturn(*stories, player.value(),
                     &mRuntime.mStore, native->life ? native->life->generation : 0);

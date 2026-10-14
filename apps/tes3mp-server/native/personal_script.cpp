@@ -396,12 +396,12 @@ namespace TES3MP::Native
         require(!mEncounters || mIntents);
         require(!mReturns || mEncounters);
         require(!mEnables || mReturns);
-        require(!mRelocations || (mEncounters && !mEnables));
-        require(!mNpcBanks || (mRelocations && mSourceWaits && mLifeEvents && mFairOpportunities && mActivities && !mReturns && !mEnables));
-        require(!mSourceWaits || (mEncounters && mBanks && !mReturns && (!mRelocations || mNpcBanks)));
+        require(!mRelocations || (mEncounters && (!mEnables || mNpcBanks)));
+        require(!mNpcBanks || (mRelocations && mSourceWaits && mLifeEvents && mFairOpportunities && mActivities && mReturns && mEnables));
+        require(!mSourceWaits || (mEncounters && mBanks && (!mReturns || mNpcBanks) && (!mRelocations || mNpcBanks)));
         require(!mLifeEvents || mSourceWaits);
         require(!mFairOpportunities || mLifeEvents);
-        require(!mActivities || (mRelocations && (!mSourceWaits || mNpcBanks) && !mReturns));
+        require(!mActivities || (mRelocations && (!mSourceWaits || mNpcBanks) && (!mReturns || mNpcBanks)));
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
@@ -630,13 +630,13 @@ namespace TES3MP::Native
         require(!state.encounterLife || (mEncounters && last.sourceReference == expected.encounter->reference
             && last.sourceLife == state.encounterLife && state.choices.empty()));
         require(!state.encounterReturned || (mReturns && state.encounterLife));
-        require(!state.encounterEnabled || (mEnables && state.encounterLife && state.encounterReturned));
-        require(!mEnables || state.encounterEnabled == state.encounterReturned);
+        require(!state.encounterEnabled || (mEnables && state.encounterLife && state.encounterReturned && !state.relocation));
+        require(!mEnables || state.encounterEnabled == (state.encounterReturned && !state.relocation));
         require(!state.relocation || (mRelocations && state.encounterLife && !state.encounterEnabled));
         if (state.relocation) state.relocation->validate();
-        require(!state.activity || (mActivities && state.relocation && state.encounterLife && !state.encounterReturned));
+        require(!state.activity || (mActivities && state.relocation && state.encounterLife
+            && (!state.encounterReturned || (mNpcBanks && state.activity->completed))));
         require(!mActivities || mNpcBanks || bool(state.activity) == bool(state.encounterLife));
-        require(!mNpcBanks || bool(state.relocation) == bool(state.encounterLife));
         if (state.activity)
         {
             state.activity->validate();
@@ -931,7 +931,7 @@ namespace TES3MP::Native
             const auto index = size_t(found - mDefinitions.begin());
             const auto& current = before[index]; validate(current, index);
             require(execution.ownership == current.last.ownership && execution.campaign == mCampaign
-                && execution.physicalScope == (mNpcBanks && current.encounterLife ? index + 2 : 1)
+                && execution.physicalScope == (mNpcBanks && current.encounterLife && current.relocation && !current.encounterReturned ? index + 2 : 1)
                 && (mSourceWaits ? execution.sourceReference == found->encounter->reference && execution.sourceLife
                     && (!current.encounterLife || execution.sourceLife == current.encounterLife)
                     && !execution.causalEvent : !execution.sourceReference && !execution.sourceLife));
@@ -1053,8 +1053,10 @@ namespace TES3MP::Native
         prepared.result.outcome = SharedWorldScript::Outcome::Committed;
         if (found->encounterReturned) return prepared;
         const auto index = size_t(found - before.begin());
+        require(!found->activity || (mNpcBanks && found->activity->completed));
         if (found->relocation) require(sourceLife == found->encounterLife);
-        if (mEnables)
+        const bool enable = mEnables && !found->relocation;
+        if (enable)
         {
             require(content && sourceLife == found->encounterLife);
             const auto& binding = *mDefinitions[index].encounter;
@@ -1093,7 +1095,7 @@ namespace TES3MP::Native
         }
         prepared.state = before;
         prepared.state[index].encounterReturned = true;
-        prepared.state[index].encounterEnabled = mEnables;
+        prepared.state[index].encounterEnabled = enable;
         prepared.image = encode(prepared.state);
         prepared.result.executed = true;
         return prepared;
@@ -1184,7 +1186,7 @@ namespace TES3MP::Native
                 void disable(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
                 {
                     validate(execution, ptr);
-                    require(!relocation && !activities && !npcBanks && !reservedByOther); // Mixed physical outcomes need separate admission.
+                    require((!activities || npcBanks) && !relocation && !activity && !reservedByOther); // Mixed physical outcomes need separate admission.
                     if (!prepared) throw EncounterPreparationRequired{};
                     removed = true;
                     source.getRefData().disable();
@@ -1590,7 +1592,7 @@ namespace TES3MP::Native
             {
                 const auto& current = before[i];
                 const auto scope = physicalScope(before, current.last.character);
-                if (current.encounterReturned || (current.encounterLife ? (!mNpcBanks || scope != i + 2) : scope != 1)
+                if (current.encounterReturned || (current.encounterLife ? (!mNpcBanks || !current.relocation || scope != i + 2) : scope != 1)
                     || current.scheduledTick == worldTick
                     || std::ranges::find(activeCharacters, current.last.character) == activeCharacters.end()) continue;
                 require(prepared.invocations < MaximumInvocationsPerTransaction

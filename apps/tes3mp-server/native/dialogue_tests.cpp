@@ -2094,10 +2094,20 @@ namespace
             dialogues[1].mInfo.front().mResultScript = character == 11
                 ? "set calls to calls + 1\nJournal journey_t37 20\nspeaker_r29->AiEscort player 0 200 -32 1\nMessageBox \"Escort started\""
                 : "set calls to calls + 1\nJournal journey_t37 20\nPositionCell 200 -32 1 5400 room_e87\nMessageBox \"Relocated\"";
+            ESM::DialInfo disableBranch = dialogues[1].mInfo.front();
+            disableBranch.mId = id("disable_branch_9");
+            disableBranch.mSelects = {condition(ESM::DialogueCondition::Function_Global, "personal_counter", 9)};
+            disableBranch.mResponse = "Departed.";
+            disableBranch.mResultScript = "set calls to calls + 1\nJournal journey_t37 20\nspeaker_r29->Disable\nMessageBox \"Disabled\"";
+            dialogues[1].mInfo.insert(dialogues[1].mInfo.begin(), disableBranch);
             definitions.push_back({character, 31, primary, {{relay, true}}, true,
                 dialogues, PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("room_e87")}});
         }
-        PersonalScripts policy(7, definitions, crypto, true, true, true, false, false, true, true, true, true, true, true);
+        PersonalScripts policy(7, definitions, crypto, true, true, true, true, true, true, true, true, true, true, true);
+        require(policy.scheduled() && policy.banks() && policy.dialogues() && policy.intents() && policy.encounters()
+            && policy.returns() && policy.enables() && policy.relocations() && policy.sourceWaits()
+            && policy.lifeEvents() && policy.fairOpportunities() && policy.activities() && policy.npcBanks(),
+            "Unified M5 story policy omitted a capability");
         Resolver resolver; resolver.actor = fixture.actor.getPtr();
         MWWorld::ManualRef player(fixture.content, id("speaker_r29")); resolver.player = player.getPtr();
         struct NoFallback final : MWScript::ReferenceResolver
@@ -2181,7 +2191,45 @@ namespace
             && integer(bobPrivateTick.state[1].runtime, "credit") == 1
             && number(bobPrivateTick.state[1].runtime, "posx") == 200.f,
             "Relocated private bank did not read relocated pose or pre-departure life credit");
-        std::cout << "npc banks: composed relocation/activity/wait/life-event/opportunity policy; private pose/health/timer continuation across public death; exact recovery\n";
+        rejects([&] { (void)policy.prepareReturn(bobPrivateTick.state, 11, &fixture.content, 1); },
+            "Unfinished escort activity returned before completion");
+        auto completedState = bobPrivateTick.state;
+        completedState[0].activity->steps = 1;
+        completedState[0].activity->tick = 1;
+        completedState[0].activity->completed = true;
+        auto aliceReturned = policy.prepareReturn(completedState, 11, &fixture.content, 1);
+        require(aliceReturned.result.executed && aliceReturned.invocations == 0
+            && aliceReturned.state[0].encounterReturned && !aliceReturned.state[0].encounterEnabled
+            && PersonalScripts::physicalScope(aliceReturned.state, 11) == 1
+            && PersonalScripts::relocation(aliceReturned.state, 11) == nullptr
+            && policy.encode(policy.restore(aliceReturned.image)) == aliceReturned.image,
+            "Completed activity return did not preserve dormant pose or restore shared scope");
+        auto bobReturned = policy.prepareReturn(aliceReturned.state, 22, &fixture.content, 2);
+        require(bobReturned.result.executed && bobReturned.invocations == 0
+            && bobReturned.state[1].encounterReturned && !bobReturned.state[1].encounterEnabled
+            && PersonalScripts::physicalScope(bobReturned.state, 22) == 1
+            && policy.encode(policy.restore(bobReturned.image)) == bobReturned.image,
+            "Relocation return did not preserve dormant pose or restore shared scope");
+        auto disableStart = publicTick.state;
+        disableStart[0].runtime.runtime.globals.front().mValue.setInteger(9);
+        auto aliceDisabled = runIntent(disableStart, 11, 1);
+        require(aliceDisabled.result.executed && aliceDisabled.state[0].encounterLife == 1
+            && !aliceDisabled.state[0].relocation && !aliceDisabled.state[0].activity
+            && PersonalScripts::physicalScope(aliceDisabled.state, 11) == 2
+            && policy.encode(policy.restore(aliceDisabled.image)) == aliceDisabled.image,
+            "Unified policy rejected Disable branch or failed round-trip");
+        auto disabledSchedule = policy.prepareScheduled(aliceDisabled.state, 2, both, fixture.content, scheduledResolver, &source);
+        require(disabledSchedule.result.executed && disabledSchedule.state[0].clockTicks == 1
+            && disabledSchedule.state[1].clockTicks == 2,
+            "Terminal Disable scope did not suspend its scheduled source bank");
+        auto aliceEnabledReturn = policy.prepareReturn(disabledSchedule.state, 11, &fixture.content, 1);
+        require(aliceEnabledReturn.result.executed && aliceEnabledReturn.invocations == 1
+            && aliceEnabledReturn.state[0].encounterReturned && aliceEnabledReturn.state[0].encounterEnabled
+            && PersonalScripts::physicalScope(aliceEnabledReturn.state, 11) == 1
+            && policy.encode(policy.restore(aliceEnabledReturn.image)) == aliceEnabledReturn.image,
+            "Safe return from Disable did not run stock Enable restoration in unified policy");
+        std::cout << "npc banks: unified M5 policy (Disable/Enable/return, relocation/activity/return, wait/life-event/opportunity); "
+            "private pose/health/timer continuation across public death; exact recovery\n";
     }
 
     void stock(CredentialCrypto& crypto)
