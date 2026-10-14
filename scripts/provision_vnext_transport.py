@@ -80,6 +80,10 @@ def build_manifest() -> dict[str, Any]:
         gns.PROTOBUF_INSTALL_DIR / "lib/cmake/protobuf/protobuf-config.cmake",
         "Protobuf package configuration",
     )
+    _require_file(
+        gns.PROTOBUF_INSTALL_DIR / "lib/cmake/absl/abslConfig.cmake",
+        "Abseil package configuration",
+    )
     _require_file(gns.OPENSSL_INSTALL_DIR / "include/openssl/ssl.h", "OpenSSL headers")
     gns_evidence = _require_file(gns.EVIDENCE_PATH, "GameNetworkingSockets evidence")
     cares_evidence = _require_file(cares.EVIDENCE_PATH, "c-ares evidence")

@@ -20,6 +20,12 @@ a target. See the current status and next slice below.
 - [Durable engineering decisions](docs/vnext/DECISIONS.md)
 - [Implementation milestones](docs/vnext/PLAN.md)
 
+## Building
+
+- **macOS / Linux:** `./build.sh product` (or `client`, `server`, `headless`, `checks`, `protocol`, `server-logic`, `adapter-tests`, `desktop-evidence`, `doctor`)
+- **Windows:** `build_windows.bat -Target product` (or [`build_windows.ps1`](build_windows.ps1) with the same target names)
+- **VSCode CMake Tools:** select configure preset `vnext-product-macos`, `vnext-product-linux`, or `vnext-product-windows` from [`CMakePresets.json`](CMakePresets.json) and the matching `vnext-product-*` build preset; [`cmake/TES3MPPlatformDefaults.cmake`](cmake/TES3MPPlatformDefaults.cmake) resolves local `deps/openmw-deps` and cached source trees automatically without manual environment variables.
+
 The source baseline is OpenMW 0.51.0 at
 `f4bec41444214a7903bebd178389ca22ca13f646`. Intentional differences are recorded
 in [`docs/vnext/BASELINE_PROVENANCE.json`](docs/vnext/BASELINE_PROVENANCE.json).

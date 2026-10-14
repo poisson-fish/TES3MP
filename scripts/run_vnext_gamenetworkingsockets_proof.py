@@ -478,6 +478,7 @@ def build_protobuf(
         "-DCMAKE_CXX_STANDARD=17",
         "-DABSL_ENABLE_INSTALL=ON",
         "-DABSL_PROPAGATE_CXX_STD=ON",
+        "-Dprotobuf_FORCE_FETCH_DEPENDENCIES=ON",
         f"-DFETCHCONTENT_SOURCE_DIR_ABSL={abseil.resolve()}",
         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON",
         "-Dprotobuf_BUILD_TESTS=OFF",
@@ -530,6 +531,7 @@ def build_and_test_proof(
         f"-DCMAKE_PREFIX_PATH={prefix_path}",
         f"-DOPENSSL_ROOT_DIR={OPENSSL_INSTALL_DIR.resolve()}",
         f"-DProtobuf_DIR={PROTOBUF_INSTALL_DIR.resolve() / 'lib/cmake/protobuf'}",
+        f"-Dabsl_DIR={PROTOBUF_INSTALL_DIR.resolve() / 'lib/cmake/absl'}",
         f"-DVNEXT_GNS_SOURCE_DIR={gns_source.resolve()}",
     ]
     if os.name == "nt":

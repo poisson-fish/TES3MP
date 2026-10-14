@@ -267,6 +267,7 @@
   "buildPresets": [
     {
       "name": "vnext-product-windows",
+      "displayName": "TES3MP client and dedicated server (Windows x86-64)",
       "configurePreset": "vnext-product-windows",
       "targets": [
         "openmw",
@@ -275,21 +276,25 @@
     },
     {
       "name": "vnext-product-client-windows",
+      "displayName": "TES3MP client only (Windows x86-64)",
       "configurePreset": "vnext-product-windows",
       "targets": ["openmw"]
     },
     {
       "name": "vnext-product-server-windows",
+      "displayName": "TES3MP dedicated server only (Windows x86-64)",
       "configurePreset": "vnext-product-windows",
       "targets": ["tes3mp_server"]
     },
     {
       "name": "vnext-product-headless-windows",
+      "displayName": "TES3MP headless client (Windows x86-64)",
       "configurePreset": "vnext-product-windows",
       "targets": ["tes3mp_headless_client"]
     },
     {
       "name": "vnext-product-checks-windows",
+      "displayName": "TES3MP product + adapter & server app tests (Windows x86-64)",
       "configurePreset": "vnext-product-windows",
       "targets": [
         "openmw",
@@ -300,11 +305,13 @@
     },
     {
       "name": "vnext-protocol-contracts-windows",
+      "displayName": "TES3MP protocol contracts (Windows x86-64)",
       "configurePreset": "vnext-product-windows",
       "targets": ["tes3mp_protocol_contracts_run"]
     },
     {
       "name": "vnext-server-logic-windows",
+      "displayName": "TES3MP server logic & app tests (Windows x86-64)",
       "configurePreset": "vnext-product-windows",
       "targets": [
         "tes3mp_server_logic_tests_run",
@@ -313,16 +320,19 @@
     },
     {
       "name": "vnext-adapter-tests-windows",
+      "displayName": "TES3MP OpenMW adapter tests (Windows x86-64)",
       "configurePreset": "vnext-product-windows",
       "targets": ["openmw_tes3mp_adapter_tests_run"]
     },
     {
       "name": "vnext-desktop-evidence-windows",
+      "displayName": "TES3MP desktop evidence (Windows x86-64)",
       "configurePreset": "vnext-desktop-evidence-windows",
       "targets": ["tes3mp_desktop_evidence"]
     },
     {
       "name": "vnext-product-linux",
+      "displayName": "TES3MP client and dedicated server (Linux x86-64)",
       "configurePreset": "vnext-product-linux",
       "targets": [
         "openmw",
@@ -330,7 +340,64 @@
       ]
     },
     {
+      "name": "vnext-product-client-linux",
+      "displayName": "TES3MP client only (Linux x86-64)",
+      "configurePreset": "vnext-product-linux",
+      "targets": ["openmw"]
+    },
+    {
+      "name": "vnext-product-server-linux",
+      "displayName": "TES3MP dedicated server only (Linux x86-64)",
+      "configurePreset": "vnext-product-linux",
+      "targets": ["tes3mp_server"]
+    },
+    {
+      "name": "vnext-product-headless-linux",
+      "displayName": "TES3MP headless client (Linux x86-64)",
+      "configurePreset": "vnext-product-linux",
+      "targets": ["tes3mp_headless_client"]
+    },
+    {
+      "name": "vnext-product-checks-linux",
+      "displayName": "TES3MP product + adapter & server app tests (Linux x86-64)",
+      "configurePreset": "vnext-product-linux",
+      "targets": [
+        "openmw",
+        "tes3mp_server",
+        "openmw_tes3mp_adapter_tests_run",
+        "tes3mp_server_app_tests_run"
+      ]
+    },
+    {
+      "name": "vnext-protocol-contracts-linux",
+      "displayName": "TES3MP protocol contracts (Linux x86-64)",
+      "configurePreset": "vnext-product-linux",
+      "targets": ["tes3mp_protocol_contracts_run"]
+    },
+    {
+      "name": "vnext-server-logic-linux",
+      "displayName": "TES3MP server logic & app tests (Linux x86-64)",
+      "configurePreset": "vnext-product-linux",
+      "targets": [
+        "tes3mp_server_logic_tests_run",
+        "tes3mp_server_app_tests_run"
+      ]
+    },
+    {
+      "name": "vnext-adapter-tests-linux",
+      "displayName": "TES3MP OpenMW adapter tests (Linux x86-64)",
+      "configurePreset": "vnext-product-linux",
+      "targets": ["openmw_tes3mp_adapter_tests_run"]
+    },
+    {
+      "name": "vnext-desktop-evidence-linux",
+      "displayName": "TES3MP desktop evidence (Linux x86-64)",
+      "configurePreset": "vnext-desktop-evidence-linux",
+      "targets": ["tes3mp_desktop_evidence"]
+    },
+    {
       "name": "vnext-product-macos",
+      "displayName": "TES3MP client and dedicated server (macOS)",
       "configurePreset": "vnext-product-macos",
       "targets": [
         "openmw",
@@ -338,17 +405,64 @@
       ]
     },
     {
-      "name": "vnext-desktop-evidence-linux",
-      "configurePreset": "vnext-desktop-evidence-linux",
-      "targets": ["tes3mp_desktop_evidence"]
+      "name": "vnext-product-client-macos",
+      "displayName": "TES3MP client only (macOS)",
+      "configurePreset": "vnext-product-macos",
+      "targets": ["openmw"]
+    },
+    {
+      "name": "vnext-product-server-macos",
+      "displayName": "TES3MP dedicated server only (macOS)",
+      "configurePreset": "vnext-product-macos",
+      "targets": ["tes3mp_server"]
+    },
+    {
+      "name": "vnext-product-headless-macos",
+      "displayName": "TES3MP headless client (macOS)",
+      "configurePreset": "vnext-product-macos",
+      "targets": ["tes3mp_headless_client"]
+    },
+    {
+      "name": "vnext-product-checks-macos",
+      "displayName": "TES3MP product + adapter & server app tests (macOS)",
+      "configurePreset": "vnext-product-macos",
+      "targets": [
+        "openmw",
+        "tes3mp_server",
+        "openmw_tes3mp_adapter_tests_run",
+        "tes3mp_server_app_tests_run"
+      ]
+    },
+    {
+      "name": "vnext-protocol-contracts-macos",
+      "displayName": "TES3MP protocol contracts (macOS)",
+      "configurePreset": "vnext-product-macos",
+      "targets": ["tes3mp_protocol_contracts_run"]
+    },
+    {
+      "name": "vnext-server-logic-macos",
+      "displayName": "TES3MP server logic & app tests (macOS)",
+      "configurePreset": "vnext-product-macos",
+      "targets": [
+        "tes3mp_server_logic_tests_run",
+        "tes3mp_server_app_tests_run"
+      ]
+    },
+    {
+      "name": "vnext-adapter-tests-macos",
+      "displayName": "TES3MP OpenMW adapter tests (macOS)",
+      "configurePreset": "vnext-product-macos",
+      "targets": ["openmw_tes3mp_adapter_tests_run"]
     },
     {
       "name": "vnext-desktop-evidence-macos",
+      "displayName": "TES3MP desktop evidence (macOS)",
       "configurePreset": "vnext-desktop-evidence-macos",
       "targets": ["tes3mp_desktop_evidence"]
     },
     {
       "name": "vnext-baseline-windows",
+      "displayName": "vNext OpenMW 0.51 baseline tests (Windows x86-64)",
       "configurePreset": "vnext-baseline-windows",
       "targets": [
         "components-tests",
@@ -358,10 +472,12 @@
     },
     {
       "name": "vnext-baseline-windows-ci",
+      "displayName": "vNext OpenMW 0.51 full baseline (Windows x86-64 CI)",
       "configurePreset": "vnext-baseline-windows-ci"
     },
     {
       "name": "vnext-baseline-linux",
+      "displayName": "vNext OpenMW 0.51 baseline tests (Linux x86-64)",
       "configurePreset": "vnext-baseline-linux",
       "targets": [
         "components-tests",
@@ -371,10 +487,12 @@
     },
     {
       "name": "vnext-baseline-linux-ci",
+      "displayName": "vNext OpenMW 0.51 full baseline (Linux x86-64 CI)",
       "configurePreset": "vnext-baseline-linux-ci"
     },
     {
       "name": "vnext-baseline-macos",
+      "displayName": "vNext OpenMW 0.51 baseline tests (macOS)",
       "configurePreset": "vnext-baseline-macos",
       "targets": [
         "components-tests",
@@ -384,6 +502,7 @@
     },
     {
       "name": "vnext-baseline-macos-ci",
+      "displayName": "vNext OpenMW 0.51 full baseline (macOS CI)",
       "configurePreset": "vnext-baseline-macos-ci"
     }
   ]

@@ -62,8 +62,11 @@ target allowlist and rejects forbidden include families in independent sources.
 `scripts/tests/test_tes3mp_target_boundaries.py` proves that both checks fail
 closed with temporary miniature CMake projects.
 
-The standalone presets in this directory build the independent libraries and
-their contract executables without OpenMW. Runtime-safety entry points are:
+The standalone presets in [`CMakePresets.json`](CMakePresets.json)
+(`tes3mp-standalone`, `tes3mp-protocol-contracts`, `tes3mp-server-logic`,
+`tes3mp-adapter-tests`) build the independent libraries and contract executables
+without OpenMW (or via `./build.sh protocol` on macOS/Linux and
+`build_windows.bat -Target protocol` on Windows). Runtime-safety entry points are:
 
 ```sh
 python scripts/run_tes3mp_runtime_safety.py --profile asan-ubsan --fuzz-seconds 30

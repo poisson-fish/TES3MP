@@ -18,6 +18,9 @@ endif()
 
 set(TES3MP_FLATBUFFERS_SOURCE_DIR "" CACHE PATH
     "Optional extracted FlatBuffers 25.12.19 source used instead of the pinned download")
+if(NOT TES3MP_FLATBUFFERS_SOURCE_DIR AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../deps/flatbuffers-25.12.19/include/flatbuffers/flatbuffers.h")
+    set(TES3MP_FLATBUFFERS_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../deps/flatbuffers-25.12.19")
+endif()
 if(TES3MP_FLATBUFFERS_SOURCE_DIR)
     if(NOT EXISTS "${TES3MP_FLATBUFFERS_SOURCE_DIR}/include/flatbuffers/flatbuffers.h")
         message(FATAL_ERROR

@@ -475,46 +475,6 @@
       "purpose": "Defines the app-owned testable dedicated-server composition library, focused contracts, and verified-transport executable root."
     },
     {
-      "path": "apps/tes3mp-server/native/CMakeLists.txt",
-      "status": "A",
-      "purpose": "Opt-in M1 native loadout, inventory, and enchantment probe with filtered synthetic tests, explicit temporary OpenMW links, and mode-specific dependency evidence."
-    },
-    {
-      "path": "apps/tes3mp-server/native/diagnostic.hpp",
-      "status": "A",
-      "purpose": "Engine-free owned diagnostic record/effect/GMST values and fixed sample count/string/report limits."
-    },
-    {
-      "path": "apps/tes3mp-server/native/enchantment.cpp",
-      "status": "A",
-      "purpose": "Bound and stage engine enchantment cost/charge diagnostics from the retained loadout, validating numeric conversion and multiplication before calling engine calculations."
-    },
-    {
-      "path": "apps/tes3mp-server/native/inventory.cpp",
-      "status": "A",
-      "purpose": "Exercise real ContainerStore and WorldModel lifecycle with an explicitly registered owner and resolved empty store plus compiler-derived script locals, registration, and OnPCAdd assignment; execute no script instructions."
-    },
-    {
-      "path": "apps/tes3mp-server/native/loadout.hpp",
-      "status": "A",
-      "purpose": "App-local owner for configured engine records, encoding, and cached readers; exposes staged samples, disposable inventory operations, and enchantment calculation diagnostics."
-    },
-    {
-      "path": "apps/tes3mp-server/native/loadout.cpp",
-      "status": "A",
-      "purpose": "Reuse OpenMW configuration, TES3 loading, and store normalization; enumerate winning IDs with engine ASCII folding, or select bounded sampling, inventory, or enchantment diagnostics."
-    },
-    {
-      "path": "apps/tes3mp-server/native/main.cpp",
-      "status": "A",
-      "purpose": "Headless native probe entry point with documented normalized record IDs, separate diagnostic/report streams, sample/inventory/enchantment selection, and visible failures."
-    },
-    {
-      "path": "apps/tes3mp-server/native/loadout_tests.cpp",
-      "status": "A",
-      "purpose": "OpenMW-written synthetic loadouts exercise configuration, normalized enumeration, bounded projection, inventory/script initialization, two-owner add/remove isolation and notification rejection, and per-store enchantment calculations."
-    },
-    {
       "path": "apps/tes3mp-server/actor_content.cpp",
       "status": "A",
       "purpose": "Loads and validates the bounded manifest-scoped actor artifact, exact cells, AI packages, and collision-occupiable points before server listen."
@@ -655,6 +615,46 @@
       "purpose": "Thin single-threaded dedicated-server process root with fail-closed content collision, transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
     },
     {
+      "path": "apps/tes3mp-server/native/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Opt-in M1 native loadout, inventory, and enchantment probe with filtered synthetic tests, explicit temporary OpenMW links, and mode-specific dependency evidence."
+    },
+    {
+      "path": "apps/tes3mp-server/native/diagnostic.hpp",
+      "status": "A",
+      "purpose": "Engine-free owned diagnostic record/effect/GMST values and fixed sample count/string/report limits."
+    },
+    {
+      "path": "apps/tes3mp-server/native/enchantment.cpp",
+      "status": "A",
+      "purpose": "Bound and stage engine enchantment cost/charge diagnostics from the retained loadout, validating numeric conversion and multiplication before calling engine calculations."
+    },
+    {
+      "path": "apps/tes3mp-server/native/inventory.cpp",
+      "status": "A",
+      "purpose": "Exercise real ContainerStore and WorldModel lifecycle with an explicitly registered owner and resolved empty store plus compiler-derived script locals, registration, and OnPCAdd assignment; execute no script instructions."
+    },
+    {
+      "path": "apps/tes3mp-server/native/loadout.cpp",
+      "status": "A",
+      "purpose": "Reuse OpenMW configuration, TES3 loading, and store normalization; enumerate winning IDs with engine ASCII folding, or select bounded sampling, inventory, or enchantment diagnostics."
+    },
+    {
+      "path": "apps/tes3mp-server/native/loadout.hpp",
+      "status": "A",
+      "purpose": "App-local owner for configured engine records, encoding, and cached readers; exposes staged samples, disposable inventory operations, and enchantment calculation diagnostics."
+    },
+    {
+      "path": "apps/tes3mp-server/native/loadout_tests.cpp",
+      "status": "A",
+      "purpose": "OpenMW-written synthetic loadouts exercise configuration, normalized enumeration, bounded projection, inventory/script initialization, two-owner add/remove isolation and notification rejection, and per-store enchantment calculations."
+    },
+    {
+      "path": "apps/tes3mp-server/native/main.cpp",
+      "status": "A",
+      "purpose": "Headless native probe entry point with documented normalized record IDs, separate diagnostic/report streams, sample/inventory/enchantment selection, and visible failures."
+    },
+    {
       "path": "apps/tes3mp-server/phase7_proof_profile.hpp",
       "status": "A",
       "purpose": "Pins the owner-approved bounded Phase 7 protocol, authentication, connection, and grace mapping proof profile."
@@ -715,6 +715,11 @@
       "purpose": "Owned minimal server configuration values, limits, errors, and secret-loading interface."
     },
     {
+      "path": "build.sh",
+      "status": "A",
+      "purpose": "Selects bounded product, focused check, headless, standalone contract, or full baseline build scopes on macOS and Linux with full logs in build/logs."
+    },
+    {
       "path": "build_windows.bat",
       "status": "A",
       "purpose": "Thin Windows command-shell entry point for the bounded PowerShell product build wrapper."
@@ -723,6 +728,11 @@
       "path": "build_windows.ps1",
       "status": "A",
       "purpose": "Selects bounded product, focused check, headless, standalone contract, or full baseline build scopes with explicit MSVC setup."
+    },
+    {
+      "path": "cmake/TES3MPPlatformDefaults.cmake",
+      "status": "A",
+      "purpose": "Resolves default local vcpkg, Qt, and FetchContent paths on macOS, Linux, and Windows when CMake presets are activated directly in VSCode without wrapper environment variables."
     },
     {
       "path": "cmake/TES3MPRuntimeSafety.cmake",
@@ -2642,11 +2652,11 @@
       "files": [
         {
           "path": "CMakeLists.txt",
-          "sha256": "42b936d3fcae7842fa0898df2cd02b4a0e310eb9c44e1b5a58f2e1b96b0f9891"
+          "sha256": "bb49869f597a04094d189b9888cb86daef4e914caf03639dbf7425046b108575"
         },
         {
           "path": "CMakePresets.json",
-          "sha256": "076cd31ed9d7e3271f627653c5e91e88798eada199e488e299b5041189cfb8c0"
+          "sha256": "482de097bc6a6195c43caa57bfd0d779eb1778807fc565d117f6c903341ff46f"
         },
         {
           "path": "extern/CMakeLists.txt",
@@ -2654,7 +2664,7 @@
         },
         {
           "path": "scripts/run_vnext_baseline.py",
-          "sha256": "55fa2d4c18ff2d640744c424484a689155dc837e846a7cf75cb5fc3ce9883a9d"
+          "sha256": "968ec9a2b25bb657907aeafc8adddfd1aebbf7444e3648852ea757dc98ec8571"
         },
         {
           "path": "scripts/verify_vnext_legacy_exclusion.py",
@@ -2746,7 +2756,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "6dfd4e93fc7864efbd0627abbb66e4937315f4784ff9162df27ba4f908a2f8d3"
+          "sha256": "368308b7ae2eeb04d21e3c2b46ebb40fe0aec3157faf2103863a4fd7549e54b4"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -3025,7 +3035,7 @@
         },
         {
           "path": "scripts/run_vnext_gamenetworkingsockets_proof.py",
-          "sha256": "ee1a6129b60f0dbf1ca5a6169e7a8d6b731f7d4ca4cd8d9197f3aeeb092c9195"
+          "sha256": "1d51e5abd870e5a803aa35c83d04b5baf778337086570ae888068e6b8f0be3e7"
         },
         {
           "path": "scripts/tests/test_run_vnext_gamenetworkingsockets_proof.py",

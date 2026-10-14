@@ -48,16 +48,19 @@
   "buildPresets": [
     {
       "name": "tes3mp-standalone",
+      "displayName": "TES3MP protocol tests (standalone)",
       "configurePreset": "tes3mp-standalone",
       "targets": ["tes3mp_protocol_tests_run"]
     },
     {
       "name": "tes3mp-protocol-contracts",
+      "displayName": "TES3MP protocol contracts (standalone)",
       "configurePreset": "tes3mp-standalone",
       "targets": ["tes3mp_protocol_contracts_run"]
     },
     {
       "name": "tes3mp-server-logic",
+      "displayName": "TES3MP server logic & app tests (standalone)",
       "configurePreset": "tes3mp-standalone",
       "targets": [
         "tes3mp_server_logic_tests_run",
@@ -66,11 +69,13 @@
     },
     {
       "name": "tes3mp-adapter-tests",
+      "displayName": "TES3MP OpenMW adapter tests (standalone)",
       "configurePreset": "tes3mp-standalone",
       "targets": ["openmw_tes3mp_adapter_tests_run"]
     },
     {
       "name": "tes3mp-safety-asan-ubsan",
+      "displayName": "TES3MP ASan+UBSan + fuzzers (standalone)",
       "configurePreset": "tes3mp-safety-asan-ubsan",
       "targets": [
         "tes3mp_protocol_tests_run",
@@ -85,6 +90,7 @@
     },
     {
       "name": "tes3mp-safety-tsan",
+      "displayName": "TES3MP ThreadSanitizer (standalone)",
       "configurePreset": "tes3mp-safety-tsan",
       "targets": ["tes3mp_protocol_tests_run"]
     }

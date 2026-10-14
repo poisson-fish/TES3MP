@@ -6,6 +6,7 @@
 #include <components/files/hash.hpp>
 #include <components/files/openfile.hpp>
 
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>

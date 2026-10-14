@@ -112,7 +112,53 @@ def download(url: str, destination: pathlib.Path, algorithm: str, expected: str)
             temporary.unlink()
 
 
-def provision_windows(cmake: str, env: dict[str, str]) -> None:
+def provision_flatbuffers(cmake: str, env: dict[str, str]) -> None:
+    fb_lock_path = ROOT / "scripts" / "vnext_flatbuffers_proof.json"
+    if fb_lock_path.is_file():
+        fb_dep = json.loads(fb_lock_path.read_text(encoding="utf-8")).get("dependency", {})
+        archive_info = fb_dep.get("source_archive", {})
+        source_dir_name = fb_dep.get("source_directory", "flatbuffers-25.12.19")
+        destination = ROOT / "deps" / source_dir_name
+        header = destination / "include" / "flatbuffers" / "flatbuffers.h"
+        if not header.is_file():
+            DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            archive = DOWNLOAD_DIR / f"{source_dir_name}.tar.gz"
+            download(archive_info["url"], archive, "sha256", archive_info["sha256"])
+            run([cmake, "-E", "tar", "xf", str(archive)], env=env, cwd=ROOT / "deps")
+
+    extern_sources = (
+        (
+            "recastnavigation",
+            "recastnavigation-03259f3287ff8330f0d66fcd98d022edddffaa97",
+            "https://github.com/OpenMW/recastnavigation/archive/03259f3287ff8330f0d66fcd98d022edddffaa97.zip",
+            "63db2ac90904764d7f1466d3c95994ec51d777cddd870b70f8ef674c09ed166b3d16ffc4ac1d18d0eab865fda4bf51b6ea17049025b66a338d3cadd0f48dc712",
+            "CMakeLists.txt",
+        ),
+        (
+            "yaml-cpp",
+            "yaml-cpp-c2680200486572baf8221ba052ef50b58ecd816e",
+            "https://github.com/jbeder/yaml-cpp/archive/c2680200486572baf8221ba052ef50b58ecd816e.zip",
+            "9eb328e37ff547e7f681d64e3a8f268a8a5645cb1c258106d1d9f959eec498dfc7c466690c56f210ad7d5fb95b806a30c87ccbb019cccf5c3c6135cfc3c13fe1",
+            "CMakeLists.txt",
+        ),
+    )
+    for name, extracted_name, url, sha512, marker in extern_sources:
+        dest = ROOT / "deps" / name
+        if (dest / marker).is_file():
+            continue
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        archive = DOWNLOAD_DIR / f"{extracted_name}.zip"
+        download(url, archive, "sha512", sha512)
+        extracted_dir = ROOT / "deps" / extracted_name
+        if extracted_dir.exists():
+            shutil.rmtree(extracted_dir)
+        run([cmake, "-E", "tar", "xf", str(archive)], env=env, cwd=ROOT / "deps")
+        if dest.exists():
+            shutil.rmtree(dest)
+        extracted_dir.replace(dest)
+
+
+def provision_windows(cmake: str, env: dict[str, str], *, require_qt: bool = True) -> None:
     lock = load_lock()["windows_x86_64"]
     deps_root = pathlib.Path(env["VNEXT_VCPKG_ROOT"])
     qt_parent = pathlib.Path(env["VNEXT_QT_ROOT"]).parents[1]
@@ -131,6 +177,8 @@ def provision_windows(cmake: str, env: dict[str, str]) -> None:
     if not toolchain.is_file():
         raise BaselineError(f"Dependency bundle did not provide {toolchain}")
 
+    if not require_qt:
+        return
     qt = lock["qt"]
     qmake = pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake.exe"
     if not qmake.exists():
@@ -184,7 +232,7 @@ def extract_macos_bundle(cmake: str, archive: pathlib.Path, destination: pathlib
         raise BaselineError(f"macOS dependency bundle did not provide {toolchain}")
 
 
-def provision_macos(cmake: str, env: dict[str, str]) -> None:
+def provision_macos(cmake: str, env: dict[str, str], *, require_qt: bool = True) -> None:
     macos = load_lock()["macos"]
     triplet = env["VNEXT_VCPKG_TRIPLET"]
     bundle = macos["vcpkg_bundles"].get(triplet)
@@ -199,36 +247,49 @@ def provision_macos(cmake: str, env: dict[str, str]) -> None:
     if manifest_lines != [bundle["archive_url"], expected_hash_line]:
         raise BaselineError("Pinned macOS dependency manifest content does not match the dependency lock.")
     download(bundle["archive_url"], archive, "sha512", bundle["archive_sha512"])
-    extract_macos_bundle(cmake, archive, pathlib.Path(env["VNEXT_VCPKG_ROOT"]), env)
-    qmake = pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake"
-    if not qmake.is_file():
-        raise BaselineError(f"Homebrew Qt installation did not provide {qmake}")
+    destination = pathlib.Path(env["VNEXT_VCPKG_ROOT"])
+    extract_macos_bundle(cmake, archive, destination, env)
+    tmp_link = pathlib.Path("/tmp/openmw-deps")
+    if destination != tmp_link and not tmp_link.exists():
+        try:
+            tmp_link.symlink_to(destination)
+        except OSError:
+            pass
+    if require_qt:
+        qmake = pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake"
+        if not qmake.is_file():
+            raise BaselineError(f"Homebrew Qt installation did not provide {qmake}")
 
 
-def make_environment(host: str) -> dict[str, str]:
+def make_environment(host: str, *, vcpkg_only: bool = False) -> dict[str, str]:
     env = os.environ.copy()
     deps_root = ROOT / "deps"
     if host == "Windows":
         env.setdefault("VNEXT_VCPKG_ROOT", str(deps_root))
         env.setdefault("VNEXT_QT_ROOT", str(deps_root / "Qt" / "6.6.3" / "msvc2019_64"))
     elif host == "Darwin":
-        env.setdefault("VNEXT_VCPKG_ROOT", "/tmp/openmw-deps")
+        workspace_vcpkg = deps_root / "openmw-deps"
+        default_vcpkg = (
+            str(workspace_vcpkg)
+            if vcpkg_only or (workspace_vcpkg / "scripts" / "buildsystems" / "vcpkg.cmake").is_file()
+            else "/tmp/openmw-deps"
+        )
+        env.setdefault("VNEXT_VCPKG_ROOT", default_vcpkg)
         is_arm64 = platform.machine().lower() == "arm64"
         env.setdefault("VNEXT_VCPKG_TRIPLET", "arm64-osx-dynamic" if is_arm64 else "x64-osx-dynamic")
         env.setdefault("VNEXT_QT_ROOT", "/opt/homebrew/opt/qt" if is_arm64 else "/usr/local/opt/qt")
     return env
 
 
-def validate_environment(host: str, env: dict[str, str], *, provision: bool = False) -> None:
+def validate_environment(host: str, env: dict[str, str], *, provision: bool = False, vcpkg_only: bool = False) -> None:
     if platform.machine().lower() not in {"amd64", "x86_64", "arm64"}:
         raise BaselineError(f"Unsupported host architecture: {platform.machine()}")
     if host == "Windows":
         if not provision and not env.get("VSCMD_VER", "").startswith("17."):
             raise BaselineError("Run from an x64 Visual Studio 2022 developer prompt; VSCMD_VER 17.x is required.")
-        required = (
-            pathlib.Path(env["VNEXT_VCPKG_ROOT"]) / "scripts" / "buildsystems" / "vcpkg.cmake",
-            pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake.exe",
-        )
+        required = [pathlib.Path(env["VNEXT_VCPKG_ROOT"]) / "scripts" / "buildsystems" / "vcpkg.cmake"]
+        if not vcpkg_only:
+            required.append(pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake.exe")
         if not provision:
             for path in required:
                 if not path.is_file():
@@ -243,10 +304,9 @@ def validate_environment(host: str, env: dict[str, str], *, provision: bool = Fa
                 f"macOS host architecture requires {expected_triplet}, got {env['VNEXT_VCPKG_TRIPLET']}."
             )
         if not provision:
-            required = (
-                pathlib.Path(env["VNEXT_VCPKG_ROOT"]) / "scripts" / "buildsystems" / "vcpkg.cmake",
-                pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake",
-            )
+            required = [pathlib.Path(env["VNEXT_VCPKG_ROOT"]) / "scripts" / "buildsystems" / "vcpkg.cmake"]
+            if not vcpkg_only:
+                required.append(pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake")
             for path in required:
                 if not path.is_file():
                     raise BaselineError(f"Required dependency is missing: {path}. Run the provision command first.")
@@ -382,6 +442,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="use the supported platform's full-build CI preset and install the result",
     )
+    parser.add_argument(
+        "--vcpkg-only",
+        action="store_true",
+        help="provision or check only the vcpkg and FlatBuffers product dependencies without requiring Qt",
+    )
     args = parser.parse_args(argv)
     host = platform.system()
     if host not in PRESETS:
@@ -389,21 +454,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.ci and host not in CI_PRESETS:
         raise BaselineError(f"A full-build CI preset is not defined for {host} yet.")
     preset = CI_PRESETS[host] if args.ci else PRESETS[host]
-    env = make_environment(host)
-    if args.command == "provision" and host == "Darwin":
+    env = make_environment(host, vcpkg_only=args.vcpkg_only)
+    if args.command == "provision" and host == "Darwin" and not args.vcpkg_only:
         provision_macos_prerequisites(env)
     cmake = find_tool("cmake", "VNEXT_CMAKE")
     ninja = find_tool("ninja", "VNEXT_NINJA")
-    validate_environment(host, env, provision=args.command == "provision")
+    validate_environment(host, env, provision=args.command == "provision", vcpkg_only=args.vcpkg_only)
 
     if args.command == "provision":
+        provision_flatbuffers(cmake, env)
         if host == "Windows":
-            provision_windows(cmake, env)
+            provision_windows(cmake, env, require_qt=not args.vcpkg_only)
         elif host == "Darwin":
-            provision_macos(cmake, env)
+            provision_macos(cmake, env, require_qt=not args.vcpkg_only)
         else:
             raise BaselineError("Automated dependency provisioning is defined only for Windows and macOS.")
-        print(f"{host} baseline dependencies are provisioned and verified.")
+        print(f"{host} dependencies are provisioned and verified.")
         return 0
     if args.command == "doctor":
         print(f"Host: {host} {platform.machine()}")

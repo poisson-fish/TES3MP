@@ -10636,7 +10636,7 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Native magic failure cue capacity exhausted");
                 ESM::RefId school;
                 MWMechanics::getSpellSuccessChance(*spellRecord.source, caster, mRuntime.mStore, true, false, &school);
-                MagicImpactCue cue{context.identity.kind, uint8_t(cast.sourceKind), context.identity.id,
+                MagicImpactCue cue{uint8_t(context.identity.kind), uint8_t(cast.sourceKind), context.identity.id,
                     context.identity.life, cast.commandId, magicVisualRecord(uint64_t(cast.sourceKind), spellEffectSource), {}, 3};
                 cue.presentation = 2; cue.school = uint8_t(ESM::MagicSchool::skillRefIdToIndex(school));
                 magicImpactCues.push_back(std::move(cue));

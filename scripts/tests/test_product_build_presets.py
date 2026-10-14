@@ -45,22 +45,23 @@ class ProductBuildPresetTests(unittest.TestCase):
             preset = self.build[f"vnext-product-{platform}"]
             self.assertEqual(preset["targets"], expected)
 
-    def test_non_shipping_windows_targets_are_explicit_opt_ins(self) -> None:
-        self.assertEqual(self.build["vnext-product-client-windows"]["targets"], ["openmw"])
-        self.assertEqual(self.build["vnext-product-server-windows"]["targets"], ["tes3mp_server"])
-        self.assertEqual(
-            self.build["vnext-product-headless-windows"]["targets"],
-            ["tes3mp_headless_client"],
-        )
-        self.assertEqual(
-            self.build["vnext-product-checks-windows"]["targets"],
-            [
-                "openmw",
-                "tes3mp_server",
-                "openmw_tes3mp_adapter_tests_run",
-                "tes3mp_server_app_tests_run",
-            ],
-        )
+    def test_non_shipping_targets_are_explicit_opt_ins_across_platforms(self) -> None:
+        for platform in ("windows", "linux", "macos"):
+            self.assertEqual(self.build[f"vnext-product-client-{platform}"]["targets"], ["openmw"])
+            self.assertEqual(self.build[f"vnext-product-server-{platform}"]["targets"], ["tes3mp_server"])
+            self.assertEqual(
+                self.build[f"vnext-product-headless-{platform}"]["targets"],
+                ["tes3mp_headless_client"],
+            )
+            self.assertEqual(
+                self.build[f"vnext-product-checks-{platform}"]["targets"],
+                [
+                    "openmw",
+                    "tes3mp_server",
+                    "openmw_tes3mp_adapter_tests_run",
+                    "tes3mp_server_app_tests_run",
+                ],
+            )
 
     def test_desktop_evidence_has_an_instrumented_persistent_tree(self) -> None:
         for platform in ("windows", "linux", "macos"):
@@ -73,15 +74,29 @@ class ProductBuildPresetTests(unittest.TestCase):
                 ["tes3mp_desktop_evidence"],
             )
 
-    def test_focused_windows_presets_do_not_name_the_openmw_product(self) -> None:
-        expected = {
-            "vnext-protocol-contracts-windows": ["tes3mp_protocol_contracts_run"],
-            "vnext-server-logic-windows": ["tes3mp_server_logic_tests_run", "tes3mp_server_app_tests_run"],
-            "vnext-adapter-tests-windows": ["openmw_tes3mp_adapter_tests_run"],
-        }
-        for name, targets in expected.items():
-            self.assertEqual(self.build[name]["targets"], targets)
-            self.assertNotIn("openmw", targets)
+    def test_focused_presets_do_not_name_the_openmw_product(self) -> None:
+        for platform in ("windows", "linux", "macos"):
+            expected = {
+                f"vnext-protocol-contracts-{platform}": ["tes3mp_protocol_contracts_run"],
+                f"vnext-server-logic-{platform}": ["tes3mp_server_logic_tests_run", "tes3mp_server_app_tests_run"],
+                f"vnext-adapter-tests-{platform}": ["openmw_tes3mp_adapter_tests_run"],
+            }
+            for name, targets in expected.items():
+                self.assertEqual(self.build[name]["targets"], targets)
+                self.assertNotIn("openmw", targets)
+
+    def test_vscode_visible_presets_provide_display_names_and_platform_defaults(self) -> None:
+        for preset in self.presets["configurePresets"]:
+            if not preset.get("hidden", False):
+                self.assertTrue(preset.get("displayName"), preset["name"])
+        for preset in self.presets["buildPresets"]:
+            self.assertTrue(preset.get("displayName"), preset["name"])
+        root_cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertTrue(
+            'include("${CMAKE_CURRENT_LIST_DIR}/cmake/TES3MPPlatformDefaults.cmake")' in root_cmake,
+            "CMakeLists.txt must include cmake/TES3MPPlatformDefaults.cmake",
+        )
+        self.assertTrue((ROOT / "cmake/TES3MPPlatformDefaults.cmake").is_file())
 
     def test_desktop_automation_is_not_coupled_to_global_testing(self) -> None:
         for relative in ("apps/openmw/CMakeLists.txt", "apps/openmw/tes3mp/CMakeLists.txt"):
@@ -99,12 +114,17 @@ class ProductBuildPresetTests(unittest.TestCase):
             ["tes3mp_server_logic_tests_run", "tes3mp_server_app_tests_run"],
         )
 
-    def test_windows_wrapper_is_quiet_by_default_and_keeps_full_logs(self) -> None:
-        text = (ROOT / "build_windows.ps1").read_text(encoding="utf-8")
-        self.assertIn("[switch]$VerboseOutput", text)
-        self.assertIn('"build\\logs"', text)
-        self.assertIn("*>> $buildLog", text)
-        self.assertIn("Get-Content -LiteralPath $buildLog -Tail $TailLines", text)
+    def test_windows_and_posix_wrappers_are_quiet_by_default_and_keep_full_logs(self) -> None:
+        ps1 = (ROOT / "build_windows.ps1").read_text(encoding="utf-8")
+        self.assertTrue("[switch]$VerboseOutput" in ps1, "missing -VerboseOutput switch")
+        self.assertTrue('"build\\logs"' in ps1, "missing build\\logs directory")
+        self.assertTrue("*>> $buildLog" in ps1, "missing log redirection")
+        self.assertTrue("Get-Content -LiteralPath $buildLog -Tail $TailLines" in ps1, "missing log tail")
+
+        sh = (ROOT / "build.sh").read_text(encoding="utf-8")
+        self.assertTrue("--verbose" in sh, "missing --verbose option")
+        self.assertTrue('LOG_DIR="${REPO_ROOT}/build/logs"' in sh, "missing build/logs directory")
+        self.assertTrue('tail -n "${TAIL_LINES}"' in sh, "missing log tail")
 
     def test_desktop_capture_runners_share_the_common_harness(self) -> None:
         harness = (ROOT / "scripts/desktop_evidence_harness.py").read_text(encoding="utf-8")
