@@ -95,9 +95,10 @@ namespace MWScript
 
         MWWorld::Ptr getPlayer() const;
         MWMechanics::NpcStats& getPlayerStats() const;
-        // Only the validated invocation source may change detached NPC state.
-        // Stock callers retain the ordinary NPC writer.
+        // Only the validated invocation source or a named story NPC record may
+        // change detached NPC state. Stock callers retain the ordinary NPC writer.
         void modDisposition(const MWWorld::Ptr& actor, int value) const;
+        void modDisposition(std::string_view name, int value) const;
         void enable(const MWWorld::Ptr& reference) const;
         void disable(const MWWorld::Ptr& reference) const;
         bool onDeath(const MWWorld::Ptr& reference) const;
@@ -109,6 +110,8 @@ namespace MWScript
         bool cellChanged() const;
         bool menuMode() const;
         bool playerSleeping() const;
+        bool onActivate(const MWWorld::Ptr& reference) const;
+        void activate(const MWWorld::Ptr& reference) const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
         DialogueState* getDialogueState() const;

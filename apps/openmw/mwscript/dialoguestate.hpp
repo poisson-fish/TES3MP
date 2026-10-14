@@ -52,8 +52,18 @@ namespace MWScript
             int id;
             bool operator==(const Choice&) const = default;
         };
+        struct NpcDisposition
+        {
+            ESM::RefId record;
+            int disposition = 0;
+            bool modified = false;
+            bool operator==(const NpcDisposition&) const = default;
+        };
         std::vector<Choice> choices;
+        std::vector<NpcDisposition> npcDispositions;
         void addChoice(std::string_view, int);
+        void seedNpcDisposition(const ESM::RefId&, int);
+        void modNpcDisposition(const ESM::RefId&, int, int);
         DialogueState(const ExecutionContext&, State&, std::span<const ESM::Dialogue>, bool choicesAllowed = false);
         const ESM::Dialogue& record(const ESM::RefId&, ESM::Dialogue::Type) const;
         int journalIndex(const ESM::RefId&) const;

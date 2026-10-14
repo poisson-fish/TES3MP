@@ -200,7 +200,7 @@ namespace TES3MP::Native
                 PersonalScripts::Instance::Npc npc{cursor.word(), cursor.word(), ref(cursor)};
                 const auto disposition = cursor.word(); require(disposition <= UINT32_MAX);
                 npc.disposition = std::bit_cast<int32_t>(uint32_t(disposition));
-                require(npc.reference && npc.life && !npc.record.empty());
+                require(bool(npc.reference) == bool(npc.life) && !npc.record.empty());
                 if (state) state->npcs.push_back(std::move(npc));
             }
         }
@@ -692,12 +692,15 @@ namespace TES3MP::Native
             for (size_t i = 0; i < state.npcs.size(); ++i)
             {
                 const auto& npc = state.npcs[i];
-                require(npc.reference && npc.life && npc.record.is<ESM::StringRefId>() && !npc.record.empty()
+                require(bool(npc.reference) == bool(npc.life) && npc.record.is<ESM::StringRefId>() && !npc.record.empty()
                     && npc.record.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
                     && npc.record.getRefIdString().find('\0') == std::string_view::npos
-                    && std::ranges::find(state.talkedSpeakers, npc.reference) != state.talkedSpeakers.end()
-                    && std::ranges::none_of(std::span(state.npcs).first(i),
-                        [&](const auto& previous) { return previous.reference == npc.reference; }));
+                    && (!npc.reference || (state.encounterLife && npc.reference == expected.encounter->reference)
+                        || std::ranges::find(state.talkedSpeakers, npc.reference) != state.talkedSpeakers.end())
+                    && std::ranges::none_of(std::span(state.npcs).first(i), [&](const auto& previous) {
+                        return (npc.reference && previous.reference == npc.reference)
+                            || ((!npc.reference || !previous.reference) && previous.record == npc.record);
+                    }));
             }
         }
         else
@@ -1248,7 +1251,11 @@ namespace TES3MP::Native
                 && (mIntents ? actor.getClass().getScript(actor).empty()
                              : actor.getClass().getScript(actor) == result.script));
             std::optional<MWMechanics::NpcStats> npcStats;
-            const auto ownedNpc = std::ranges::find(state.npcs, execution.sourceReference, &Instance::Npc::reference);
+            auto ownedNpc = std::ranges::find(state.npcs, execution.sourceReference, &Instance::Npc::reference);
+            if (ownedNpc == state.npcs.end())
+                ownedNpc = std::ranges::find_if(state.npcs, [&](const auto& npc) {
+                    return !npc.reference && npc.record == actor.getCellRef().getRefId();
+                });
             if (mIntents && speakerStats)
             {
                 require(actor.getType() == ESM::NPC::sRecordId);
@@ -1258,6 +1265,9 @@ namespace TES3MP::Native
                     require(ownedNpc->record == actor.getCellRef().getRefId() && ownedNpc->life <= execution.sourceLife);
                     npcStats->setBaseDisposition(ownedNpc->disposition);
                 }
+                for (const auto& npc : state.npcs)
+                    if (npc.reference != execution.sourceReference && npc.record != actor.getCellRef().getRefId())
+                        dialogue.seedNpcDisposition(npc.record, npc.disposition);
             }
             else require(ownedNpc == state.npcs.end());
             const int priorDisposition = npcStats ? npcStats->getBaseDisposition() : 0;
@@ -1319,6 +1329,18 @@ namespace TES3MP::Native
                 {
                     require(state.npcs.size() < MaximumNpcsPerStory);
                     state.npcs.push_back(changed);
+                }
+            }
+            for (const auto& foreign : dialogue.npcDispositions)
+            {
+                if (!foreign.modified) continue;
+                const auto existing = std::ranges::find(state.npcs, foreign.record, &Instance::Npc::record);
+                if (existing != state.npcs.end())
+                    existing->disposition = foreign.disposition;
+                else
+                {
+                    require(state.npcs.size() < MaximumNpcsPerStory);
+                    state.npcs.push_back({0, 0, foreign.record, foreign.disposition});
                 }
             }
             state.runtime.runtime.globals = std::move(invocation.state.globals);
@@ -1508,11 +1530,12 @@ namespace TES3MP::Native
             {
                 const Source& source;
                 MWWorld::ManualRef reference;
-                bool events;
+                bool events, encounters;
                 uint64_t cursor = 0, expectedScope = 1, expectedLife = 0;
-                bool privateScope = false;
-                SourceResolver(const Source& value, const MWWorld::ESMStore& store, bool lifeEvents)
-                    : source(value), reference(store, value.record), events(lifeEvents), expectedLife(value.life)
+                bool privateScope = false, reservedByOther = false, removed = false, activated = false;
+                SourceResolver(const Source& value, const MWWorld::ESMStore& store, bool lifeEvents, bool allowEncounters)
+                    : source(value), reference(store, value.record), events(lifeEvents), encounters(allowEncounters)
+                    , expectedLife(value.life)
                 {
                     reference.getPtr().getRefData().setPosition(value.position);
                 }
@@ -1552,14 +1575,37 @@ namespace TES3MP::Native
                 }
                 void enable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
                 { throw std::invalid_argument("Scheduled source writes not admitted"); }
-                void disable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
-                { throw std::invalid_argument("Scheduled source writes not admitted"); }
+                void disable(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
+                {
+                    require(encounters && ptr == resolve(execution, source.record, false)
+                        && ptr.hasLiveReference() && ptr.getType() == ESM::NPC::sRecordId);
+                    if (!privateScope && !source.living && !ownDeath(execution.character))
+                        throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
+                    require((privateScope || source.living) && !reservedByOther);
+                    removed = true;
+                    reference.getPtr().getRefData().disable();
+                }
                 bool disabled(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
                 {
                     require(ptr == resolve(execution, source.record, false));
                     if (!privateScope && !source.living && !ownDeath(execution.character))
                         throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
-                    return !ptr.getRefData().isEnabled();
+                    return removed || !ptr.getRefData().isEnabled();
+                }
+                bool onActivate(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
+                {
+                    require(ptr == resolve(execution, source.record, false));
+                    if (!privateScope && !source.living && !ownDeath(execution.character))
+                        throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
+                    return !disabled(execution, ptr) && reference.getPtr().getRefData().onActivate();
+                }
+                void activate(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
+                {
+                    require(ptr == resolve(execution, source.record, false));
+                    if (!privateScope && !source.living && !ownDeath(execution.character))
+                        throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
+                    require(!activated && !disabled(execution, ptr) && reference.getPtr().getRefData().activateByScript());
+                    activated = true;
                 }
                 bool onDeath(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
                 {
@@ -1612,7 +1658,9 @@ namespace TES3MP::Native
                 }
             };
             std::unique_ptr<SourceResolver> sourceResolver;
-            if (mSourceWaits) sourceResolver = std::make_unique<SourceResolver>(*source, content, mLifeEvents);
+            if (mSourceWaits)
+                sourceResolver = std::make_unique<SourceResolver>(
+                    *source, content, mLifeEvents, mEncounters && (!mLifeEvents || mNpcBanks) && (!mActivities || mNpcBanks));
             for (const auto& entry : before) require(entry.scheduledTick <= worldTick);
             prepared.state = before;
             bool processed = false;
@@ -1633,6 +1681,14 @@ namespace TES3MP::Native
                     sourceResolver->privateScope = mNpcBanks && current.encounterLife != 0;
                     sourceResolver->expectedScope = sourceResolver->privateScope ? i + 2 : 1;
                     sourceResolver->expectedLife = sourceResolver->privateScope ? current.encounterLife : source->life;
+                    const auto owner = mFairOpportunities ? reservationOwner(before, sourceResolver->expectedLife) : 0;
+                    sourceResolver->reservedByOther = owner != 0 && owner != execution.character;
+                    sourceResolver->removed = false;
+                    sourceResolver->activated = false;
+                    sourceResolver->reference.getPtr().getRefData() = MWWorld::RefData();
+                    (void)sourceResolver->reference.getPtr().getRefData().onActivate();
+                    if (source->activated && (!source->activatedCharacter || source->activatedCharacter == execution.character))
+                        require(!sourceResolver->reference.getPtr().getRefData().activate());
                     ESM::Position pose = source->position;
                     if (sourceResolver->privateScope)
                     {
@@ -1707,6 +1763,43 @@ namespace TES3MP::Native
                     if (mFairOpportunities && prepared.state[i].reservedLife
                         && prepared.state[i].deathCursor >= prepared.state[i].reservedLife)
                     { prepared.state[i].reservedLife = 0; prepared.state[i].reservationTick = 0; }
+                    if (sourceResolver->removed)
+                    {
+                        auto& state = prepared.state[i];
+                        state.choices.clear();
+                        if (mFairOpportunities)
+                        {
+                            const auto owner = reservationOwner(before, execution.sourceLife);
+                            require(!owner || owner == execution.character);
+                            if (state.reservedLife && execution.sourceLife >= state.reservedLife)
+                            {
+                                state.reservedLife = 0;
+                                state.reservationTick = 0;
+                            }
+                        }
+                        state.encounterLife = execution.sourceLife;
+                        state.relocation.reset();
+                        state.activity.reset();
+                        state.last.physicalScope = i + 2;
+                        auto ownedNpc = std::ranges::find(state.npcs, execution.sourceReference, &Instance::Npc::reference);
+                        if (ownedNpc == state.npcs.end())
+                            ownedNpc = std::ranges::find_if(state.npcs, [&](const auto& npc) {
+                                return !npc.reference && npc.record == source->record;
+                            });
+                        if (ownedNpc != state.npcs.end())
+                        {
+                            require(ownedNpc->record == source->record && ownedNpc->life <= execution.sourceLife);
+                            ownedNpc->reference = execution.sourceReference;
+                            ownedNpc->life = execution.sourceLife;
+                        }
+                        else
+                        {
+                            require(state.npcs.size() < MaximumNpcsPerStory);
+                            const auto* npcRecord = content.get<ESM::NPC>().find(source->record);
+                            state.npcs.push_back({execution.sourceReference, execution.sourceLife, source->record,
+                                npcRecord->mNpdt.mDisposition});
+                        }
+                    }
                     require(prepared.state[i].clockTicks != UINT64_MAX);
                     ++prepared.state[i].clockTicks;
                 }

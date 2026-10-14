@@ -39,6 +39,28 @@ namespace MWScript
             throw std::invalid_argument("Unadmitted or bounded dialogue choice");
         choices.push_back({ std::string(text), id });
     }
+    void DialogueState::seedNpcDisposition(const ESM::RefId& id, int disposition)
+    {
+        require(mChoicesAllowed && id.is<ESM::StringRefId>() && !id.empty() && npcDispositions.size() < 64);
+        if (std::ranges::find(npcDispositions, id, &NpcDisposition::record) == npcDispositions.end())
+            npcDispositions.push_back({ id, disposition, false });
+    }
+    void DialogueState::modNpcDisposition(const ESM::RefId& id, int defaultBase, int delta)
+    {
+        require(mChoicesAllowed && id.is<ESM::StringRefId>() && !id.empty());
+        auto found = std::ranges::find(npcDispositions, id, &NpcDisposition::record);
+        if (found == npcDispositions.end())
+        {
+            require(npcDispositions.size() < 64);
+            npcDispositions.push_back({ id, defaultBase, false });
+            found = std::prev(npcDispositions.end());
+        }
+        const int64_t disposition = int64_t(found->disposition) + delta;
+        if (disposition < INT32_MIN || disposition > INT32_MAX)
+            throw std::invalid_argument("NPC disposition exceeds stock integer range");
+        found->disposition = int(disposition);
+        found->modified = true;
+    }
     void DialogueState::validateExecution(const ExecutionContext& value) const
     { require(value == mExecution); }
     const ESM::Dialogue& DialogueState::record(const ESM::RefId& id, ESM::Dialogue::Type type) const

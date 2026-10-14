@@ -768,12 +768,22 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext() && !R::implicit)
+                {
+                    const auto name = runtime.getStringLiteral(runtime[0].mInteger);
+                    runtime.pop();
+                    const Interpreter::Type_Integer value = runtime[0].mInteger;
+                    runtime.pop();
+                    context.modDisposition(name, value);
+                    return;
+                }
                 MWWorld::Ptr ptr = R()(runtime);
 
                 Interpreter::Type_Integer value = runtime[0].mInteger;
                 runtime.pop();
 
-                static_cast<InterpreterContext&>(runtime.getContext()).modDisposition(ptr, value);
+                context.modDisposition(ptr, value);
             }
         };
 

@@ -147,12 +147,12 @@ namespace
     {
         MWScript::ExecutionContext expected;
         MWWorld::Ptr actor, player;
-        uint64_t sourceLife = 3;
+        uint64_t sourceReference = 41, sourceLife = 3;
         bool wait = false, waitPlayer = false;
         MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& reference, bool) const override
         {
             require(execution == expected, "Dialogue lookup lost invocation identity");
-            require(execution.sourceReference == 41 && execution.sourceLife == sourceLife, "Stale source/life accepted");
+            require(execution.sourceReference == sourceReference && execution.sourceLife == sourceLife, "Stale source/life accepted");
             if (reference == "player")
             {
                 if (waitPlayer) throw MWScript::ScriptContextUnavailable();
@@ -760,7 +760,36 @@ namespace
             const auto escaped = run(unowned, unowned.initial(), 11, 31, &statsA, &speaker);
             require(escaped.result.outcome == SharedWorldScript::Outcome::Rejected && escaped.state.empty()
                 && escaped.response.empty() && escaped.result.presentation.empty() && speaker.getBaseDisposition() == 50,
-                "Explicit foreign NPC result escaped source ownership or leaked prior writes");
+                "Explicit non-NPC result escaped source ownership or leaked prior writes");
+            auto crossNpc = fixture.definitions;
+            for (auto& definition : crossNpc)
+                for (auto& info : definition.dialogues[1].mInfo)
+                    info.mResultScript += "\n\"speaker_b\"->ModDisposition 70";
+            PersonalScripts crossPolicy(7, crossNpc, crypto, true, true, true);
+            const auto crossResult = run(crossPolicy, crossPolicy.initial(), 11, 31, &statsA, &speaker);
+            const std::vector<PersonalScripts::Instance::Npc> expectedCross{
+                {41, 3, id("speaker_a"), 67}, {0, 0, id("speaker_b"), 70}};
+            require(crossResult.result.executed && crossResult.state[0].npcs == expectedCross
+                && crossResult.state[1].npcs.empty() && crossResult.state[2].npcs.empty()
+                && crossPolicy.encode(crossPolicy.restore(crossResult.image)) == crossResult.image,
+                "Cross-NPC ModDisposition did not stage/persist foreign NPC record disposition or leaked across stories");
+            const auto crossChoice = run(crossPolicy, crossResult.state, 11, 31, &statsA, &speaker, 102, 7, 1);
+            require(crossChoice.result.executed && crossChoice.state[0].npcs[1] == PersonalScripts::Instance::Npc{0, 0, id("speaker_b"), 140},
+                "Second cross-NPC ModDisposition did not accumulate on unbound foreign NPC record");
+            resolver.actor = sb.getPtr();
+            resolver.expected = crossChoice.state[0].last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = crossChoice.state[0].eventCursor + 1;
+            resolver.sourceReference = 42; resolver.sourceLife = 1;
+            resolver.expected.sourceReference = 42; resolver.expected.sourceLife = 1;
+            const auto metForeign = crossPolicy.prepareIntent(crossChoice.state, 11, 109,
+                {31, 42, 1, crossChoice.state[0].dialogueRevision, "passage_k61", -1},
+                "", fixture.content, resolver, PersonalScripts::MaximumInvocationsPerTransaction,
+                &statsA, {}, &speaker, JournalDate);
+            require(metForeign.result.executed && metForeign.response == "Returned."
+                && metForeign.state[0].npcs[1] == PersonalScripts::Instance::Npc{42, 1, id("speaker_b"), 211}
+                && crossPolicy.encode(crossPolicy.restore(metForeign.image)) == metForeign.image,
+                "Meeting a foreign-modified NPC did not apply its persisted base disposition or bind placement/life");
+            resolver.actor = sa.getPtr(); resolver.sourceReference = 41;
             auto overflow = fixture.definitions;
             for (auto& definition : overflow)
                 for (auto& info : definition.dialogues[1].mInfo) info.mResultScript += "\nModDisposition 2147483647";
@@ -2064,6 +2093,8 @@ namespace
         for (const auto& [name, body] : std::vector<std::pair<std::string, std::string>>{
             {"ledger_v63", "if ( MenuMode == 1 )\nreturn\nendif\n"
                 "if ( GetPCSleep == 1 )\nset sleeping to 1\nreturn\nendif\n"
+                "if ( OnActivate == 1 )\nset activated to 1 + speaker_r29->OnActivate\nspeaker_r29->Activate\nendif\n"
+                "if ( GetJournalIndex \"journey_t37\" >= 20 )\nif ( personal_counter == 7 )\nDisable\nendif\nendif\n"
                 "set moved to CellChanged\nset stage to GetJournalIndex \"journey_t37\"\n"
                 "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
                 "if OnDeath == 1\nset credit to credit + 1\nset personal_counter to personal_counter + 1\nendif\n"
@@ -2073,7 +2104,7 @@ namespace
         {
             ESM::Script script; script.blank(); script.mId = id(name);
             script.mScriptText = "begin " + name + "\nlong calls\nlong credit\nlong stage\nfloat timer\n"
-                "float posx\nfloat posy\nfloat yaw\nfloat health\nfloat ratio\nshort blocked\nshort moved\nshort sleeping\n"
+                "float posx\nfloat posy\nfloat yaw\nfloat health\nfloat ratio\nshort blocked\nshort moved\nshort sleeping\nshort activated\n"
                 + body + "\nend";
             scripts.push_back(script);
         }
@@ -2167,18 +2198,20 @@ namespace
         // Foreign kill of shared NPC in public scope 1 puts B into sourceWait + reservedLife=2, while A's private bank continues!
         publicStats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 0), MWWorld::TimeStamp{});
         events = {{1, 2, 11, 1, 1, 11, 1}};
-        source = {41, 1, 20, id("speaker_r29"), false, 11, 1, events, &publicStats, publicPose, &privateStats, true, false, 11, 0};
+        source = {41, 1, 20, id("speaker_r29"), false, 11, 1, events, &publicStats, publicPose, &privateStats, true, false, 11, 0, true, 11};
         auto splitTick = policy.prepareScheduled(aliceEscort.state, 2, both, fixture.content, scheduledResolver, &source);
         require(splitTick.result.executed && !splitTick.state[0].sourceWait && splitTick.state[0].clockTicks == 2
             && number(splitTick.state[0].runtime, "posx") == 140.f && number(splitTick.state[0].runtime, "posy") == -20.f
             && std::abs(number(splitTick.state[0].runtime, "yaw") - 90.f) < 1e-3f
             && number(splitTick.state[0].members[0], "health") == 20.f && number(splitTick.state[0].members[0], "ratio") == 1.f
             && integer(splitTick.state[0].runtime, "moved") == 1 && integer(splitTick.state[0].runtime, "sleeping") == 0
+            && integer(splitTick.state[0].runtime, "activated") == 1
             && integer(splitTick.state[0].runtime, "stage") == 20
             && integer(splitTick.state[0].runtime, "credit") == 0 && splitTick.state[0].deathCursor == 0
             && splitTick.state[1].sourceWait && splitTick.state[1].reservedLife == 2
-            && integer(splitTick.state[1].runtime, "stage") == 0 && integer(splitTick.state[1].runtime, "moved") == 0,
-            "Private NPC bank stopped on public death, read public pose/dead health, or failed to isolate stage/CellChanged");
+            && integer(splitTick.state[1].runtime, "stage") == 0 && integer(splitTick.state[1].runtime, "moved") == 0
+            && integer(splitTick.state[1].runtime, "activated") == 0,
+            "Private NPC bank stopped on public death, read public pose/dead health, or failed to isolate stage/CellChanged/OnActivate");
         auto restored = policy.restore(splitTick.image);
         require(policy.encode(restored) == splitTick.image, "Composed NPC bank state did not round-trip");
         // Respawn in life 2: B holds reservation for life 2, so A (if still in scope 1) would be blocked, and B can relocate in life 2 and clear reservation.
@@ -2244,8 +2277,25 @@ namespace
             && PersonalScripts::physicalScope(aliceEnabledReturn.state, 11) == 1
             && policy.encode(policy.restore(aliceEnabledReturn.image)) == aliceEnabledReturn.image,
             "Safe return from Disable did not run stock Enable restoration in unified policy");
+        auto scheduledDepartureStart = publicTick.state;
+        scheduledDepartureStart[0].dialogue.quests.push_back({id("journey_t37"), 20, 1});
+        scheduledDepartureStart[0].runtime.runtime.globals.front().mValue.setInteger(7);
+        events.clear();
+        source = {41, 1, 0, id("speaker_r29"), true, 0, 0, events, &publicStats, publicPose, &privateStats};
+        auto scheduledDeparture = policy.prepareScheduled(scheduledDepartureStart, 2, both, fixture.content, scheduledResolver, &source);
+        require(scheduledDeparture.result.executed && scheduledDeparture.state[0].encounterLife == 1
+            && !scheduledDeparture.state[0].relocation && !scheduledDeparture.state[0].activity
+            && PersonalScripts::physicalScope(scheduledDeparture.state, 11) == 2
+            && PersonalScripts::physicalScope(scheduledDeparture.state, 22) == 1
+            && integer(scheduledDeparture.state[0].members[0], "blocked") == 1
+            && policy.encode(policy.restore(scheduledDeparture.image)) == scheduledDeparture.image,
+            "Scheduled source-bank Disable did not transition character story into terminal removal");
+        auto postDepartureTick = policy.prepareScheduled(scheduledDeparture.state, 3, both, fixture.content, scheduledResolver, &source);
+        require(postDepartureTick.result.executed && postDepartureTick.state[0].clockTicks == 2
+            && postDepartureTick.state[1].clockTicks == 3,
+            "Scheduled terminal Disable did not suspend subsequent source-bank ticks for the departed story");
         std::cout << "npc banks: unified M5 policy (Disable/Enable/return, relocation/activity/return, wait/life-event/opportunity); "
-            "private pose/health/timer continuation across public death; exact recovery\n";
+            "private pose/health/timer/activation/scheduled-Disable continuation across public death; exact recovery\n";
     }
 
     void stock(CredentialCrypto& crypto)
@@ -2307,17 +2357,20 @@ namespace
         stockStats.clearHasDied();
         rejects([&] { interpreter.run(runtime.compileResult("ModDisposition 17"), scoped, 4096); },
             "Full stock installer bypassed staged NPC result ownership");
+        rejects([&] { interpreter.run(runtime.compileResult("\"speaker_r29\"->ModDisposition 17"), scoped, 4096); },
+            "Full stock installer bypassed staged explicit NPC result ownership");
         MWScript::Misc::installOpcodes(interpreter);
         MWScript::Cell::installOpcodes(interpreter);
         rejects([&] { interpreter.run(runtime.compileResult("Disable", true, id("speaker_r29")), scoped, 4096); },
             "Full stock installer bypassed staged physical ownership");
         rejects([&] { interpreter.run(runtime.compileResult("set calls to GetDisabled", true), scoped, 4096); },
             "Full stock installer read unscoped physical state for a scoped caller");
-        for (const int op : {Compiler::Cell::opcodeCellChanged, Compiler::Misc::opcodeMenuMode, Compiler::Misc::opcodeGetPcSleep})
+        for (const int op : {Compiler::Cell::opcodeCellChanged, Compiler::Misc::opcodeMenuMode, Compiler::Misc::opcodeGetPcSleep,
+                 Compiler::Misc::opcodeOnActivate, Compiler::Misc::opcodeActivate})
             rejects([&] {
                 const Interpreter::Program queryProgram{{(uint32_t(0x32) << 26) | uint32_t(op)}};
                 interpreter.run(queryProgram, scoped, 4096);
-            }, "Full stock installer let a scoped caller read unscoped CellChanged/MenuMode/GetPCSleep");
+            }, "Full stock installer let a scoped caller read/write unscoped CellChanged/MenuMode/GetPCSleep/OnActivate/Activate");
         fixture.actor.getPtr().getRefData().disable();
         interpreter.run(runtime.compileResult("set calls to GetDisabled", true), context, 4096);
         require(locals.mLongs.front() == 1, "Stock GetDisabled stopped reading source RefData");

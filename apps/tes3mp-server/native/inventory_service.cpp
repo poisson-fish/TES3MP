@@ -3264,6 +3264,12 @@ namespace TES3MP::Native
             }
             if (personalState) for (const auto& story : *personalState) for (const auto& npc : story.npcs)
             {
+                if (!npc.reference)
+                {
+                    if (!mRuntime.mStore.get<ESM::NPC>().search(npc.record))
+                        throw std::invalid_argument("Story NPC record absent on recovery");
+                    continue;
+                }
                 if (!decoded.combat || !decoded.life)
                     throw std::invalid_argument("Story NPC lacks durable physical source");
                 const auto placement = std::ranges::find(decoded.combat->npcPlacements, npc.reference);

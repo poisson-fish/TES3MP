@@ -336,7 +336,7 @@ namespace MWScript
             {
                 MWWorld::Ptr ptr = R()(runtime);
 
-                runtime.push(ptr.getRefData().onActivate());
+                runtime.push(static_cast<InterpreterContext&>(runtime.getContext()).onActivate(ptr));
             }
         };
 
@@ -349,6 +349,11 @@ namespace MWScript
                 InterpreterContext& context = static_cast<InterpreterContext&>(runtime.getContext());
 
                 MWWorld::Ptr ptr = R()(runtime);
+                if (context.getExecutionContext())
+                {
+                    context.activate(ptr);
+                    return;
+                }
 
                 if (ptr.getRefData().activateByScript() || ptr.getContainerStore())
                     context.executeActivation(ptr, MWMechanics::getPlayer());
@@ -1811,22 +1816,31 @@ namespace MWScript
 
         void registerSourceWaitOpcodes(Compiler::Extensions& extensions)
         {
+            extensions.registerInstruction("disable", "x", Compiler::Misc::opcodeDisable, Compiler::Misc::opcodeDisableExplicit);
             extensions.registerFunction("getdisabled", 'l', "x", Compiler::Misc::opcodeGetDisabled, Compiler::Misc::opcodeGetDisabledExplicit);
             extensions.registerFunction("getsecondspassed", 'f', "", Compiler::Misc::opcodeGetSecondsPassed);
             extensions.registerFunction("menumode", 'l', "", Compiler::Misc::opcodeMenuMode);
             extensions.registerFunction("getpcsleep", 'l', "", Compiler::Misc::opcodeGetPcSleep);
+            extensions.registerFunction("onactivate", 'l', "", Compiler::Misc::opcodeOnActivate, Compiler::Misc::opcodeOnActivateExplicit);
+            extensions.registerInstruction("activate", "x", Compiler::Misc::opcodeActivate, Compiler::Misc::opcodeActivateExplicit);
         }
 
         void installSourceWaitOpcodes(Interpreter::Interpreter& interpreter, bool queries)
         {
             if (queries)
             {
+                interpreter.installSegment5<OpDisable<ImplicitRef>>(Compiler::Misc::opcodeDisable);
+                interpreter.installSegment5<OpDisable<ExplicitRef>>(Compiler::Misc::opcodeDisableExplicit);
                 interpreter.installSegment5<OpGetDisabled<ImplicitRef>>(Compiler::Misc::opcodeGetDisabled);
                 interpreter.installSegment5<OpGetDisabled<ExplicitRef>>(Compiler::Misc::opcodeGetDisabledExplicit);
             }
             interpreter.installSegment5<OpGetSecondsPassed>(Compiler::Misc::opcodeGetSecondsPassed);
             interpreter.installSegment5<OpMenuMode>(Compiler::Misc::opcodeMenuMode);
             interpreter.installSegment5<OpGetPcSleep>(Compiler::Misc::opcodeGetPcSleep);
+            interpreter.installSegment5<OpOnActivate<ImplicitRef>>(Compiler::Misc::opcodeOnActivate);
+            interpreter.installSegment5<OpOnActivate<ExplicitRef>>(Compiler::Misc::opcodeOnActivateExplicit);
+            interpreter.installSegment5<OpActivate<ImplicitRef>>(Compiler::Misc::opcodeActivate);
+            interpreter.installSegment5<OpActivate<ExplicitRef>>(Compiler::Misc::opcodeActivateExplicit);
         }
 
         void registerEnableOpcodes(Compiler::Extensions& extensions)

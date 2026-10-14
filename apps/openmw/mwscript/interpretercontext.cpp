@@ -249,6 +249,34 @@ namespace MWScript
         stats->setBaseDisposition(int(disposition));
     }
 
+    void InterpreterContext::modDisposition(std::string_view name, int value) const
+    {
+        if (!mExecution)
+        {
+            modDisposition(resolveReferenceName(name), value);
+            return;
+        }
+        scriptStateName(name);
+        const ESM::RefId id = ESM::RefId::stringRefId(name);
+        if (!mSourceNpcStats || !mDialogueState || id == "player")
+            throw std::invalid_argument("NPC result lacks staged source ownership");
+        const auto source = resolveReference({});
+        if (!source.hasLiveReference() || source.getType() != ESM::NPC::sRecordId)
+            throw std::invalid_argument("NPC result lacks staged source ownership");
+        if (id == source.getCellRef().getRefId())
+        {
+            modDisposition(source, value);
+            return;
+        }
+        const auto player = resolveReference(ESM::RefId::stringRefId("player"), false);
+        if (!player.isEmpty() && player.getCellRef().getRefId() == id)
+            throw std::invalid_argument("NPC result lacks staged source ownership");
+        const auto* record = getContent().get<ESM::NPC>().search(id);
+        if (!record)
+            throw std::invalid_argument("Foreign NPC result lacks NPC record");
+        mDialogueState->modNpcDisposition(record->mId, record->mNpdt.mDisposition, value);
+    }
+
     void InterpreterContext::requireUnscopedService() const
     {
         if (mExecution)
@@ -297,6 +325,22 @@ namespace MWScript
             return mReferenceState->playerSleeping(*mExecution);
         }
         return MWBase::Environment::get().getWindowManager()->getPlayerSleeping();
+    }
+
+    bool InterpreterContext::onActivate(const MWWorld::Ptr& reference) const
+    {
+        if (mExecution)
+        {
+            if (!mReferenceState) throw std::invalid_argument("OnActivate lacks staged physical scope");
+            return mReferenceState->onActivate(*mExecution, reference);
+        }
+        return reference.getRefData().onActivate();
+    }
+
+    void InterpreterContext::activate(const MWWorld::Ptr& reference) const
+    {
+        if (!mExecution || !mReferenceState) throw std::invalid_argument("Activate lacks staged physical scope");
+        mReferenceState->activate(*mExecution, reference);
     }
 
     void InterpreterContext::position(const MWWorld::Ptr& reference, const std::array<float, 3>& xyz,

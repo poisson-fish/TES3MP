@@ -33,6 +33,10 @@ namespace MWScript
         { throw std::invalid_argument("MenuMode lacks staged source admission"); }
         virtual bool playerSleeping(const ExecutionContext&) const
         { throw std::invalid_argument("GetPCSleep lacks staged source admission"); }
+        virtual bool onActivate(const ExecutionContext&, const MWWorld::Ptr&)
+        { throw std::invalid_argument("OnActivate lacks staged activation admission"); }
+        virtual void activate(const ExecutionContext&, const MWWorld::Ptr&)
+        { throw std::invalid_argument("Activate lacks staged activation admission"); }
     };
 }
 #endif

@@ -125,6 +125,8 @@ namespace TES3MP::Native
             const MWMechanics::CreatureStats* privateStats = nullptr; // Detached living stats for private scopes.
             bool cellChanged = false, sleeping = false;
             uint64_t cellChangedCharacter = 0, sleepingCharacter = 0;
+            bool activated = false;
+            uint64_t activatedCharacter = 0;
         };
         using State = std::vector<Instance>;
         struct Prepared

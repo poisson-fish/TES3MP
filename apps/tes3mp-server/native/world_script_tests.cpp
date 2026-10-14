@@ -550,7 +550,7 @@ namespace
                     return info.mActor == npc->mId && info.mResultScript.find("TR_M1_GS_MQ_4 50") != std::string::npos;
                 }), "Unchanged TR riddles completion branch missing");
             blocked([&] { SharedWorldScript runtime(*record, owned, content, crypto, bank, npc->mId, true); },
-                "line ", "TR Duel of Riddles source-bank (Batch 2+)");
+                "line ", "TR Duel of Riddles source-bank (Batch 3+)");
         }
         else
         {
@@ -568,13 +568,14 @@ namespace
             require(finish != topic->mInfo.end(), "Unchanged ring completion branch missing");
             const auto unchanged = runtime.encode(runtime.initial());
             blocked([&] { (void)runtime.compileResult(finish->mResultScript, true, npc->mId); },
-                "line 4", "Seyda Neen ring completion (AddItem/RemoveItem)");
+                "line ", "Seyda Neen ring completion (AddItem/RemoveItem)");
             require(runtime.encode(runtime.initial()) == unchanged, "Rejected stock quest changed script state");
             const auto* departure = loadout.store().get<ESM::NPC>().find(id("vodunius nuccius"));
             const auto* departureScript = loadout.store().get<ESM::Script>().find(departure->mScript);
             const std::vector<ESM::Script> departureBank{*departureScript};
-            blocked([&] { SharedWorldScript source(*departureScript, {}, content, crypto, departureBank,
-                departure->mId); }, "line ", "Seyda Neen departure source-bank (Disable)");
+            SharedWorldScript source(*departureScript, {}, content, crypto, departureBank, departure->mId);
+            require(source.encode(source.restore(source.encode(source.initial()))) == source.encode(source.initial()),
+                "Seyda Neen departure source-bank failed admission");
         }
         std::cout << "Quest completion remains open; no journal/reward/source life was executed or copied\n";
     }
@@ -593,6 +594,7 @@ namespace
             "if ( MenuMode == 1 )\nreturn\nendif\n"
             "if ( GetPCSleep == 1 )\nreturn\nendif\n"
             "if ( CellChanged == 1 )\nset doOnce to 1\nendif\n"
+            "if ( OnActivate == 1 )\nActivate\nendif\n"
             "if ( OnDeath == 1 )\nset TR_m1_HT_EldaleDead to 1\nStartScript TR_m0_TelvanniHortDeathSc\nendif\n"
             "if ( GetJournalIndex \"TR_M1_GS_MQ_4\" >= 10 )\nset doOnce to 2\nendif\n"
             "set timer to timer + GetSecondsPassed\nset health to GetHealth\nset ratio to GetHealthGetRatio\n"
@@ -603,12 +605,13 @@ namespace
         ESM::Script nuccius; nuccius.blank(); nuccius.mId = id("nucciusScript");
         nuccius.mScriptText = "begin nucciusScript\nshort state\n"
             "if ( CellChanged == 0 )\nreturn\nendif\n"
-            "if ( GetJournalIndex \"MS_Nuccius\" >= 100 )\nset state to 1\nendif\nend nucciusScript\n";
+            "if ( GetJournalIndex \"MS_Nuccius\" >= 100 )\nDisable\nset state to 1\nendif\nend nucciusScript\n";
         SharedWorldScript admittedDeparture(nuccius, {}, "quest-audit-v95", crypto, std::vector<ESM::Script>{nuccius},
             id("vodunius nuccius"));
         (void)admittedBank.compileResult(
             "if ( GetJournalIndex \"TR_M1_GS_MQ_4\" >= 10 )\nSetJournalIndex \"TR_M1_GS_MQ_4\" 20\nendif\n"
-            "Journal TR_M1_GS_MQ_4 10\nAddTopic \"puzzling riddles\"\nChoice \"Answer one\" 1 \"Answer two\" 2\nModDisposition 10\n"
+            "Journal TR_M1_GS_MQ_4 10\nAddTopic \"puzzling riddles\"\nChoice \"Answer one\" 1 \"Answer two\" 2\n"
+            "ModDisposition 10\n\"arrille\"->ModDisposition 40\n"
             "TR_m1_T_Eldale->PositionCell 200 -32 1 0 \"Eldale\"\nTR_m1_T_Eldale->AiTravel 200 -32 1\n"
             "TR_m1_T_Eldale->AiEscort player 0 200 -32 1\nTR_m1_T_Eldale->Disable\n",
             true, id("TR_m1_T_Eldale"), false, true, true);
@@ -620,8 +623,8 @@ namespace
             return candidate;
         };
         for (const auto* query : {
-            "if ( OnActivate == 1 )\nActivate\nendif",
-            "if ( GetJournalIndex \"MS_Nuccius\" >= 100 )\nDisable\nendif",
+            "if ( player->OnActivate == 1 )\nplayer->Activate\nendif",
+            "player->Disable",
             "Journal \"TR_M1_GS_MQ_4\" 10",
             "SetJournalIndex \"TR_M1_GS_MQ_4\" 10",
             "if ( player->GetItemCount \"ring_keley\" >= 1 )\nset state to 1\nendif"})
@@ -629,19 +632,17 @@ namespace
                 auto candidate = makeBankScript(query);
                 SharedWorldScript blocked(candidate, {eldaleDead}, "quest-audit-v95", crypto,
                     std::vector<ESM::Script>{candidate, hortDeath}, id("TR_m1_T_Eldale"), true);
-            }, "Unadmitted Batch-2/3 activation, scheduled Disable, journal write, or item opcode compiled in source bank");
+            }, "Unadmitted foreign activation/disable, journal write, or item opcode compiled in source bank");
         for (const auto* resultOp : {
-            "\"arrille\"->ModDisposition 40",
             "if ( player->GetItemCount \"ring_keley\" >= 1 )\nset doOnce to 1\nendif",
             "player->AddItem \"gold_001\" 100",
             "player->RemoveItem \"ring_keley\" 1"})
             rejects([&] { (void)admittedBank.compileResult(resultOp, true, id("TR_m1_T_Eldale"), false, true, true); },
-                "Unadmitted Batch-2/3 foreign-NPC or provenance item opcode compiled in dialogue result");
-        std::cout << "quest audit: V95+Batch-1 admits source-bank GetJournalIndex/CellChanged/MenuMode/GetPCSleep/"
-            "OnDeath/StartScript/StopScript/GetSecondsPassed/GetDisabled/GetPos/GetAngle/GetHealth "
-            "and result Journal/SetJournalIndex/GetJournalIndex/AddTopic/Choice/ModDisposition/Disable/Enable/Position/PositionCell/AiTravel/AiEscort; "
-            "remaining quest batches isolated to (2) OnActivate/Activate/scheduled-Disable/foreign-ModDisposition, "
-            "(3) provenance GetItemCount/AddItem/RemoveItem\n";
+                "Unadmitted Batch-3 provenance item opcode compiled in dialogue result");
+        std::cout << "quest audit: V95+Batch-1/2 admits source-bank GetJournalIndex/CellChanged/MenuMode/GetPCSleep/"
+            "OnActivate/Activate/Disable/OnDeath/StartScript/StopScript/GetSecondsPassed/GetDisabled/GetPos/GetAngle/GetHealth "
+            "and result Journal/SetJournalIndex/GetJournalIndex/AddTopic/Choice/ModDisposition/foreign-ModDisposition/Disable/Enable/Position/PositionCell/AiTravel/AiEscort; "
+            "remaining quest batch isolated to (3) provenance GetItemCount/AddItem/RemoveItem\n";
     }
 }
 
