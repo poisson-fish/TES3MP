@@ -17,6 +17,8 @@ namespace MWScript
     namespace Ai
     {
         void installOpcodes(Interpreter::Interpreter& interpreter);
+        void registerActivityOpcodes(Compiler::Extensions& extensions);
+        void installActivityOpcodes(Interpreter::Interpreter& interpreter);
     }
 }
 

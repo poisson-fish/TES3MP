@@ -6944,6 +6944,8 @@ int main(int argc, char** argv)
                             || std::string_view(argv[1]) == "dialogue-intents"
                             || std::string_view(argv[1]) == "dialogue-disposition"
                             || std::string_view(argv[1]) == "dialogue-npc-state"
+                            || std::string_view(argv[1]) == "story-activities"
+                            || std::string_view(argv[1]) == "story-departure"
                             || std::string_view(argv[1]) == "story-encounter"
                             || std::string_view(argv[1]) == "story-return"
                             || std::string_view(argv[1]) == "story-enable"

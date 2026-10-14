@@ -90,7 +90,7 @@ namespace MWMechanics
         const osg::Vec3f halfExtents = MWBase::Environment::get().getWorld()->getHalfExtents(actor);
         const float maxHalfExtent = std::max(halfExtents.x(), std::max(halfExtents.y(), halfExtents.z()));
 
-        if ((leaderPos - followerPos).length2() <= mMaxDist * mMaxDist)
+        if (followerInRange(leaderPos, followerPos, mMaxDist))
         {
             // TESCS allows the creation of Escort packages without a specific destination
             constexpr float nowhere = std::numeric_limits<float>::max();
@@ -111,18 +111,24 @@ namespace MWMechanics
                 mRemainingDuration = mDuration;
                 return true;
             }
-            mMaxDist = maxHalfExtent + 450.0f;
+            mMaxDist = followDistance(maxHalfExtent, true);
         }
         else
         {
             // Stop moving if the player is too far away
             MWBase::Environment::get().getMechanicsManager()->playAnimationGroup(actor, "idle3", 0, 1);
             actor.getClass().getMovementSettings(actor).mPosition[1] = 0;
-            mMaxDist = maxHalfExtent + 250.0f;
+            mMaxDist = followDistance(maxHalfExtent, false);
         }
 
         return false;
     }
+
+    bool AiEscort::followerInRange(const osg::Vec3f& leader, const osg::Vec3f& follower, float maxDistance)
+    { return (leader - follower).length2() <= maxDistance * maxDistance; }
+
+    float AiEscort::followDistance(float maxHalfExtent, bool moving)
+    { return maxHalfExtent + (moving ? 450.0f : 250.0f); }
 
     void AiEscort::writeState(ESM::AiSequence::AiSequence& sequence) const
     {

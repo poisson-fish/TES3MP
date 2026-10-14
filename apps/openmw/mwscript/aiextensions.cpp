@@ -82,6 +82,12 @@ namespace MWScript
                 for (unsigned int i = 0; i < arg0; ++i)
                     runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.aiTravel(ptr, {x, y, z}, repeat, {}, 0);
+                    return;
+                }
                 if (!ptr.getClass().isActor() || ptr == MWMechanics::getPlayer())
                     return;
 
@@ -120,6 +126,12 @@ namespace MWScript
                 for (unsigned int i = 0; i < arg0; ++i)
                     runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.aiTravel(ptr, {x, y, z}, repeat, actorID, duration);
+                    return;
+                }
                 if (!ptr.getClass().isActor() || ptr == MWMechanics::getPlayer())
                     return;
 
@@ -557,6 +569,20 @@ namespace MWScript
                 actor.getClass().getCreatureStats(actor).getAiSequence().stack(facePackage, actor);
             }
         };
+
+        void registerActivityOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerInstruction("aitravel", "fff/lx", Compiler::Ai::opcodeAiTravel, Compiler::Ai::opcodeAiTravelExplicit);
+            extensions.registerInstruction("aiescort", "cffff/l", Compiler::Ai::opcodeAiEscort, Compiler::Ai::opcodeAiEscortExplicit);
+        }
+
+        void installActivityOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment3<OpAiTravel<ImplicitRef>>(Compiler::Ai::opcodeAiTravel);
+            interpreter.installSegment3<OpAiTravel<ExplicitRef>>(Compiler::Ai::opcodeAiTravelExplicit);
+            interpreter.installSegment3<OpAiEscort<ImplicitRef>>(Compiler::Ai::opcodeAiEscort);
+            interpreter.installSegment3<OpAiEscort<ExplicitRef>>(Compiler::Ai::opcodeAiEscortExplicit);
+        }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)
         {

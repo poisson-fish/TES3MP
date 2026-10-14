@@ -103,6 +103,7 @@ namespace MWScript
         bool onDeath(const MWWorld::Ptr& reference) const;
         float health(const MWWorld::Ptr& reference, bool ratio) const;
         bool disabled(const MWWorld::Ptr& reference) const;
+        void aiTravel(const MWWorld::Ptr&, const std::array<float, 3>&, bool, const ESM::RefId&, float) const;
         void position(const MWWorld::Ptr&, const std::array<float, 3>&, float, const ESM::RefId&) const;
         const ESM::Position& position(const MWWorld::Ptr&) const;
         const MWWorld::ESMStore& getContent() const;

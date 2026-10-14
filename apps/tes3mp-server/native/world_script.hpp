@@ -51,8 +51,8 @@ namespace TES3MP::Native
         bool bankCapable() const { return mRuntime.bankCapable(); }
         const ESM::RefId& sourceRecord() const { return mRuntime.sourceRecord(); }
         Interpreter::Program compileResult(std::string_view source, bool physical = false,
-            const ESM::RefId& reference = {}, bool restoration = false, bool relocation = false) const
-        { return mRuntime.compileResult(source, physical, reference, restoration, relocation); }
+            const ESM::RefId& reference = {}, bool restoration = false, bool relocation = false, bool activity = false) const
+        { return mRuntime.compileResult(source, physical, reference, restoration, relocation, activity); }
         MWScript::WorldScript::Invocation executeResult(const State& state, const MWScript::ExecutionContext& execution,
             const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver, MWScript::ScriptState& bank,
             MWScript::GlobalScriptDesc& caller, MWScript::DialogueState& dialogue, const Interpreter::Program& program,

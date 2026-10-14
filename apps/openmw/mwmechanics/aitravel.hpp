@@ -47,6 +47,10 @@ namespace MWMechanics
 
         osg::Vec3f getDestination() const override { return osg::Vec3f(mX, mY, mZ); }
 
+        // Stock completion policy for transaction-owned navigation frames.
+        static bool destinationReached(const osg::Vec3f& position, const osg::Vec3f& destination,
+            float halfHeight, float speed, float duration, bool pathComplete, float& timer);
+
     private:
         const float mX;
         const float mY;

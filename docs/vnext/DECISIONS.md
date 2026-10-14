@@ -263,17 +263,17 @@ V88 fixed original-life Enable (≤16 instructions/one call) commits restoration
 Fresh images/capability 41; silent recovery; general restoration stays closed.
 
 **Source relocation (V89).** Stock source-only Position/PositionCell/GetPos/GetAngle
-share a staged reference within [admission bounds](DEVELOPMENT.md). Inert pose/origin/
-banks/progression/receipts commit together. Validate overlap before durability,
-geometry before recovery; borrowed transforms restore on failure. Occupied scopes,
-fresh images/capability 42, ≤37 optional capabilities; silent recovery. No new writer
-or mixed removal/relocation.
+share [bounded staged state](DEVELOPMENT.md). Inert pose/origin/banks/receipts commit
+together. Validate overlap before durability and geometry before recovery; borrowed
+transforms restore on failure. Occupied scopes, fresh images/capability 42, silent
+recovery; no mixed removal/relocation.
 
 **Relocated return (V90).** Grounded online living bodies clear quiescent original/
 destination NPC and shared peer hull boundaries; require living original source life.
 Occupancy commits while outcomes/receipts remain dormant. Preserve source/inventory/life;
 rejection installs nothing, uncertainty closes authority. Fresh images/capability 42;
-silent recovery. Escorts/mutable AI remain later; M5 stays open.
+silent recovery. V94 adds bounded stock escort/travel policy and durable private physics frames;
+arrival retains the destination without quest credit. Broader mutable AI remains later.
 
 **Persistence.** Validate before allocation/mutation. Stage gameplay/scripts/presentation;
 preserve miss/failure costs. Persist before publication; restore content/version-bound
@@ -303,11 +303,9 @@ persist without rerolls. Markers own unscripted actors; clients suppress spawnin
 slots; no living access/disposal. Identity-bound 19 slots use format 7. Unavailable
 effects reject; equipped appearance and ground suppression follow commits.
 
-**Cross-actor effects (V51).** Absorb benefits bind the original caster life;
-respawn never inherits them. Persist effects, benefits, resources and RNG together.
-Dispel groups temporary spells by source/caster/life/launch, leaving enchanted
-items and constants intact. T3C6/capability 24 carries authoritative paralysis;
-inherited movement cannot bypass it. Existing campaigns do not silently upgrade.
+**Cross-actor effects (V51).** Absorb binds the original caster life. Effects/resources/
+RNG commit together. Dispel keys source/caster/life/launch, retaining enchantments/constants.
+Capability 24 carries authoritative paralysis; movement cannot bypass it. Fresh campaigns.
 
 **Detached movement.** Stock physics commits water, inventory/stats/effects and
 landing/drowning damage. Player environmental deaths have no actor killer.
@@ -329,22 +327,19 @@ committed Charm into stock dialogue disposition.
 state and spell/item selection. Recovery validates content IDs/inventory; only
 trusted updates write them. Share stock aggression with server authority.
 
-**Social lifecycle (V59-V66).** Commit werewolf equipment/effects/stats/crime/witness
-engagement together. ≤128 unscripted/unleveled collision witnesses recover placement-bound
-bodies/resources/combat/lives/targeting. Command requires an available living, source-life-matched
-caster; older caps persist.
+**Social lifecycle (V59–66).** Werewolf/crime/witness effects commit together.
+≤128 unscripted/unleveled witnesses retain placement-bound simulation/lives.
+Command requires an available living matching caster life; older caps persist.
 
 **Player travel (V67/V68).** Each player owns a durable Mark. Recall commits
 payment/destination/epoch; rejection retries, storage failure closes until coherent
 restart. V68 persists bounded Enable/DisableTeleporting. Disabled/unmarked casts
 pay without teleporting.
 
-**Object/travel (V69).** Explicit-player
-stock intervention search caps interiors at 256 cells and rejects unbound
-destinations. Shared reach/Lock/Open rules, collision identity and ordered effects
-join the existing commit. Stock gem selection captures once per new creature
-death with matching caster life; gem/death/revision/payment persist together.
-T3D2/capability 30 feeds Telekinesis into stock focus; the server owns reach/access/sight.
+**Object/travel (V69).** Explicit-player stock intervention caps interiors at 256;
+unbound destinations reject. Reach/Lock/Open, collision and effects commit together.
+Stock gem selection captures once per matching caster/creature life; gem/death/payment
+persist together. Capability 30 carries authoritative Telekinesis reach.
 
 **Equipment ownership (V70).** Stock bound/ExtraSpell handlers own temporary identities/
 acyclic restoration links; ordinary items stay independent. Forbid temporary stacking/
@@ -352,27 +347,24 @@ transfers; splice expired links; manual changes win. Effects/constants/wear/draw
 commit together. Rejections install nothing; failed permanent attempts wait for source
 changes. Recovery validates ownership.
 
-**Dynamic actors (V71).** Namespace 3 shares the inventory counter. Stage collision/
-inventory membership before durability; owner/source/life forms an acyclic forest.
-Remove descendants without respawn. Recovery validates sources/selectors/identities/lives/
-animation hashes. Reuse stock writers; scripts remain M5. Collision follows committed
-active areas. Wait/rest composes effects/resources/cleanup with game time, preserving action/respawn ticks.
+**Dynamic actors (V71).** Namespace 3 shares the inventory counter. Collision/inventory
+membership commits together; owner/source/life forms an acyclic forest. Remove descendants
+without respawn; recovery validates content/identity/life/animations. Stock writers own
+active-area collision. Wait/rest preserves action/respawn ticks while advancing game time.
 
-**Player lives (V72).** Wrap V71; persist ID/generation/birth/spawn/attributed deaths;
-zero killer is environmental. Death clears body/sources/actions, retaining external
-attribution. Command/Absorb/Soultrap require living matching casters. Online respawn
-restores stats/spawn, preserves inventory/social/Mark and increments generation.
-Cleanup/RNG/membership/relocation/zero-velocity/epoch commit together. Validate
-history/baselines; reject old-life timestamps. Capability 32 gates lives; 37 admits
-early dead-life respawn through this transaction. UI waits for committed revival.
+**Player lives (V72).** Persist identity/generation/spawn/attributed deaths; zero killer
+is environmental. Death clears body/actions/sources while retaining attribution.
+Stock online respawn preserves inventory/social/Mark and increments generation.
+Cleanup/RNG/membership/epoch commit together; stale lives reject. Capabilities 32/37
+gate lives/early revival; UI waits for durability.
 
 **Committed bodies (V73).** Persist stock death action/group/frame/RNG; sample active
 clocks without client cleanup. Capability 33 gates recipes; publish capability-30 aliases
 once. Projectile WhenStrikes application/consumption shares the inventory transaction.
 
-**Spell sources (V74).** Persist canonical 24-hour power deadlines. Reuse stock
-sources/launch/Dispel rules. Travel composes recipient/ordinal relocations before
-publication; ignored entries preserve other ordinals. Scripts/spellbooks remain M5.
+**Spell sources (V74).** Persist stock power deadlines and source/launch/Dispel rules.
+Travel commits recipient/ordinal relocations; ignored entries preserve other ordinals.
+Scripts/spellbooks remain M5.
 
 **Passive Self (V75).** Bound witnesses/Corprus clocks; retain stock resistance,
 base-stat rules/no-ops. Cures quench ordinals; removal undoes harmful worsening,
@@ -384,10 +376,9 @@ born after release, retain named lives/object revisions. Discover intervention c
 before manifest binding; budget exhaustion rejects. Capability 35 admits ordinals
 beyond seven; older peers omit those transient applications.
 
-**Spell presentation (capability 34).** Publish committed windup/failed-school/ordinal
-results with caster/target lives through stock helpers. Snapshots own loops/cleanup;
-bounded chunks commit atomically once. Reconnect restores loops without transient replay.
-Capability 33 retains legacy cues; presentation never persists.
+**Spell presentation (capability 34).** Stock helpers publish committed life-bound
+windup/failed-school/ordinal cues. Atomic snapshots restore loops without transient
+replay. Capability 33 retains legacy cues; presentation never persists.
 
 **Shared cells (V77).** Connected exteriors share physics/navigation; other regions
 isolate. Caps: 256 cells, 37 actors/summons, 8,192 references/region, 256 navigation
@@ -406,9 +397,8 @@ signatures with stock inventory/stats/spells. Fresh profiles cannot simulate; bo
 starters grant once. Omission stays empty; one safe point. Recovery validates resources.
 Gear/cell rebuilds preserve bodies/profiles; capabilities 6/36 gate creation and public gear.
 
-**Character installation:** committed profile revisions bind coherent installation;
-newer motion cannot raise inventory floors. Delayed lanes resync; public equipment
-presents independently of private delivery.
+**Character installation:** Profile revisions bind coherent installation; motion cannot
+raise inventory floors. Delayed lanes resync; gear presents independently.
 
 **Resume inactivity:** live authenticated bindings renew bounded token expiry;
 validated snapshots renew client deadlines. Disconnect stops renewal. Expired tokens

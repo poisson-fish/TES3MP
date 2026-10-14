@@ -5600,10 +5600,12 @@ namespace TES3MP::Native::Testing
         const bool fairOpportunities = healthReads || effectFamily == "story-opportunities";
         const bool lifeEvents = fairOpportunities || effectFamily == "story-life-events";
         const bool sourceWaits = lifeEvents || effectFamily == "story-source-waits";
+        const bool storyActivity = effectFamily == "story-activities" || effectFamily == "story-departure";
+        const bool escortActivity = effectFamily == "story-activities";
         const bool storyRelocationReturn = effectFamily == "story-relocation-return";
         const bool storyRelocation = storyRelocationReturn || effectFamily == "story-relocation";
         const bool storyReturn = storyRelocationReturn || storyEnable || effectFamily == "story-return";
-        const bool storyEncounter = sourceWaits || storyReturn || storyRelocation || effectFamily == "story-encounter";
+        const bool storyEncounter = storyActivity || sourceWaits || storyReturn || storyRelocation || effectFamily == "story-encounter";
         const bool dialogueNpc = effectFamily == "dialogue-npc-state";
         const bool personalIntents = storyEncounter || dialogueNpc || dialogueJournal || dialogueDisposition || effectFamily == "dialogue-intents";
         const bool personalDialogue = personalIntents || effectFamily == "dialogue";
@@ -6363,7 +6365,9 @@ namespace TES3MP::Native::Testing
                                 select.mFunction = ESM::DialogueCondition::Function_PcAlchemy;
                                 info.mSelects.push_back(select);
                                 info.mResponse = "A private passage for %PCName|%PCClass|%cell|%ambient_counter_83|%pccrimelevel.";
-                                info.mResultScript += storyRelocation
+                                info.mResultScript += storyActivity
+                                    ? (escortActivity ? "AiEscort player 0 320 -32 1\n" : "AiTravel 320 -32 1\n")
+                                    : storyRelocation
                                     ? "PositionCell 200 -32 1 5400 \"NPC Door Contact Test\"\nset ambient_counter_83 to npc_door_actor->GetPos x\n"
                                     : storyEncounter ? "Disable\nset ambient_counter_83 to GetDisabled\n" : "Choice \"Proceed\" 7\n";
                             }
@@ -9326,7 +9330,7 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (fairOpportunities                            ? "native-inventory-93\nmanifest "
+            out << (storyActivity ? "native-inventory-94\nmanifest " : fairOpportunities                            ? "native-inventory-93\nmanifest "
                 : lifeEvents                                    ? "native-inventory-92\nmanifest "
                 : sourceWaits                                  ? "native-inventory-91\nmanifest "
                 : storyRelocationReturn                        ? "native-inventory-90\nmanifest "
@@ -9653,8 +9657,8 @@ namespace TES3MP::Native::Testing
                         closePlayers[i] = std::get<CanonicalPlayerEntityState>(
                             advanceCanonicalSpatialState(closePlayers[i], id<ServerTick>(4),
                                 Transform(closePlayers[i].transform().cell(),
-                                    Position3(int64_t((scene.mPosition[0] + i * 20) * 1024),
-                                        int64_t((scene.mPosition[1] - 20) * 1024), 1024),
+                                    Position3(int64_t((scene.mPosition[0] + (storyActivity ? 0 : i * 20)) * 1024),
+                                        int64_t((scene.mPosition[1] + (storyActivity ? (i ? 60 : -60) : -20)) * 1024), 1024),
                                     closePlayers[i].transform().orientation()),
                                 LinearVelocity3(0, 0, 0)));
                     authority = std::get<CanonicalServerState>(
@@ -10017,6 +10021,134 @@ namespace TES3MP::Native::Testing
                         }
                         if (!lifeEvents) std::cout << "source waits host: A's stock melee death; coherent wait/clock/bank rollback; "
                             "failed death and respawn writes; silent reconnect/restart; new-life single resume, no quest credit\n";
+                        return;
+                    }
+                    if (storyActivity)
+                    {
+                        require(policy->activities() && policy->relocations(), "V94 activity policy absent");
+                        auto established = records;
+                        for (size_t i = 0; i < 2; ++i) {
+                            established[i].characterProfile = completed[i]; established[i].savedPlayer = authority.players()[i];
+                        }
+                        auto establishedRegistry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+                            PlayerIdentityRegistry::create(*crypto, storage, established));
+                        const auto original = image(service);
+                        const auto originalCampaign = readActorCampaign({reinterpret_cast<const char*>(original.data()), original.size()});
+                        const auto sharedFrame = native.characterBinding().mNavigatingActor->image();
+                        auto pending = prepare(native, 5, 1, 101, request);
+                        require(pending && native.physicalScope(id<PlayerId>(1), pending.get()) != 1
+                            && native.physicalScope(id<PlayerId>(2), pending.get()) == 1, "Activity did not isolate A before publication");
+                        std::vector<std::byte> proposed;
+                        require(pending->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && image(service) == original
+                            && native.characterBinding().mNavigatingActor->image() == sharedFrame,
+                            "Rejected activity start installed banks, NPC movement, loot or life");
+                        require(pending->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                            && image(service) == proposed, "Activity start retry changed the durable candidate");
+                        auto saved = image(service);
+                        auto run = std::make_unique<InventoryHost>(descriptor, manifest, *establishedRegistry, *crypto, saved);
+                        require(image(run->service()) == saved, "Mid-route restart reset the activity");
+                        const auto alice = [&](const auto& owner) { return state(owner)[0]; };
+                        require(alice(run->service()).activity && alice(run->service()).activity->escort == escortActivity
+                            && !alice(run->service()).activity->completed && !state(run->service())[1].activity,
+                            "Package type, unfinished progress or B's starting opportunity changed");
+                        auto& resumed = dynamic_cast<InventoryService&>(run->service()); resumed.synchronizeCells(authority);
+                        const auto initialActivity = alice(resumed);
+                        std::vector<CanonicalSessionProgress> remaining;
+                        for (const auto& session : authority.activeSessions()) if (session.playerId() == id<PlayerId>(2)) remaining.push_back(session);
+                        const auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), remaining));
+                        auto suspended = resumed.prepareNativePlayerTick(disconnected, id<ServerTick>(6), 1.f/30, {}, &world, {}, {});
+                        require(suspended && suspended->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                            && alice(resumed).activity == initialActivity.activity && alice(resumed).relocation == initialActivity.relocation,
+                            "Disconnect advanced or reset solo activity");
+                        const auto beforeStep = image(resumed);
+                        auto step = resumed.prepareNativePlayerTick(authority, id<ServerTick>(7), 1.f/30, {}, &world, {}, {});
+                        require(step && step->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Rejected; })
+                            == CanonicalDurabilityResult::Rejected && image(resumed) == beforeStep,
+                            "Rejected activity step leaked pose or continuation");
+                        require(step->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                            "Reconnect activity retry rejected its unchanged candidate");
+                        require(image(resumed) == proposed, "Reconnect retry changed the activity candidate image");
+                        if (alice(resumed).activity->steps != initialActivity.activity->steps + 1)
+                            std::cerr << "Activity steps before=" << initialActivity.activity->steps << " after=" << alice(resumed).activity->steps
+                                << " tick=" << alice(resumed).activity->tick << " completed=" << alice(resumed).activity->completed << '\n';
+                        require(alice(resumed).activity->steps == initialActivity.activity->steps + 1,
+                            "Reconnect caught up offline ticks or retried the package twice");
+                        auto uncertain = resumed.prepareNativePlayerTick(authority, id<ServerTick>(8), 1.f/30, {}, &world, {}, {});
+                        require(uncertain && uncertain->commit([&](auto bytes) { proposed.assign(bytes.begin(), bytes.end()); return CanonicalDurabilityResult::Failed; })
+                            == CanonicalDurabilityResult::Failed && resumed.inventoryImage().empty(), "Uncertain AI step left authority open");
+                        run = std::make_unique<InventoryHost>(descriptor, manifest, *establishedRegistry, *crypto, proposed);
+                        require(image(run->service()) == proposed, "Uncertain activity restart did not install exact durable progress");
+                        uint64_t tick = 8;
+                        auto& current = dynamic_cast<InventoryService&>(run->service()); current.synchronizeCells(authority);
+                        while (!alice(current).activity->completed && tick < 180)
+                        {
+                            auto move = current.prepareNativePlayerTick(authority, id<ServerTick>(++tick), 1.f/30, {}, &world, {}, {});
+                            require(move && move->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                                "Stock AI activity failed to advance");
+                        }
+                        const auto arrived = alice(current);
+                        const auto extent = current.characterBinding().mNavigatingActor->selectedActorHalfExtents();
+                        const float arrivalTolerance = escortActivity ? std::max({extent[0], extent[1], extent[2]}) : extent[2] + 64;
+                        require(arrived.activity->completed && std::hypot(arrived.relocation->position[0] - 320,
+                                arrived.relocation->position[1] + 32) <= arrivalTolerance
+                            && arrived.dialogue.quests.front().mState == 10 && !state(current)[1].activity,
+                            "A did not reach its destination, arrival awarded progression, or B lost its opportunity");
+                        const auto gearA = current.projectInventory(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                        const auto gearB = current.projectInventory(authority, id<SessionId>(2), id<ServerTick>(tick), id<CanonicalRevision>(tick));
+                        require(gearA && gearA->equipment && gearB && gearB->equipment
+                            && gearA->equipment->motions.size() == 1 && gearB->equipment->motions.size() == 1
+                            && gearA->equipment->motions.front().position == arrived.relocation->position
+                            && gearB->equipment->motions.front().position == current.characterBinding().mNavigatingActor->snapshot().mPosition
+                            && gearA->containers.empty() && current.projectCombat(authority, id<SessionId>(2), id<ServerTick>(tick), id<CanonicalRevision>(tick))->actors().size() == 1,
+                            "A's destination/B's source visibility or scoped loot restrictions diverged");
+                        const auto arrivedImage = image(current);
+                        const auto campaign = readActorCampaign({reinterpret_cast<const char*>(arrivedImage.data()), arrivedImage.size()});
+                        require(campaign.life->generation == originalCampaign.life->generation && campaign.life->deaths.empty()
+                            && std::ranges::equal(campaign.inventory, originalCampaign.inventory), "Activity duplicated lives or public inventory/loot");
+                        const auto [personal, inner] = readPersonalScriptCampaign(
+                            {reinterpret_cast<const char*>(arrivedImage.data()), arrivedImage.size()});
+                        for (const int mismatch : {0, 1, 2})
+                        {
+                            auto corrupt = policy->restore(personal);
+                            if (mismatch == 0) corrupt[0].activity->tick = tick + 1;
+                            else if (mismatch == 1) corrupt[0].relocation->position[0] += 1;
+                            else corrupt[0].activity->destination[0] += 1;
+                            const auto invalid = sealPersonalScriptCampaign(inner, policy->encode(corrupt));
+                            bool rejected = false;
+                            try { InventoryHost bad(descriptor, manifest, *establishedRegistry, *crypto, std::as_bytes(std::span(invalid))); }
+                            catch (const std::invalid_argument&) { rejected = true; }
+                            require(rejected && image(current) == arrivedImage, "Recovery installed a mismatched private frame/clock/destination");
+                        }
+                        // A's original causal receipt survives arrival and resumes silently.
+                        auto duplicate = prepare(current, ++tick, 1, 101, request);
+                        const auto quiet = current.projectPersonalDialogue(authority, id<SessionId>(1), id<ServerTick>(tick), id<CanonicalRevision>(tick), duplicate.get());
+                        require(duplicate && quiet[0].response.empty() && quiet[0].messages.empty()
+                            && duplicate->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                            && alice(current).activity == arrived.activity && alice(current).relocation == arrived.relocation,
+                            "Duplicate departure replayed output or moved A's completed NPC");
+                        auto bob = prepare(current, ++tick, 2, 101, request);
+                        require(bob && bob->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed
+                            && state(current)[1].activity && !state(current)[1].activity->completed
+                            && state(current)[1].encounterLife == arrived.encounterLife && alice(current).relocation == arrived.relocation,
+                            "B could not start its original opportunity independently of A");
+                        const auto bothImage = image(current);
+                        InventoryHost bothRestart(descriptor, manifest, *establishedRegistry, *crypto, bothImage);
+                        require(image(bothRestart.service()) == bothImage && state(bothRestart.service())[0].activity->completed
+                            && !state(bothRestart.service())[1].activity->completed,
+                            "Restart merged activity progress or created another source life/loot");
+                        auto& bobOwner = dynamic_cast<InventoryService&>(bothRestart.service()); bobOwner.synchronizeCells(authority);
+                        while (!state(bobOwner)[1].activity->completed && tick < 360)
+                        {
+                            auto move = bobOwner.prepareNativePlayerTick(authority, id<ServerTick>(++tick), 1.f/30, {}, &world, {}, {});
+                            require(move && move->commit([](auto) { return CanonicalDurabilityResult::Committed; }) == CanonicalDurabilityResult::Committed,
+                                "B's retained stock activity could not advance");
+                        }
+                        require(state(bobOwner)[1].activity->completed && alice(bobOwner).activity == arrived.activity
+                            && alice(bobOwner).relocation == arrived.relocation, "B could not finish independently or A's destination reset");
+                        std::cout << "story activity host: stock " << (escortActivity ? "AiEscort player" : "AiTravel")
+                            << "; A reaches destination, B retains and completes original opportunity; rejected/uncertain start/step writes; "
+                            "disconnect suspension, exact mid-route/arrival/two-scope restart; no duplicate life/public loot or completion rewards\n";
                         return;
                     }
                     if (storyEncounter)

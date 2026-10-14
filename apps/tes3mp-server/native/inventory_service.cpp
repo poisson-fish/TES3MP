@@ -2,6 +2,8 @@
 #include <apps/openmw/mwmechanics/deathanimation.hpp>
 #include "stock_actor_script.hpp"
 #include <apps/openmw/mwmechanics/aifollow.hpp>
+#include <apps/openmw/mwmechanics/aitravel.hpp>
+#include <apps/openmw/mwmechanics/aiescort.hpp>
 #include <apps/openmw/mwmechanics/objectmagic.hpp>
 #include <numbers>
 #include "inventory_service.hpp"
@@ -3246,6 +3248,16 @@ namespace TES3MP::Native
                     || decoded.combat->npcPlacements.size() != 1
                     || story.last.sourceReference != decoded.combat->npcPlacements.front())
                     throw std::invalid_argument("Encounter origin differs from durable NPC placement/life");
+                if (story.activity)
+                {
+                    if (story.activity->tick > decoded.tick || story.activity->actorImage.empty())
+                        throw std::invalid_argument("Activity clock/frame differs from durable gameplay");
+                    const auto activityFrame = mBinding.mNavigatingActor->prepareRestore(story.activity->actorImage);
+                    if (activityFrame->snapshot().mPosition != story.relocation->position
+                        || activityFrame->snapshot().mYaw != story.relocation->yaw
+                        || (story.activity->steps && activityFrame->destination() != story.activity->destination))
+                        throw std::invalid_argument("Activity frame differs from scoped pose");
+                }
                 if (story.relocation && !mBinding.mNavigatingActor->actorPoseClear(story.last.sourceReference,
                         story.relocation->position, story.relocation->yaw))
                     throw std::invalid_argument("Encounter relocation overlaps admitted geometry");
@@ -5483,6 +5495,37 @@ namespace TES3MP::Native
             journalStamp);
         if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
             return reject(prepared.result.diagnostic.c_str());
+        if (prepared.result.executed && mBinding.mPersonalScripts->activities())
+        {
+            auto& story = *std::ranges::find_if(prepared.state, [&](const auto& value) {
+                return value.last.character == session->playerId().value() && value.last.story == request.story;
+            });
+            if (story.activity)
+            {
+                if (mCombat->knockedDown[npc] || mCombat->hitRecoveryTicks[npc]
+                    || hasParalysis(mTimedEffects, npc)
+                    || std::ranges::any_of(mTimedEffects, [&](const auto& effect) {
+                        return effect.actor == npc && effect.effectIndex == uint64_t(ESM::MagicEffect::refIdToIndex(ESM::MagicEffect::Levitate))
+                            && effect.magnitude > 0;
+                    }))
+                    return reject("activity source effects/recovery unavailable");
+                const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+                const auto setting = [&](const char* name) { return settings.find(name)->mValue.getFloat(); };
+                const auto magnitude = [&](ESM::RefId effect) {
+                    const auto value = speakerStats.getMagicEffects().get(MWMechanics::EffectKey(effect));
+                    return value ? value->getMagnitude() : 0.f;
+                };
+                const float weight = std::max(0.f, mRuntime.storage(mCombatNpcOwner).getWeight()
+                    - magnitude(ESM::MagicEffect::Feather) + magnitude(ESM::MagicEffect::Burden));
+                const float encumbrance = MWClass::normalizedEncumbrance(weight,
+                    speakerStats.getAttribute(ESM::Attribute::Strength).getModified() * setting("fEncumbranceStrMult"));
+                if (encumbrance > 1.f) return reject("activity source overencumbered");
+                story.activity->walkSpeed = MWClass::npcWalkSpeed(speakerStats.getAttribute(ESM::Attribute::Speed).getModified(),
+                    encumbrance, setting("fMinWalkSpeed"), setting("fMaxWalkSpeed"), setting("fEncumberedMoveEffect"));
+                story.activity->actorImage = mBinding.mNavigatingActor->selectedImage();
+                story.activity->validate();
+            }
+        }
         if (prepared.result.executed)
             if (const auto* pose = PersonalScripts::relocation(prepared.state, session->playerId().value()))
             {
@@ -6299,6 +6342,65 @@ namespace TES3MP::Native
             }
             native->memberScene = fresh;
             transaction->scene = std::move(fresh);
+        }
+        if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->activities())
+        {
+            const auto* current = personalState(transaction.get());
+            auto stories = *current;
+            bool changed = false;
+            auto& room = *transaction->scene;
+            std::vector<std::pair<uint64_t, const InteriorActorScene::Prepared*>> activityHulls;
+            for (size_t i = 0; i < 2; ++i)
+                if (transaction->steps[i]) activityHulls.emplace_back(PlayerHullBase + i, transaction->steps[i].get());
+            for (auto& story : stories)
+            {
+                if (!story.activity || story.activity->completed || story.activity->tick >= tick.value()) continue;
+                const auto owner = PlayerId::fromValue(story.last.character).value();
+                const size_t index = actor(owner);
+                const auto* player = inputPlayers.findPlayer(owner);
+                if (!player || !transaction->states[index].root || !room.hasPlayer(PlayerHullBase + index)
+                    || std::ranges::none_of(inputPlayers.activeSessions(), [&](const auto& session) { return session.playerId() == owner; })
+                    || !native->combat || native->combat->actors[index][8][2] <= 0
+                    || transaction->states[index].root->cell() != mBinding.mContainers.front().mCell)
+                    continue; // Offline/absent owners suspend; never catch up or reset.
+                auto& activity = *story.activity;
+                const auto& pose = *story.relocation;
+                const auto p = transaction->states[index].root->position();
+                const osg::Vec3f follower(float(double(p.x()) / 1024), float(double(p.y()) / 1024), float(double(p.z()) / 1024));
+                const osg::Vec3f leader(pose.position[0], pose.position[1], pose.position[2]);
+                const auto extents = room.selectedActorHalfExtents();
+                const float maxExtent = std::max({extents[0], extents[1], extents[2]});
+                const bool moving = !activity.escort || MWMechanics::AiEscort::followerInRange(leader, follower, activity.followDistance);
+                std::vector<uint64_t> hidden;
+                for (size_t peer = 0; peer < 2; ++peer)
+                    if (peer != index && room.hasPlayer(PlayerHullBase + peer)) hidden.push_back(PlayerHullBase + peer);
+                std::unique_ptr<InteriorActorScene::Prepared> step;
+                room.withPlayerHulls(activityHulls, [&] { room.withHiddenActors(hidden, [&] {
+                    step = room.prepareScopedNavigation(activity.actorImage,
+                        ActorMovement{.enabled = true, .walkSpeed = moving ? activity.walkSpeed : 0.f}, activity.destination);
+                }); });
+                const auto frame = step->snapshot();
+                const osg::Vec3f destination(activity.destination[0], activity.destination[1], activity.destination[2]);
+                // Use stock package completion and escort distance hysteresis. No journal/reward effect follows arrival.
+                if (activity.escort)
+                {
+                    activity.completed = moving && (step->pathCompleted() || (osg::Vec3f(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]) - destination).length2() <= maxExtent * maxExtent);
+                    activity.followDistance = MWMechanics::AiEscort::followDistance(maxExtent, moving);
+                }
+                else activity.completed = MWMechanics::AiTravel::destinationReached(
+                    {frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]}, destination, extents[2], activity.walkSpeed,
+                    1.f/30, step->pathCompleted(), activity.destinationTimer);
+                story.relocation->position = frame.mPosition; story.relocation->yaw = frame.mYaw;
+                story.relocation->validate();
+                activity.actorImage.assign(step->image().begin(), step->image().end());
+                activity.tick = tick.value(); ++activity.steps; changed = true;
+            }
+            if (changed)
+            {
+                if (!native->personalScripts) native->personalScripts.emplace();
+                native->personalScripts->state = std::move(stories);
+                native->personalScripts->image = mBinding.mPersonalScripts->encode(native->personalScripts->state);
+            }
         }
         // V87 returns a dormant terminal encounter to shared exploration only
         // from a grounded, living, authenticated body clear of every shared hull.
@@ -12694,8 +12796,15 @@ namespace TES3MP::Native
                 {
                     // Appearance and one inert destination hull only. No public
                     // container access, combat/life simulation or transient cues.
+                    std::array<float, 3> velocity{};
+                    const auto activity = std::ranges::find_if(*stories, [&](const auto& story) {
+                        return story.last.character == session->playerId().value() && story.activity;
+                    });
+                    const auto* previous = mPersonalScriptState ? PersonalScripts::relocation(*mPersonalScriptState, session->playerId().value()) : nullptr;
+                    if (activity != stories->end() && !activity->activity->completed && previous && scopeCandidate)
+                        for (size_t axis = 0; axis < 3; ++axis) velocity[axis] = (pose->position[axis] - previous->position[axis]) * 30.f;
                     for (auto& motion : view.motions)
-                    { motion.position = pose->position; motion.yaw = pose->yaw; motion.velocity = {}; }
+                    { motion.position = pose->position; motion.yaw = pose->yaw; motion.velocity = velocity; }
                 }
                 else
                 {

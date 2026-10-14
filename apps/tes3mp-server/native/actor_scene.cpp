@@ -1221,6 +1221,12 @@ namespace TES3MP::Native
         const auto& extent = mImpl->mAgentBounds.mHalfExtents;
         return std::hypot(extent.x(), extent.y());
     }
+    std::array<float, 3> InteriorActorScene::selectedActorHalfExtents() const
+    {
+        if (!mImpl) throw std::invalid_argument("Activity hull scene is unloaded");
+        const auto& extent = mImpl->mAgentBounds.mHalfExtents;
+        return {extent.x(), extent.y(), extent.z()};
+    }
     float InteriorActorScene::npcHalfExtentY(ESM::RefId race, float scale) const
     {
         if (!mImpl || !std::isfinite(scale) || scale <= 0.f || scale > 100.f)
@@ -2140,6 +2146,12 @@ namespace TES3MP::Native
     {
         return mNeighbor ? splitActorImages(mState->bytes).first : std::span<const char>(mState->bytes);
     }
+    std::optional<std::array<float, 3>> InteriorActorScene::Prepared::destination() const
+    {
+        if (!mState->travel.hasDestination) return {};
+        const auto& point = mState->travel.destination;
+        return std::array<float, 3>{point.x(), point.y(), point.z()};
+    }
     std::span<const char> InteriorActorScene::Prepared::neighborImage(size_t index) const
     {
         auto* next = mNeighbor.get();
@@ -2387,6 +2399,19 @@ namespace TES3MP::Native
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigation(
         const ActorMovement& movement, std::span<const ActorSceneDoor> doors,
         std::optional<std::array<float, 3>> destination)
+    { return prepareNavigationFrom(nullptr, movement, doors, destination); }
+
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareScopedNavigation(
+        std::span<const char> image, const ActorMovement& movement, const std::array<float, 3>& destination)
+    {
+        if (mNeighbor || !mScenery.empty()) throw std::invalid_argument("Activity exceeds one actor/interior");
+        auto before = prepareRestore(image);
+        return prepareNavigationFrom(before.get(), movement, {}, destination);
+    }
+
+    std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigationFrom(
+        const Prepared* before, const ActorMovement& movement, std::span<const ActorSceneDoor> doors,
+        std::optional<std::array<float, 3>> destination)
     {
         if (!mImpl) throw std::logic_error("Actor scene is unloaded");
         const auto localDoors = mImpl->localDoors(doors);
@@ -2394,11 +2419,12 @@ namespace TES3MP::Native
         mImpl->validateDoors(doors);
         if (!mImpl->mNavigator) throw std::logic_error("Actor navigation unavailable");
         mImpl->validateMovement(movement);
-        mImpl->syncNavigationPosition(mImpl->mActor->mPosition);
+        const auto& initial = before ? *before->mState->frame : *mImpl->mActor;
+        mImpl->syncNavigationPosition(initial.mPosition);
         auto frame = std::make_unique<MWPhysics::ActorFrameData>(movement.enabled
-            ? mImpl->movementFrame(*mImpl->mActor, movement) : *mImpl->mActor);
-        auto path = mImpl->mPath;
-        auto travel = mImpl->mTravel;
+            ? mImpl->movementFrame(initial, movement) : initial);
+        auto path = before ? before->mState->path : mImpl->mPath;
+        auto travel = before ? before->mState->travel : mImpl->mTravel;
         travel.landingFall = 0.f;
         if (movement.jumpFlags)
         {
@@ -2414,7 +2440,8 @@ namespace TES3MP::Native
             if (!contains(*destination))
                 throw std::invalid_argument("Interior follow destination outside processing neighborhood");
             const osg::Vec3f selected((*destination)[0], (*destination)[1], (*destination)[2]);
-            if (!travel.hasDestination || (travel.destination - selected).length2() > 32.f * 32.f)
+            if (!travel.hasDestination || (before ? travel.destination != selected
+                    : (travel.destination - selected).length2() > 32.f * 32.f))
             {
                 travel.hasDestination = true;
                 travel.destination = selected;

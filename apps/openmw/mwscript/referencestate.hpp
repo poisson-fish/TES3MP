@@ -15,6 +15,9 @@ namespace MWScript
         virtual void enable(const ExecutionContext&, const MWWorld::Ptr&) = 0;
         virtual void disable(const ExecutionContext&, const MWWorld::Ptr&) = 0;
         virtual bool disabled(const ExecutionContext&, const MWWorld::Ptr&) const = 0;
+        virtual void aiTravel(const ExecutionContext&, const MWWorld::Ptr&, const std::array<float, 3>&, bool,
+            const ESM::RefId&, float)
+        { throw std::invalid_argument("AI package lacks staged activity admission"); }
         virtual bool onDeath(const ExecutionContext&, const MWWorld::Ptr&)
         { throw std::invalid_argument("OnDeath lacks attributed life-event admission"); }
         virtual float health(const ExecutionContext&, const MWWorld::Ptr&, bool) const

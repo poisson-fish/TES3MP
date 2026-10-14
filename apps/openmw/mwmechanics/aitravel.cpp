@@ -91,11 +91,18 @@ namespace MWMechanics
         if (!isWithinMaxRange(targetPos, actorPos))
             return mHidden;
 
-        if (pathTo(actor, targetPos, duration, characterController.getSupportedMovementDirections()))
-        {
-            actor.getClass().getMovementSettings(actor).mPosition[1] = 0;
-            return true;
-        }
+        const bool complete = pathTo(actor, targetPos, duration, characterController.getSupportedMovementDirections());
+        if (!destinationReached(actorPos, targetPos, MWBase::Environment::get().getWorld()->getHalfExtents(actor).z(),
+                actor.getClass().getCurrentSpeed(actor), duration, complete, mDestinationTimer))
+            return false;
+        actor.getClass().getMovementSettings(actor).mPosition[1] = 0;
+        return true;
+    }
+
+    bool AiTravel::destinationReached(const osg::Vec3f& actorPos, const osg::Vec3f& targetPos,
+        float halfHeight, float speed, float duration, bool pathComplete, float& timer)
+    {
+        if (pathComplete) return true;
 
         // If we've been close enough to the destination for some time give up like Morrowind.
         // The end condition should be pretty much accurate.
@@ -104,22 +111,20 @@ namespace MWMechanics
 
         // Note Morrowind uses the halved eye level, but this is close enough.
         float dist
-            = distanceIgnoreZ(actorPos, targetPos) - MWBase::Environment::get().getWorld()->getHalfExtents(actor).z();
-        const float endTolerance = std::max(64.f, actor.getClass().getCurrentSpeed(actor) * duration);
+            = distanceIgnoreZ(actorPos, targetPos) - halfHeight;
+        const float endTolerance = std::max(64.f, speed * duration);
 
         // Even if we have entered the threshold, we might have been pushed away. Reset the timer if we're currently too
         // far.
         if (dist > endTolerance)
         {
-            mDestinationTimer = TRAVEL_FINISH_TIME;
+            timer = TRAVEL_FINISH_TIME;
             return false;
         }
 
-        mDestinationTimer -= duration;
-        if (mDestinationTimer > 0)
+        timer -= duration;
+        if (timer > 0)
             return false;
-
-        actor.getClass().getMovementSettings(actor).mPosition[1] = 0;
         return true;
     }
 

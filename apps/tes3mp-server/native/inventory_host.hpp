@@ -8,6 +8,12 @@
 
 namespace TES3MP::Native
 {
+    // V94 adds source-only AiTravel/AiEscort player in the single dry interior.
+    // Stock AI policy/navigation/physics advance two private frames at most;
+    // progress, pose, story banks and gameplay share durability. Offline owners
+    // suspend; arrival retains its destination without credit, loot or new lives.
+    // Nonrepeating zero-duration packages only; banks/other scene writes freeze.
+    // Fresh images, capability 42; broader mutable/cross-cell AI remains closed.
     // V92 adds bounded attributed stock OnDeath cursors to V91 source banks.
     // V93 reserves the oldest wait's next canonical life until eligible credit;
     // combat admission/impacts and NPC targeting protect it without new loot/lives.
@@ -21,7 +27,7 @@ namespace TES3MP::Native
     // V90 returns relocated scopes at a grounded quiescent boundary clear of
     // original/destination NPC and shared peer hulls. Occupancy commits with
     // gameplay; the private inert pose/origin/bank/receipts remain dormant.
-    // Fresh images, unchanged capability 42; escorts/mutable AI stay closed.
+    // Fresh images, unchanged capability 42; V94 separately admits bounded activities.
     // V89 admits source-only stock Position/PositionCell within the admitted
     // interior. Durable terminal poses own inert visibility/collision; no new
     // AI/combat/loot writer. Relocated scopes stay occupied until return is proven.

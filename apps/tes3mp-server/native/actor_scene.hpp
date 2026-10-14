@@ -101,6 +101,9 @@ namespace TES3MP::Native
     // AI packages, scripts or presentation services are constructed here.
     class InteriorActorScene
     {
+    public:
+        class Prepared;
+    private:
         struct Impl;
         std::unique_ptr<Impl> mImpl;
         struct Dormant;
@@ -118,8 +121,9 @@ namespace TES3MP::Native
             std::span<const DynamicActorBody> dynamic = {}, bool scenery = false, bool regions = false);
         std::pair<std::vector<std::shared_ptr<const SceneUtil::TextKeyMap>>, std::string>
             bindAnimationSources(ESM::RefId actor, const ESM::NPC* playerBody = nullptr);
+        std::unique_ptr<Prepared> prepareNavigationFrom(const Prepared*, const ActorMovement&,
+            std::span<const ActorSceneDoor>, std::optional<std::array<float, 3>>);
     public:
-        class Prepared;
         InteriorActorScene(Loadout& loadout, const std::string& cell, uint64_t actor,
             const std::string& baseAnimation, const std::string& beastAnimation);
         // V20: one interior or a fixed, contiguous exterior processing neighborhood
@@ -206,6 +210,7 @@ namespace TES3MP::Native
         // distance-minus-half-extents flee gate.
         float selectedActorHalfExtentY() const;
         float selectedActorHorizontalRadius() const;
+        std::array<float, 3> selectedActorHalfExtents() const;
         float actorHalfExtentY(uint64_t actor) const;
         float npcHalfExtentY(ESM::RefId race, float scale) const;
         const std::string& fingerprint() const;
@@ -261,12 +266,16 @@ namespace TES3MP::Native
             std::span<const char> neighborImage(size_t index) const;
             bool pathUnavailable() const;
             bool pathCompleted() const;
+            std::optional<std::array<float, 3>> destination() const;
         };
         // Two stock 60 Hz steps, isolated until a durable 30 Hz tick installs.
         std::unique_ptr<Prepared> prepareNavigation(float speed, std::span<const ActorSceneDoor> doors = {});
         std::unique_ptr<Prepared> prepareNavigation(const ActorMovement& movement,
             std::span<const ActorSceneDoor> doors = {},
             std::optional<std::array<float, 3>> destination = {});
+        // Resume one private activity frame without installing it in the shared scene.
+        std::unique_ptr<Prepared> prepareScopedNavigation(std::span<const char> image,
+            const ActorMovement&, const std::array<float, 3>& destination);
         std::unique_ptr<Prepared> prepareControlled(const ActorMovement& movement,
             const std::array<float, 3>& axes, float pitch, float yaw,
             std::span<const ActorSceneDoor> doors = {});

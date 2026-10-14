@@ -58,11 +58,10 @@ Optional trailing `starting_items COUNT`: quoted-record/quantity/slot triples
 Policy changes require fresh campaigns; scripted rewards await M5.
 Fresh V80 bootstrap: append `shared_script RECORD globals COUNT GLOBAL...` after `player-physics`
 (0–16 globals); validate winning content/ownership before publication. Omission retains V79.
-V81/V82: `personal_scripts COUNT story ID script "RECORD" globals COUNT GLOBAL...`
-(1–8 stories mirrored/character). V81 admits trusted source-free calls; V82 schedules
-online established characters once/tick without catch-up. V83 uses
-`story ID scripts COUNT script "RECORD" running 0|1 ... globals COUNT GLOBAL...`:
-1–4 ordered members/story, ≤16 mirrored scripts; locals/flags/ordinals/markers recover with gameplay.
+V81–83: `personal_scripts COUNT story ID scripts COUNT script "RECORD" running 0|1 ...
+globals COUNT GLOBAL...`; 1–8 mirrored stories/character, 1–4 ordered members/story,
+≤16 mirrored scripts. V81 is trusted-call-only; V82–83 schedule online characters
+once/tick without catch-up. Banks recover with gameplay.
 V84 adds `dialogues COUNT "RECORD"...` per story (1–16 DIAL, 64 INFO, 16 conditions/INFO).
 V85: fresh campaigns/capability 40; ≤14 mirrored scripts reserve two dialogue calls/tick,
 one/character. First topic seeds menus; living unscripted speakers validate reach/sight/life.
@@ -85,7 +84,7 @@ V89: fresh images/capability 42; source-only Position/PositionCell/GetPos/GetAng
 same interior, finite coordinates ≤1,000,000, displacement ≤4,096, rotation ≤360°.
 Inherited discovery/retry budgets; validate final scoped hull before durability,
 geometry on recovery. One inert pose, occupied scope; no new simulation/life/loot,
-cross-cell movement, escorts or mixed Disable/Position. Wire permits suppression
+cross-cell movement or mixed Disable/Position. Wire permits suppression
 or one zero-velocity pose; ≤37 optional capabilities; silent recovery.
 V90 returns grounded online living bodies beyond quiescent original/destination
 NPC (≥256) and peer (≥128) hulls, enlarged by radii plus 32; living original life
@@ -104,8 +103,15 @@ Combat admission/impacts and NPC targeting protect one canonical opportunity wit
 Recovery validates cursor/reservation origins against death history.
 Filters: `source-waits`, `life-events`, `opportunities`; host: `story-` prefix.
 Source-only stock GetHealth/GetHealthGetRatio use staged stats; foreign deaths defer
-the bank. Journal wait/reservation status recovers silently. Health/scene writes,
-targeted StartScript and calendar arithmetic stay closed.
+the bank. Journal wait/reservation status recovers silently. Health writes, targeted StartScript and calendar arithmetic stay closed.
+V94: fresh images/capability 42; one nonrepeating source-only AiTravel or AiEscort player
+(duration 0) in the same dry interior. V89 coordinate/displacement bounds apply;
+≤2 active private frames, ≤65,536 bytes/frame, two 60 Hz substeps/30 Hz commit.
+Stock walk speed freezes at quiescent admission; temporary effects, paralysis, levitation or overencumbrance reject.
+Continuation/pose/banks commit together; offline owners suspend without catch-up.
+Arrival retains the private destination; no automatic quest credit or loot access.
+Banks remain frozen; combat, package replacement, cross-cell AI and mixed scene writes
+stay closed. Filters: `activities`, `story-activities`, `story-departure`.
 V77 requires established characters; V78 requires capabilities 6/36.
 Desktop captures emit race/head/hair/sex as `player_appearance_sample`;
 compare join/reentry/reconnect/restart. Creation has no body; wire/native fixtures are synthetic.

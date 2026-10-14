@@ -65,6 +65,16 @@ namespace TES3MP::Native
                 int disposition = 0; // Stock raw base; derived disposition clamps later.
                 bool operator==(const Npc&) const = default;
             };
+            struct Activity
+            {
+                bool escort = false, completed = false;
+                std::array<float, 3> destination{};
+                float destinationTimer = 2, followDistance = 450, walkSpeed = 0;
+                uint64_t tick = 0, steps = 0;
+                std::vector<char> actorImage; // Same placement/origin life; no store or new actor identity.
+                bool operator==(const Activity&) const = default;
+                void validate() const;
+            };
             MWScript::ExecutionContext last;
             uint64_t eventCursor = 0;
             SharedWorldScript::State runtime;
@@ -88,7 +98,8 @@ namespace TES3MP::Native
             uint64_t encounterLife = 0;
             bool encounterReturned = false; // Dormant outcome; origin and story receipts remain frozen.
             bool encounterEnabled = false; // Stock source Enable committed at safe return; never renews the story.
-            std::optional<Relocation> relocation; // Terminal inert pose; original placement/life, no new loot or actor simulation.
+            std::optional<Relocation> relocation; // Retained private pose; V89 inert, V94 activity frame. Same origin life, no store copy.
+            std::optional<Activity> activity;
             uint64_t clockTicks = 0; // Successful scheduled story steps only; no wait/offline/downtime catch-up.
             std::optional<SourceWait> sourceWait; // One bounded dependency; banks remain running and unchanged.
             uint64_t deathCursor = 0; // Source life, independent of dialogue/event ordinals.
@@ -129,7 +140,7 @@ namespace TES3MP::Native
         };
         PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false,
             bool banks = false, bool intents = false, bool returns = false, bool enables = false, bool relocations = false,
-            bool sourceWaits = false, bool lifeEvents = false, bool fairOpportunities = false);
+            bool sourceWaits = false, bool lifeEvents = false, bool fairOpportunities = false, bool activities = false);
         uint64_t campaign() const { return mCampaign; }
         bool scheduled() const { return mScheduled; }
         bool banks() const { return mBanks; }
@@ -142,6 +153,7 @@ namespace TES3MP::Native
         bool sourceWaits() const { return mSourceWaits; }
         bool lifeEvents() const { return mLifeEvents; }
         bool fairOpportunities() const { return mFairOpportunities; }
+        bool activities() const { return mActivities; }
         static uint64_t reservationOwner(const State&, uint64_t life);
         static const Instance::Relocation* relocation(const State&, uint64_t character);
         static uint64_t physicalScope(const State&, uint64_t character);
@@ -183,7 +195,7 @@ namespace TES3MP::Native
         bool mEnables = false;
         bool mRelocations = false;
         bool mSourceWaits = false;
-        bool mLifeEvents = false, mFairOpportunities = false;
+        bool mLifeEvents = false, mFairOpportunities = false, mActivities = false;
         std::vector<Interpreter::Program> mRestorations;
         struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
         std::vector<std::vector<ResultProgram>> mResults;

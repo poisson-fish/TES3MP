@@ -1,4 +1,5 @@
 #include "worldscript.hpp"
+#include "aiextensions.hpp"
 #include "transformationextensions.hpp"
 
 #include "interpretercontext.hpp"
@@ -330,6 +331,7 @@ namespace MWScript
         if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
         if (referenceState) Misc::installDisableOpcodes(interpreter);
         if (referenceState) Transformation::installPositionOpcodes(interpreter);
+        if (referenceState) Ai::installActivityOpcodes(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
         interpreter.run(program ? *program : mProgram, *context, MaximumExecutedInstructions, trace);
@@ -341,7 +343,7 @@ namespace MWScript
     }
 
     Interpreter::Program WorldScript::compileResult(std::string_view text, bool physical, const ESM::RefId& reference,
-        bool restoration, bool relocation) const
+        bool restoration, bool relocation, bool activity) const
     {
         require(mBank && text.size() <= MaximumSourceBytes && text.find('\0') == std::string_view::npos,
             "Dialogue result source exceeds bounds or lacks bank");
@@ -355,6 +357,8 @@ namespace MWScript
         if (restoration) Misc::registerEnableOpcodes(extensions);
         require(!relocation || (physical && !reference.empty()), "Relocation lacks bounded source");
         if (relocation) Transformation::registerPositionOpcodes(extensions);
+        require(!activity || (physical && !reference.empty()), "Activity lacks bounded source");
+        if (activity) Ai::registerActivityOpcodes(extensions);
         context.setExtensions(&extensions);
         std::string source = "begin " + std::string(mId.getRefIdString()) + "\n";
         for (const auto kind : {'s', 'l', 'f'})
@@ -367,7 +371,8 @@ namespace MWScript
         Compiler::Scanner scanner(errors, stream, &extensions);
         try { scanner.scan(parser); }
         catch (const Compiler::SourceException&) { throw std::invalid_argument("Invalid dialogue result: " + errors.first); }
-        require(errors.isGood() && !errors.countWarnings(), "Unsupported dialogue result instruction");
+        if (!errors.isGood() || errors.countWarnings())
+            throw std::invalid_argument("Invalid dialogue result: " + errors.first);
         // Result blocks cannot introduce or alter the actor's declarations.
         for (const char kind : {'s', 'l', 'f'})
             require(parser.getLocals().get(kind) == mDeclarations.get(kind), "Dialogue result changed declarations");

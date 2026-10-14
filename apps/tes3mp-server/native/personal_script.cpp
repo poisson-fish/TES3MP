@@ -39,6 +39,7 @@ namespace TES3MP::Native
         constexpr uint64_t IntentMagic = 0x3754535054335354;
         constexpr uint64_t SourceWaitMagic = 0x4454535054335354;
         constexpr uint64_t LifeEventMagic = 0x4554535054335354;
+        constexpr uint64_t ActivityMagic = 0x4754535054335354;
         constexpr uint64_t OpportunityMagic = 0x4654535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
@@ -332,9 +333,44 @@ namespace TES3MP::Native
         }
     }
 
+    namespace
+    {
+        void activity(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        {
+            word(bytes, bool(state.activity));
+            if (!state.activity) return;
+            const auto& a = *state.activity;
+            word(bytes, a.escort); word(bytes, a.completed);
+            for (float v : a.destination) word(bytes, std::bit_cast<uint32_t>(v));
+            word(bytes, std::bit_cast<uint32_t>(a.destinationTimer));
+            word(bytes, std::bit_cast<uint32_t>(a.followDistance));
+            word(bytes, std::bit_cast<uint32_t>(a.walkSpeed));
+            word(bytes, a.tick); word(bytes, a.steps); word(bytes, a.actorImage.size());
+            bytes.insert(bytes.end(), a.actorImage.begin(), a.actorImage.end());
+        }
+        void activity(Cursor& input, PersonalScripts::Instance* state)
+        {
+            const auto present = input.word(); require(present <= 1);
+            if (!present) return;
+            PersonalScripts::Instance::Activity a;
+            const auto escort = input.word(), complete = input.word(); require(escort <= 1 && complete <= 1);
+            a.escort = escort; a.completed = complete;
+            const auto real = [&] { const auto bits = input.word(); require(bits <= UINT32_MAX); return std::bit_cast<float>(uint32_t(bits)); };
+            for (auto& v : a.destination) v = real();
+            a.destinationTimer = real(); a.followDistance = real(); a.walkSpeed = real(); a.tick = input.word(); a.steps = input.word();
+            const auto size = input.word(); require(size <= 65536);
+            const auto image = input.take(size);
+            require(a.steps <= a.tick && (!a.steps || size) && (!a.completed || a.steps));
+            // Validate scalars on the preflight pass without allocating the physics image.
+            const auto steps = a.steps; const auto completed = a.completed;
+            a.steps = 0; a.completed = false; a.validate(); a.steps = steps; a.completed = completed;
+            if (state) { a.actorImage.assign(image.begin(), image.end()); state->activity = std::move(a); }
+        }
+    }
+
     PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
         bool scheduled, bool banks, bool intents, bool returns, bool enables, bool relocations, bool sourceWaits,
-        bool lifeEvents, bool fairOpportunities)
+        bool lifeEvents, bool fairOpportunities, bool activities)
         : mCampaign(campaign)
         , mDefinitions(std::move(definitions))
         , mScheduled(scheduled)
@@ -346,6 +382,7 @@ namespace TES3MP::Native
         , mSourceWaits(sourceWaits)
         , mLifeEvents(lifeEvents)
         , mFairOpportunities(fairOpportunities)
+        , mActivities(activities)
     {
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         size_t scripts = 0;
@@ -361,6 +398,7 @@ namespace TES3MP::Native
         require(!mSourceWaits || (mEncounters && mBanks && !mReturns && !mRelocations));
         require(!mLifeEvents || mSourceWaits);
         require(!mFairOpportunities || mLifeEvents);
+        require(!mActivities || (mRelocations && !mSourceWaits && !mReturns));
         mResults.resize(mDefinitions.size());
         for (size_t i = 0; i < mDefinitions.size(); ++i)
         {
@@ -427,7 +465,7 @@ namespace TES3MP::Native
                     if (dialogue.mType == ESM::Dialogue::Topic)
                         mResults[i].push_back({dialogue.mId, info.mId, entry.script->compileResult(info.mResultScript,
                             mEncounters && !mLifeEvents, mEncounters && !mLifeEvents ? entry.encounter->record : ESM::RefId{},
-                            false, mRelocations)});
+                            false, mRelocations && !mActivities, mActivities)});
                 }
             }
         }
@@ -587,6 +625,13 @@ namespace TES3MP::Native
         require(!mEnables || state.encounterEnabled == state.encounterReturned);
         require(!state.relocation || (mRelocations && state.encounterLife && !state.encounterEnabled));
         if (state.relocation) state.relocation->validate();
+        require(!state.activity || (mActivities && state.relocation && state.encounterLife && !state.encounterReturned));
+        require(!mActivities || bool(state.activity) == bool(state.encounterLife));
+        if (state.activity)
+        {
+            state.activity->validate();
+            Instance::Relocation target{state.relocation->origin, state.activity->destination, 0}; target.validate();
+        }
         if (state.encounterLife)
             require(std::ranges::any_of(state.npcs, [&](const auto& npc) {
                 return npc.reference == expected.encounter->reference && npc.life == state.encounterLife
@@ -674,6 +719,16 @@ namespace TES3MP::Native
                 ServerTick::initial(), CanonicalRevision::initial())).empty());
     }
 
+    void PersonalScripts::Instance::Activity::validate() const
+    {
+        require(std::ranges::all_of(destination, [](float v) { return std::isfinite(v) && std::abs(v) <= 1e6f; })
+            && std::isfinite(destinationTimer) && destinationTimer >= -1.f/30 && destinationTimer <= 2
+            && std::isfinite(followDistance) && followDistance >= 250 && followDistance <= 4096
+            && std::isfinite(walkSpeed) && walkSpeed >= 0 && walkSpeed <= 4096
+            && actorImage.size() <= 65536 && steps <= tick && (!steps || !actorImage.empty())
+            && (!completed || steps));
+    }
+
     std::vector<char> PersonalScripts::encode(const State& state) const
     {
         require(state.size() == mDefinitions.size());
@@ -683,7 +738,7 @@ namespace TES3MP::Native
             }));
         std::vector<char> bytes;
         word(bytes,
-            mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
+            mActivities ? ActivityMagic : mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
                 : mRelocations ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables   ? EncounterEnableMagic
                 : mReturns   ? EncounterReturnMagic
@@ -733,6 +788,7 @@ namespace TES3MP::Native
                         word(bytes, std::bit_cast<uint32_t>(state[i].relocation->yaw));
                     }
                 }
+                if (mActivities) activity(bytes, state[i]);
             }
         }
         require(bytes.size() <= MaximumImageBytes);
@@ -744,7 +800,7 @@ namespace TES3MP::Native
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
         require(input.word()
-            == (mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
+            == (mActivities ? ActivityMagic : mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
                 : mRelocations ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables      ? EncounterEnableMagic
                 : mReturns      ? EncounterReturnMagic
@@ -800,6 +856,7 @@ namespace TES3MP::Native
                         pose.yaw = real(); pose.validate();
                     }
                 }
+                if (mActivities) activity(preflight, nullptr);
             }
         }
         require(preflight.bytes.empty());
@@ -838,6 +895,7 @@ namespace TES3MP::Native
                     for (auto& value : entry.relocation->position) value = std::bit_cast<float>(uint32_t(input.word()));
                     entry.relocation->yaw = std::bit_cast<float>(uint32_t(input.word()));
                 }
+                if (mActivities) activity(input, &entry);
             }
             validate(entry, i); state.push_back(std::move(entry));
         }
@@ -1071,7 +1129,8 @@ namespace TES3MP::Native
                 MWScript::ExecutionContext expected;
                 MWWorld::Ptr source;
                 bool prepared = false, removed = false;
-                bool relocations = false;
+                bool relocations = false, activities = false;
+                std::optional<Instance::Activity> activity;
                 ESM::RefId cell;
                 std::array<float, 3> origin{};
                 std::optional<Instance::Relocation> relocation;
@@ -1081,13 +1140,27 @@ namespace TES3MP::Native
                     const std::array<float, 3>& xyz, float yaw, const ESM::RefId& destination) override
                 {
                     validate(execution, ptr);
-                    require(relocations && !removed && (destination.empty() || destination == cell));
+                    require(relocations && !activities && !removed && (destination.empty() || destination == cell));
                     Instance::Relocation pose{origin, xyz, yaw}; pose.validate();
                     if (!prepared) throw EncounterPreparationRequired{};
                     relocation = pose;
                     auto p = source.getRefData().getPosition();
                     std::copy(xyz.begin(), xyz.end(), p.pos); p.rot[2] = yaw;
                     source.getRefData().setPosition(p);
+                }
+                void aiTravel(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr,
+                    const std::array<float, 3>& destination, bool repeat, const ESM::RefId& follower, float duration) override
+                {
+                    validate(execution, ptr);
+                    require(activities && !repeat && duration == 0 && !removed && !relocation && !activity
+                        && (follower.empty() || follower == ESM::RefId::stringRefId("player")));
+                    Instance::Relocation target{origin, destination, 0}; target.validate();
+                    if (!prepared) throw EncounterPreparationRequired{};
+                    // The stock opcode supplies package arguments; stock completion/range
+                    // policy advances the durable continuation with detached navigation.
+                    activity.emplace(); activity->escort = !follower.empty(); activity->destination = destination;
+                    const auto& p = source.getRefData().getPosition();
+                    relocation = Instance::Relocation{origin, origin, p.rot[2]};
                 }
                 void enable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
                 { throw std::invalid_argument("Enable requires safe-return restoration admission"); }
@@ -1099,7 +1172,7 @@ namespace TES3MP::Native
                 void disable(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
                 {
                     validate(execution, ptr);
-                    require(!relocation); // Mixed physical outcomes need separate admission.
+                    require(!relocation && !activities); // Mixed physical outcomes need separate admission.
                     if (!prepared) throw EncounterPreparationRequired{};
                     removed = true;
                     source.getRefData().disable();
@@ -1134,7 +1207,7 @@ namespace TES3MP::Native
                 privateSource->getPtr().getCellRef() = origin.getCellRef();
                 privateSource->getPtr().getRefData().setPosition(origin.getRefData().getPosition());
                 scene.expected = runningExecution; scene.source = privateSource->getPtr(); scene.prepared = encounterPrepared;
-                scene.relocations = mRelocations; scene.cell = found->encounter->cell;
+                scene.relocations = mRelocations; scene.activities = mActivities; scene.cell = found->encounter->cell;
                 std::copy(std::begin(origin.getRefData().getPosition().pos), std::end(origin.getRefData().getPosition().pos), scene.origin.begin());
             }
 
@@ -1205,6 +1278,7 @@ namespace TES3MP::Native
                 require(dialogue.choices.empty()); // A removed speaker cannot own a pending choice.
                 state.encounterLife = execution.sourceLife;
                 state.relocation = scene.relocation;
+                state.activity = std::move(scene.activity);
             }
             if (scene.removed || scene.relocation || (npcStats && (ownedNpc != state.npcs.end() || npcStats->getBaseDisposition() != priorDisposition)))
             {

@@ -4,21 +4,20 @@
 [Host](../../apps/tes3mp-server/native/inventory_host.hpp): 60 Hz physics substeps;
 30 Hz authoritative commits. Preserve the working V77–85 migration base.
 
-**Accepted baseline:** M4 exploration/chargen/combat/lives/loot and V79 physics retain
-split/regroup/recovery.
+**Accepted baseline:** M4/V79 retain split/regroup/recovery.
 Owner acceptance: `build/m4-user-acceptance-player-v79-20261006-live-01/operator-acceptance.json`;
 impaired movement/recovery: `build/player-physics-desktop-{impaired-16,restart-04}/result.json`.
 TR remains appearance-only; scripts await M5 content proof.
 
-**M5 execution:** explicit stock contexts and bounded banks commit with gameplay;
+**M5 execution:** stock contexts/banks commit with gameplay;
 unavailable services reject/defer, offline schedules suspend, recovery is silent.
 V80 shared presentation and V85 authenticated paired dialogue have semantic desktop
 proof: `build/m5-ambient-desktop-{02,restart-01,ui-01}/result.json`,
 `build/m5-dialogue-desktop-{06,restart-02}/result.json`.
 
 **V85 dialogue:** capability 40 authenticates speakers/choices. Detached stock filters,
-private relationships, substitutions and journal text/calendar commit with banks;
-clients install private views silently. Stats accepted,
+private relationships, substitutions and journal text/calendar commit with banks.
+Stats accepted,
 2026-10-07: `build/m5-dialogue-ui-01/agent-signoff.json` and
 `build/logs/m5-dialogue-operator-restart-01.log`. Substitution/disposition/journal visual
 acceptance remains open. NPC relationships/atomic recovery:
@@ -53,17 +52,23 @@ newer lives resume once. Rejection/restart/stale-life/continuation:
 history only with bank/gameplay durability. Own/pre-quest credit, foreign/helper
 exclusion, stale-life rejection and retry/restart pass. V93 retains the oldest
 wait's next canonical opportunity until eligible credit; repeated foreign attacks
-cannot consume B's life. No new loot/lives. Authority-snapshot helper/summon/environment
-checks do not admit live enrollment/summons.
+cannot consume B's life. No new loot/lives. Live enrollment/summons remain closed.
 Native: `build/logs/m5-life-event-{state,host-03,stock}.log`,
 `build/logs/m5-opportunity-{state,host-03}.log`.
 
-**Health/wait UI:** stock source reads retain staged stats and bank/cursor/clock rollback.
+**Health/wait UI:** staged health reads preserve bank/cursor/clock rollback.
 Atomic retry/restart: `build/logs/m5-health-{state-final,host-03}.log`;
 client receipts: `build/logs/m5-wait-adapter.log`.
 Synthetic two-desktop V92–93 waiting/reserved/earned recovery:
 `build/m5-wait-v{92,93}-restart-credit-01/result.json`.
 
-**Next:** bounded escort/departure activities under the
-[contract](DECISIONS.md#m5-implementation-contract), then unchanged Seyda Neen/TR proofs.
-M5 stays open.
+**V94:** stock escort/travel; A/B independently arrive. Durable scopes, offline
+suspension and failed writes/restart preserve original lives/loot.
+Native: `build/logs/m5-{activity-host,departure-host}-final.log`,
+`build/logs/m5-activity-state-final.log`.
+
+**Next:** source CellChanged/MenuMode/activation and NPC-bank continuation, then
+provenance-based ring transfers. Unchanged Seyda Neen/TR (Duel of Riddles) completion
+remains blocked. Source/result preflights: `build/logs/m5-{seyda,tr}-quest-preflight.log`;
+routines: `build/logs/m5-seyda-content-preflight-final.log`.
+Banks/package replacement/cross-cell AI remain closed; M5 stays open.

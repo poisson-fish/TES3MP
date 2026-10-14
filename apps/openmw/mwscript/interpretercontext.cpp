@@ -254,6 +254,13 @@ namespace MWScript
             throw std::runtime_error("Script service lacks scoped transaction");
     }
 
+    void InterpreterContext::aiTravel(const MWWorld::Ptr& reference, const std::array<float, 3>& destination,
+        bool repeat, const ESM::RefId& follower, float duration) const
+    {
+        if (!mExecution || !mReferenceState) throw std::invalid_argument("AI package lacks staged activity scope");
+        mReferenceState->aiTravel(*mExecution, reference, destination, repeat, follower, duration);
+    }
+
     const ESM::Position& InterpreterContext::position(const MWWorld::Ptr& reference) const
     {
         if (!mExecution) return reference.getRefData().getPosition();

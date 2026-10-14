@@ -50,6 +50,9 @@ namespace MWMechanics
 
         std::optional<float> getDuration() const override { return mDuration; }
 
+        static bool followerInRange(const osg::Vec3f& leader, const osg::Vec3f& follower, float maxDistance);
+        static float followDistance(float maxHalfExtent, bool moving);
+
     private:
         const std::string mCellId;
         const float mX;

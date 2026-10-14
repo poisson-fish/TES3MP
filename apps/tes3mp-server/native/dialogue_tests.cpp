@@ -1,4 +1,5 @@
 #include "personal_script.hpp"
+#include <apps/openmw/mwscript/aiextensions.hpp>
 #include <apps/openmw/mwgui/referenceinterface.hpp>
 #include <apps/openmw/mwbase/environment.hpp>
 #include <apps/openmw/mwclass/classes.hpp>
@@ -1441,6 +1442,98 @@ namespace
             "A removes privately, B completes independently; late failure/waits, bound receipts and silent exact restart\n";
     }
 
+    void activities(CredentialCrypto& crypto)
+    {
+        for (const bool escort : {false, true})
+        {
+            Fixture fixture(crypto, {}, true);
+            for (auto& definition : fixture.definitions)
+            {
+                definition.encounter = PersonalScripts::EncounterBinding{41, id("speaker_r29"), id("room_e87")};
+                definition.dialogues[1].mInfo.front().mResultScript = "set calls to calls + 1\nJournal journey_t37 20\n"
+                    + std::string(escort ? "speaker_r29->AiEscort player 0 200 -32 1" : "AiTravel 200 -32 1")
+                    + "\nMessageBox \"Journey started\"";
+            }
+            PersonalScripts runtime(7, fixture.definitions, crypto, true, true, true, false, false, true, false, false, false, true);
+            Resolver resolver; resolver.actor = fixture.actor.getPtr();
+            MWWorld::ManualRef player(fixture.content, id("speaker_r29")); resolver.player = player.getPtr();
+            const auto run = [&](const PersonalScripts& policy, const PersonalScripts::State& before, uint64_t character, size_t budget = 16) {
+                const auto& state = before[character == 11 ? 0 : 1];
+                resolver.expected = state.last; ++resolver.expected.invocation;
+                resolver.expected.causalEvent = state.eventCursor + 1; resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 3;
+                return policy.prepareIntent(before, character, 101, {31, 41, 3, state.dialogueRevision, "passage_k61", -1},
+                    "Room", fixture.content, resolver, budget, nullptr, {}, nullptr, JournalDate);
+            };
+            const auto initial = runtime.initial(); const auto original = runtime.encode(initial);
+            const auto alice = run(runtime, initial, 11);
+            require(alice.result.executed && alice.invocations == 2 && alice.state[0].activity
+                && alice.state[0].activity->escort == escort && !alice.state[0].activity->completed
+                && alice.state[0].activity->destination == std::array<float, 3>{200, -32, 1}
+                && calls(alice.state[0].runtime) == 1 && !alice.state[1].activity
+                && PersonalScripts::physicalScope(alice.state, 11) == 2 && PersonalScripts::physicalScope(alice.state, 22) == 1
+                && alice.state[0].relocation->position == alice.state[0].relocation->origin
+                && runtime.encode(initial) == original,
+                ("Stock activity discovery/retry mutated public source, advanced twice, or consumed B's opportunity: " + alice.result.diagnostic).c_str());
+            const auto restored = runtime.restore(alice.image);
+            require(runtime.encode(restored) == alice.image && run(runtime, restored, 22).result.executed,
+                "Activity recovery lost A's package or B's original opportunity");
+            const auto duplicate = runtime.prepareIntent(restored, 11, 101, {31, 41, 3, 0, "passage_k61", -1}, "Room", fixture.content, resolver);
+            require(!duplicate.result.executed && duplicate.result.outcome == SharedWorldScript::Outcome::Committed
+                && duplicate.result.presentation.empty(), "Activity recovery replayed departure");
+            require(run(runtime, initial, 11, 1).result.outcome == SharedWorldScript::Outcome::Rejected,
+                "Activity discovery escaped the retry budget");
+            for (const std::string result : {"AiTravel 5000 0 0", "player->AiTravel 200 -32 1", "AiEscort speaker_r29 0 200 -32 1",
+                "AiEscort player 1 200 -32 1", "AiTravel 200 -32 1 1", "AiTravel 200 -32 1\nDisable",
+                "AiTravel 200 -32 1\nAiTravel 200 -32 1", "AiTravel 200 -32 1\nGoodbye"})
+            {
+                auto definitions = fixture.definitions;
+                for (auto& definition : definitions) definition.dialogues[1].mInfo.front().mResultScript = "set calls to calls + 1\nJournal journey_t37 20\n" + result;
+                PersonalScripts invalid(7, definitions, crypto, true, true, true, false, false, true, false, false, false, true);
+                const auto attempt = run(invalid, invalid.initial(), 11);
+                require(attempt.result.outcome == SharedWorldScript::Outcome::Rejected && attempt.state.empty()
+                    && attempt.image.empty() && attempt.result.presentation.empty(), "Unbounded/mixed/foreign or late-failed activity leaked state");
+            }
+            // Full stock opcode installation must retain staged ownership and never fall through to World.
+            struct Writer final : MWScript::ReferenceState
+            {
+                MWScript::ExecutionContext expected;
+                MWWorld::Ptr source;
+                size_t calls = 0;
+                void enable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override { throw std::invalid_argument("Enable closed"); }
+                void disable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override { throw std::invalid_argument("Disable closed"); }
+                bool disabled(const MWScript::ExecutionContext&, const MWWorld::Ptr&) const override { return false; }
+                void aiTravel(const MWScript::ExecutionContext& context, const MWWorld::Ptr& ptr,
+                    const std::array<float, 3>& destination, bool repeat, const ESM::RefId& follower, float duration) override
+                {
+                    require(context == expected && ptr == source && !repeat && duration == 0
+                        && destination == std::array<float, 3>{200, -32, 1}
+                        && (follower.empty() || follower == id("player")), "Full stock AI escaped the staged writer");
+                    ++calls;
+                }
+            } writer;
+            resolver.expected = restored[0].last; writer.expected = resolver.expected; writer.source = resolver.actor;
+            MWScript::InterpreterContext owned(nullptr, resolver.expected, fixture.content, resolver,
+                nullptr, nullptr, nullptr, nullptr, &writer);
+            MWScript::InterpreterContext unowned(nullptr, resolver.expected, fixture.content, resolver);
+            Interpreter::Interpreter interpreter; Interpreter::installOpcodes(interpreter); MWScript::Ai::installOpcodes(interpreter);
+            const std::string operation = escort ? "AiEscort player 0 200 -32 1" : "AiTravel 200 -32 1";
+            for (const std::string prefix : {std::string{}, std::string("speaker_r29->")})
+            {
+                const auto program = fixture.definitions[0].script->compileResult(prefix + operation, true, id("speaker_r29"), false, false, true);
+                interpreter.run(program, owned, 32);
+                rejects([&] { interpreter.run(program, unowned, 32); }, "Full stock AI bypassed missing ownership");
+            }
+            const auto foreign = fixture.definitions[0].script->compileResult("player->" + operation, true, id("speaker_r29"), false, false, true);
+            rejects([&] { interpreter.run(foreign, owned, 32); }, "Full stock AI accepted a foreign player source");
+            require(writer.calls == 2, "Rejected stock calls installed an AI package");
+            auto invalid = restored; invalid[0].activity->destinationTimer = std::numeric_limits<float>::infinity();
+            rejects([&] { runtime.encode(invalid); }, "Nonfinite AI continuation accepted");
+            for (size_t size = 0; size < alice.image.size(); ++size)
+                rejects([&] { runtime.restore(std::span(alice.image).first(size)); }, "Truncated activity restored");
+        }
+        std::cout << "activities: stock implicit/named AiTravel/AiEscort; discovery rollback/retry; bounds, late failure, isolated opportunity, exact silent restart\n";
+    }
+
     void relocation(CredentialCrypto& crypto, bool returning = false)
     {
         Fixture fixture(crypto, {}, true);
@@ -2060,6 +2153,7 @@ int main(int argc, char** argv)
         else if (filter == "npc-state") disposition(*crypto, true);
         else if (filter == "encounter") encounter(*crypto);
         else if (filter == "enable") encounter(*crypto, true);
+        else if (filter == "activities") activities(*crypto);
         else if (filter == "relocation") relocation(*crypto);
         else if (filter == "relocation-return") relocation(*crypto, true);
         else if (filter == "source-waits") sourceWaits(*crypto);

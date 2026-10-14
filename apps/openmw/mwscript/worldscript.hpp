@@ -53,7 +53,7 @@ namespace MWScript
         bool bankCapable() const { return mBank; }
         const ESM::RefId& sourceRecord() const { return mSource; }
         Interpreter::Program compileResult(std::string_view source, bool physical = false,
-            const ESM::RefId& reference = {}, bool restoration = false, bool relocation = false) const;
+            const ESM::RefId& reference = {}, bool restoration = false, bool relocation = false, bool activity = false) const;
         State initial() const;
         void validate(const State& state) const;
         Invocation execute(const State& before, Interpreter::ExecutionTrace* trace = nullptr) const;

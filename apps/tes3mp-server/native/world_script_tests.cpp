@@ -6,6 +6,8 @@
 #include <components/esm3/loadnpc.hpp>
 
 #include <algorithm>
+#include <charconv>
+#include <sstream>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -491,10 +493,90 @@ namespace
                 ++rejected;
                 std::cout << "excluded actor=" << name << " script=" << npc->mScript << " reason="
                     << std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes) << '\n';
+                const std::string_view diagnostic(error.what());
+                const auto at = diagnostic.find(": line ");
+                if (at != std::string_view::npos)
+                {
+                    unsigned line = 0;
+                    const auto parsed = std::from_chars(diagnostic.data() + at + 7, diagnostic.data() + diagnostic.size(), line);
+                    if (parsed.ec == std::errc{} && line && line <= MWScript::WorldScript::MaximumSourceBytes)
+                    {
+                        std::istringstream source(record->mScriptText); std::string instruction;
+                        for (unsigned i = 0; i < line && std::getline(source, instruction); ++i) {}
+                        std::cout << "first-rejected-source-line=" << line << " instruction="
+                            << std::string_view(instruction).substr(0, SharedWorldScript::MaximumDiagnosticBytes) << '\n';
+                    }
+                }
             }
             require(accepted == (std::string_view(name) == "fargoth"), "Stock script admission classification changed");
         }
         require(admitted == 1 && rejected == 3, "Excluded stock script coverage differs");
+    }
+
+    // These are admission preflights, not completed quests. Read winning,
+    // unchanged content and assert the first unavailable transaction service;
+    // never rewrite a quest or silently skip its owning NPC script.
+    void questContent(CredentialCrypto& crypto, const char* config, bool tr)
+    {
+        const char* args[]{"quest-content-test", "--config", config};
+        Loadout loadout(readLoadoutOptions(3, args));
+        const auto content = loadout.contentFingerprint();
+        const auto id = [](std::string_view name) { return ESM::RefId::stringRefId(name); };
+        const auto blocked = [](auto&& operation, std::string_view expected, std::string_view context)
+        {
+            std::string diagnostic;
+            try { operation(); }
+            catch (const std::invalid_argument& error) { diagnostic = error.what(); }
+            std::cout << "BLOCKED " << context << " reason="
+                << std::string_view(diagnostic).substr(0, SharedWorldScript::MaximumDiagnosticBytes) << '\n';
+            require(!diagnostic.empty() && diagnostic.find(expected) != std::string::npos,
+                "Unchanged quest admission boundary changed; inspect its owning source");
+        };
+        if (tr)
+        {
+            const auto* npc = loadout.store().get<ESM::NPC>().find(id("TR_m1_T_Eldale"));
+            require(npc->mScript == id("TR_m1_T_EldaleSc"), "TR riddles owning NPC script changed");
+            const auto* record = loadout.store().get<ESM::Script>().find(npc->mScript);
+            const std::vector<ESM::Script> bank{*record,
+                *loadout.store().get<ESM::Script>().find(id("TR_m0_TelvanniHortDeathSc")),
+                *loadout.store().get<ESM::Script>().find(id("TR_m1_HT_UnseatingDralSc"))};
+            const std::vector<ESM::Global> owned{*loadout.store().get<ESM::Global>().find(id("TR_m1_HT_EldaleDead"))};
+            const auto* quest = loadout.store().get<ESM::Dialogue>().find(id("TR_M1_GS_MQ_4"));
+            const auto* topic = loadout.store().get<ESM::Dialogue>().find(id("puzzling riddles"));
+            require(quest->mType == ESM::Dialogue::Journal && topic->mType == ESM::Dialogue::Topic
+                && std::ranges::any_of(quest->mInfo, [](const auto& info) {
+                    return info.mData.mJournalIndex == 50 && info.mQuestStatus == ESM::DialInfo::QS_Finished;
+                }) && std::ranges::any_of(topic->mInfo, [&](const auto& info) {
+                    return info.mActor == npc->mId && info.mResultScript.find("TR_M1_GS_MQ_4 50") != std::string::npos;
+                }), "Unchanged TR riddles completion branch missing");
+            blocked([&] { SharedWorldScript runtime(*record, owned, content, crypto, bank, npc->mId, true); },
+                "line 18", "TR Duel of Riddles source-bank (GetJournalIndex)");
+        }
+        else
+        {
+            const auto* npc = loadout.store().get<ESM::NPC>().find(id("fargoth"));
+            const auto* record = loadout.store().get<ESM::Script>().find(npc->mScript);
+            const std::vector<ESM::Script> bank{*record};
+            SharedWorldScript runtime(*record, {}, content, crypto, bank);
+            const auto* quest = loadout.store().get<ESM::Dialogue>().find(id("MS_FargothRing"));
+            const auto* topic = loadout.store().get<ESM::Dialogue>().find(id("ring"));
+            require(quest->mType == ESM::Dialogue::Journal && topic->mType == ESM::Dialogue::Topic,
+                "Unchanged Seyda Neen ring records missing");
+            const auto finish = std::ranges::find_if(topic->mInfo, [&](const auto& info) {
+                return info.mActor == npc->mId && info.mResultScript.find("MS_FargothRing 100") != std::string::npos;
+            });
+            require(finish != topic->mInfo.end(), "Unchanged ring completion branch missing");
+            const auto unchanged = runtime.encode(runtime.initial());
+            blocked([&] { (void)runtime.compileResult(finish->mResultScript, true, npc->mId); },
+                "line 4", "Seyda Neen ring completion (AddItem/RemoveItem)");
+            require(runtime.encode(runtime.initial()) == unchanged, "Rejected stock quest changed script state");
+            const auto* departure = loadout.store().get<ESM::NPC>().find(id("vodunius nuccius"));
+            const auto* departureScript = loadout.store().get<ESM::Script>().find(departure->mScript);
+            const std::vector<ESM::Script> departureBank{*departureScript};
+            blocked([&] { SharedWorldScript source(*departureScript, {}, content, crypto, departureBank,
+                departure->mId); }, "line 2", "Seyda Neen departure source-bank (CellChanged)");
+        }
+        std::cout << "Quest completion remains open; no journal/reward/source life was executed or copied\n";
     }
 }
 
@@ -506,6 +588,8 @@ int main(int argc, char** argv)
         auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "content" && argc == 3) content(*crypto, argv[2]);
+        else if (filter == "quest-content" && argc == 3) questContent(*crypto, argv[2], false);
+        else if (filter == "tr-quest-content" && argc == 3) questContent(*crypto, argv[2], true);
         else if (filter == "shared" && argc == 2) shared(*crypto);
         else if (filter == "rollback") rollback(*crypto);
         else if (filter == "recovery") recovery(*crypto);

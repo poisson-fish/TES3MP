@@ -99,7 +99,7 @@ namespace TES3MP::Native
             };
             std::string version; in >> version;
             unsigned descriptorVersion = 0;
-            for (unsigned candidate = 3; candidate <= 93; ++candidate)
+            for (unsigned candidate = 3; candidate <= 94; ++candidate)
                 if (version == "native-inventory-" + std::to_string(candidate)) descriptorVersion = candidate;
             if (version == "native-inventory-56c") descriptorVersion = 56;
             if (!descriptorVersion) throw std::invalid_argument("Native inventory descriptor version incompatible");
@@ -1189,7 +1189,7 @@ namespace TES3MP::Native
                     }
                     if (start.text.starts_with("native-inventory-86\n") || start.text.starts_with("native-inventory-87\n")
                         || start.text.starts_with("native-inventory-88\n") || start.text.starts_with("native-inventory-89\n")
-                        || start.text.starts_with("native-inventory-90\n") || sourceWaits)
+                        || start.text.starts_with("native-inventory-90\n") || start.text.starts_with("native-inventory-94\n") || sourceWaits)
                     {
                         const auto& binding = start.binding;
                         if (!binding.mNavigatingActor || binding.worldDomains().size() != 1
@@ -1216,15 +1216,16 @@ namespace TES3MP::Native
                             || start.text.starts_with("native-inventory-87\n") || start.text.starts_with("native-inventory-88\n")
                             || start.text.starts_with("native-inventory-89\n") || start.text.starts_with("native-inventory-90\n")
                             || start.text.starts_with("native-inventory-91\n") || start.text.starts_with("native-inventory-92\n")
-                            || start.text.starts_with("native-inventory-93\n")),
+                            || start.text.starts_with("native-inventory-93\n") || start.text.starts_with("native-inventory-94\n")),
                         (start.text.starts_with("native-inventory-87\n") || start.text.starts_with("native-inventory-88\n")
                             || start.text.starts_with("native-inventory-90\n")),
                         start.text.starts_with("native-inventory-88\n"),
-                        (start.text.starts_with("native-inventory-89\n") || start.text.starts_with("native-inventory-90\n")),
+                        (start.text.starts_with("native-inventory-89\n") || start.text.starts_with("native-inventory-90\n")
+                            || start.text.starts_with("native-inventory-94\n")),
                         start.text.starts_with("native-inventory-91\n") || start.text.starts_with("native-inventory-92\n")
                             || start.text.starts_with("native-inventory-93\n"),
                         start.text.starts_with("native-inventory-92\n") || start.text.starts_with("native-inventory-93\n"),
-                        start.text.starts_with("native-inventory-93\n"));
+                        start.text.starts_with("native-inventory-93\n"), start.text.starts_with("native-inventory-94\n"));
             }
             if (start.binding.mSummons)
             {
