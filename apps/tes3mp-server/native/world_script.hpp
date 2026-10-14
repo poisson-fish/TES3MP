@@ -67,13 +67,14 @@ namespace TES3MP::Native
             const MWWorld::ESMStore& content, const MWScript::ReferenceResolver& resolver) const;
         Prepared prepareBank(const State&, const MWScript::ExecutionContext&, const MWWorld::ESMStore&,
             const MWScript::ReferenceResolver&, MWScript::ScriptState&, MWScript::GlobalScriptDesc&,
-            MWScript::ReferenceState* = nullptr) const;
+            MWScript::ReferenceState* = nullptr, MWScript::DialogueState* = nullptr) const;
         Result transact(State& committed, uint64_t tick, const DurableSink& persist) const;
 
     private:
         Prepared prepareImpl(const State&, uint64_t, const MWScript::ExecutionContext*,
             const MWWorld::ESMStore*, const MWScript::ReferenceResolver*, MWScript::ScriptState* = nullptr,
-            MWScript::GlobalScriptDesc* = nullptr, MWScript::ReferenceState* = nullptr) const;
+            MWScript::GlobalScriptDesc* = nullptr, MWScript::ReferenceState* = nullptr,
+            MWScript::DialogueState* = nullptr) const;
         MWScript::WorldScript mRuntime;
         CredentialDigest mIdentity;
     };

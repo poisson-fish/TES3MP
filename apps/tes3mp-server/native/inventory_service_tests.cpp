@@ -6309,7 +6309,7 @@ namespace TES3MP::Native::Testing
                         script.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n"
                             + (lifeEvents ? "long deaths\n" : "")
                             + (healthReads ? "float health\nfloat ratio\n" : "")
-                            + (npcBanks ? "float posx\nfloat posy\nfloat yaw\n" : "")
+                            + (npcBanks ? "long stage\nfloat posx\nfloat posy\nfloat yaw\n" : "")
                             + (sourceWaits ? name == "ledger_x73"
                                 ? "set calls to calls + 1\nset phase to phase + GetSecondsPassed\n"
                                   "set ambient_counter_83 to ambient_counter_83 + 1\nset relay_q19.calls to relay_q19.calls + 7\n"
@@ -6321,8 +6321,11 @@ namespace TES3MP::Native::Testing
                                 ? "set health to GetHealth\nset ratio to GetHealthGetRatio\n"
                                 : "set health to npc_door_actor->GetHealth\nset ratio to npc_door_actor->GetHealthGetRatio\n" : "")
                             + (npcBanks ? name == "ledger_x73"
-                                ? "set posx to GetPos x\nset posy to GetPos y\nset yaw to GetAngle z\n"
-                                : "set posx to npc_door_actor->GetPos x\nset posy to npc_door_actor->GetPos y\nset yaw to npc_door_actor->GetAngle z\n" : "")
+                                ? "if ( MenuMode == 1 )\nreturn\nendif\nif ( GetPCSleep == 1 )\nreturn\nendif\n"
+                                  "if ( CellChanged == 1 )\nreturn\nendif\nset stage to GetJournalIndex \"journey_t37\"\n"
+                                  "set posx to GetPos x\nset posy to GetPos y\nset yaw to GetAngle z\n"
+                                : "set stage to GetJournalIndex \"journey_t37\"\n"
+                                  "set posx to npc_door_actor->GetPos x\nset posy to npc_door_actor->GetPos y\nset yaw to npc_door_actor->GetAngle z\n" : "")
                             + "\nend " + name;
                         out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
                     }
@@ -10074,8 +10077,11 @@ namespace TES3MP::Native::Testing
                                 && number(initialActivity.members[0], "posx") == initialActivity.relocation->position[0]
                                 && number(initialActivity.members[0], "posy") == initialActivity.relocation->position[1]
                                 && number(initialActivity.runtime, "health") > 0 && number(initialActivity.runtime, "ratio") == 1.f
-                                && number(initialActivity.members[0], "health") == number(initialActivity.runtime, "health"),
-                                "Relocated/escorting NPC bank did not read its own private pose and living stats");
+                                && number(initialActivity.members[0], "health") == number(initialActivity.runtime, "health")
+                                && number(initialActivity.runtime, "stage") == 10.f
+                                && number(initialActivity.members[0], "stage") == 10.f
+                                && number(state(resumed)[1].runtime, "stage") == 0.f,
+                                "Relocated/escorting NPC bank did not read its own private pose, journal stage, and living stats");
                         std::vector<CanonicalSessionProgress> remaining;
                         for (const auto& session : authority.activeSessions()) if (session.playerId() == id<PlayerId>(2)) remaining.push_back(session);
                         const auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), remaining));
@@ -10184,6 +10190,7 @@ namespace TES3MP::Native::Testing
                             && alice(bobOwner).relocation == arrived.relocation
                             && (!npcBanks || (number(state(bobOwner)[1].runtime, "posx") == state(bobOwner)[1].relocation->position[0]
                                 && number(state(bobOwner)[1].members[0], "posx") == state(bobOwner)[1].relocation->position[0]
+                                && number(state(bobOwner)[1].runtime, "stage") == 10.f
                                 && number(alice(bobOwner).runtime, "posx") == arrived.relocation->position[0])),
                             "B could not finish independently or A's destination/bank reset");
                         std::cout << (npcBanks ? "story npc banks host: stock AiEscort player + private bank/member continuation, GetSecondsPassed, GetPos/GetAngle, GetHealth/GetHealthGetRatio; "

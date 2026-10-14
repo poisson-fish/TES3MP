@@ -2,6 +2,7 @@
 
 #include <limits>
 
+#include <components/compiler/extensions.hpp>
 #include <components/compiler/opcodes.hpp>
 
 #include <components/interpreter/context.hpp>
@@ -23,6 +24,8 @@
 
 #include "../mwmechanics/actorutil.hpp"
 
+#include "interpretercontext.hpp"
+
 namespace MWScript
 {
     namespace Cell
@@ -32,7 +35,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                runtime.push(MWBase::Environment::get().getWorldScene()->hasCellChanged() ? 1 : 0);
+                runtime.push(static_cast<InterpreterContext&>(runtime.getContext()).cellChanged() ? 1 : 0);
             }
         };
 
@@ -244,9 +247,19 @@ namespace MWScript
             }
         };
 
-        void installOpcodes(Interpreter::Interpreter& interpreter)
+        void registerStateOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerFunction("cellchanged", 'l', "", Compiler::Cell::opcodeCellChanged);
+        }
+
+        void installStateOpcodes(Interpreter::Interpreter& interpreter)
         {
             interpreter.installSegment5<OpCellChanged>(Compiler::Cell::opcodeCellChanged);
+        }
+
+        void installOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            installStateOpcodes(interpreter);
             interpreter.installSegment5<OpTestCells>(Compiler::Cell::opcodeTestCells);
             interpreter.installSegment5<OpTestInteriorCells>(Compiler::Cell::opcodeTestInteriorCells);
             interpreter.installSegment5<OpCOC>(Compiler::Cell::opcodeCOC);

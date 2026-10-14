@@ -973,6 +973,8 @@ namespace TES3MP::Native
             prepared.state = before;
             auto& state = prepared.state[index];
             const auto& definition = mDefinitions[index];
+            std::optional<MWScript::DialogueState> dialogue;
+            if (mDialogues) dialogue.emplace(execution, state.dialogue, definition.dialogues, mIntents);
             Bank bank(execution, definition, state);
             const auto& scripts = bank.scripts;
             for (size_t i = 0; i < scripts.size(); ++i)
@@ -987,7 +989,8 @@ namespace TES3MP::Native
                 input.runtime.script.mLocals.mVariables.clear();
                 require(descriptor.mLocals.write(input.runtime.script.mLocals, scripts[i]->declarations()));
                 ++prepared.invocations;
-                auto invocation = scripts[i]->prepareBank(input, execution, content, resolver, bank, descriptor, referenceState);
+                auto invocation = scripts[i]->prepareBank(input, execution, content, resolver, bank, descriptor,
+                    referenceState, dialogue ? &*dialogue : nullptr);
                 result = std::move(invocation.result); result.presentation.clear();
                 if (result.outcome != SharedWorldScript::Outcome::Committed || !result.executed)
                 { prepared.state.clear(); if (!result.sourceWait) prepared.invocations = 0; result.executed = false; return prepared; }
@@ -1581,6 +1584,31 @@ namespace TES3MP::Native
                     const float value = ratio ? health.getRatio(false) : health.getCurrent();
                     require(std::isfinite(value));
                     return value;
+                }
+                void validateScope(const MWScript::ExecutionContext& execution) const
+                {
+                    require(execution.physicalScope == expectedScope && execution.sourceReference == source.reference
+                        && execution.sourceLife == expectedLife);
+                    if (!privateScope && !source.living && !ownDeath(execution.character) && !eligible(execution.character))
+                    {
+                        require(events || (source.killer && (source.killerKind == 1 || source.killerKind == 2)));
+                        throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
+                    }
+                }
+                bool cellChanged(const MWScript::ExecutionContext& execution) const override
+                {
+                    validateScope(execution);
+                    return source.cellChanged && (!source.cellChangedCharacter || source.cellChangedCharacter == execution.character);
+                }
+                bool menuMode(const MWScript::ExecutionContext& execution) const override
+                {
+                    validateScope(execution);
+                    return false;
+                }
+                bool playerSleeping(const MWScript::ExecutionContext& execution) const override
+                {
+                    validateScope(execution);
+                    return source.sleeping && (!source.sleepingCharacter || source.sleepingCharacter == execution.character);
                 }
             };
             std::unique_ptr<SourceResolver> sourceResolver;

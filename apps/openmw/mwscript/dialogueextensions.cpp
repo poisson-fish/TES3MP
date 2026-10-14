@@ -355,12 +355,22 @@ namespace MWScript
             }
         };
 
+        void registerJournalQueryOpcode(Compiler::Extensions& extensions)
+        {
+            extensions.registerFunction("getjournalindex", 'l', "c", Compiler::Dialogue::opcodeGetJournalIndex);
+        }
+
+        void installJournalQueryOpcode(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpGetJournalIndex>(Compiler::Dialogue::opcodeGetJournalIndex);
+        }
+
         void installJournalOpcodes(Interpreter::Interpreter& interpreter)
         {
             interpreter.installSegment5<OpJournal<ImplicitRef>>(Compiler::Dialogue::opcodeJournal);
             interpreter.installSegment5<OpJournal<ExplicitRef>>(Compiler::Dialogue::opcodeJournalExplicit);
             interpreter.installSegment5<OpSetJournalIndex>(Compiler::Dialogue::opcodeSetJournalIndex);
-            interpreter.installSegment5<OpGetJournalIndex>(Compiler::Dialogue::opcodeGetJournalIndex);
+            installJournalQueryOpcode(interpreter);
             interpreter.installSegment5<OpAddTopic>(Compiler::Dialogue::opcodeAddTopic);
             interpreter.installSegment3<OpChoice>(Compiler::Dialogue::opcodeChoice);
         }

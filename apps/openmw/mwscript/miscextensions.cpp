@@ -157,7 +157,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                runtime.push(MWBase::Environment::get().getWindowManager()->isGuiMode());
+                runtime.push(static_cast<InterpreterContext&>(runtime.getContext()).menuMode());
             }
         };
 
@@ -299,7 +299,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                runtime.push(MWBase::Environment::get().getWindowManager()->getPlayerSleeping());
+                runtime.push(static_cast<InterpreterContext&>(runtime.getContext()).playerSleeping());
             }
         };
 
@@ -1813,6 +1813,8 @@ namespace MWScript
         {
             extensions.registerFunction("getdisabled", 'l', "x", Compiler::Misc::opcodeGetDisabled, Compiler::Misc::opcodeGetDisabledExplicit);
             extensions.registerFunction("getsecondspassed", 'f', "", Compiler::Misc::opcodeGetSecondsPassed);
+            extensions.registerFunction("menumode", 'l', "", Compiler::Misc::opcodeMenuMode);
+            extensions.registerFunction("getpcsleep", 'l', "", Compiler::Misc::opcodeGetPcSleep);
         }
 
         void installSourceWaitOpcodes(Interpreter::Interpreter& interpreter, bool queries)
@@ -1823,6 +1825,8 @@ namespace MWScript
                 interpreter.installSegment5<OpGetDisabled<ExplicitRef>>(Compiler::Misc::opcodeGetDisabledExplicit);
             }
             interpreter.installSegment5<OpGetSecondsPassed>(Compiler::Misc::opcodeGetSecondsPassed);
+            interpreter.installSegment5<OpMenuMode>(Compiler::Misc::opcodeMenuMode);
+            interpreter.installSegment5<OpGetPcSleep>(Compiler::Misc::opcodeGetPcSleep);
         }
 
         void registerEnableOpcodes(Compiler::Extensions& extensions)

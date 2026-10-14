@@ -1,5 +1,6 @@
 #include "worldscript.hpp"
 #include "aiextensions.hpp"
+#include "cellextensions.hpp"
 #include "transformationextensions.hpp"
 
 #include "interpretercontext.hpp"
@@ -232,9 +233,14 @@ namespace MWScript
         if (mBank)
         {
             Misc::registerScriptOpcodes(extensions);
-            if (!mSource.empty()) Misc::registerSourceWaitOpcodes(extensions);
-            if (!mSource.empty()) Stats::registerHealthOpcodes(extensions);
-            if (!mSource.empty()) Transformation::registerPositionOpcodes(extensions, false);
+            Dialogue::registerJournalQueryOpcode(extensions);
+            if (!mSource.empty())
+            {
+                Misc::registerSourceWaitOpcodes(extensions);
+                Cell::registerStateOpcodes(extensions);
+                Stats::registerHealthOpcodes(extensions);
+                Transformation::registerPositionOpcodes(extensions, false);
+            }
             if (mLifeEvents) Stats::registerDeathOpcodes(extensions);
             context.setExtensions(&extensions);
         }
@@ -327,10 +333,15 @@ namespace MWScript
         Interpreter::Interpreter interpreter;
         Interpreter::installOpcodes(interpreter);
         if (mBank) Misc::installScriptOpcodes(interpreter);
-        if (!mSource.empty()) Misc::installSourceWaitOpcodes(interpreter, !referenceState);
+        if (!mSource.empty())
+        {
+            Misc::installSourceWaitOpcodes(interpreter, !referenceState);
+            Cell::installStateOpcodes(interpreter);
+        }
         if (mLifeEvents) Stats::installDeathOpcodes(interpreter);
         if (!mSource.empty()) Stats::installHealthOpcodes(interpreter);
-        if (dialogue) Dialogue::installJournalOpcodes(interpreter);
+        if (dialogue && program) Dialogue::installJournalOpcodes(interpreter);
+        else if (mBank) Dialogue::installJournalQueryOpcode(interpreter);
         if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
         if (referenceState) Misc::installDisableOpcodes(interpreter);
         if (referenceState) Transformation::installPositionOpcodes(interpreter);

@@ -123,6 +123,8 @@ namespace TES3MP::Native
             const MWMechanics::CreatureStats* stats = nullptr; // Transaction-owned, never serialized.
             ESM::Position position{};
             const MWMechanics::CreatureStats* privateStats = nullptr; // Detached living stats for private scopes.
+            bool cellChanged = false, sleeping = false;
+            uint64_t cellChangedCharacter = 0, sleepingCharacter = 0;
         };
         using State = std::vector<Instance>;
         struct Prepared

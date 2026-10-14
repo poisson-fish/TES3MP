@@ -106,6 +106,9 @@ namespace MWScript
         void aiTravel(const MWWorld::Ptr&, const std::array<float, 3>&, bool, const ESM::RefId&, float) const;
         void position(const MWWorld::Ptr&, const std::array<float, 3>&, float, const ESM::RefId&) const;
         const ESM::Position& position(const MWWorld::Ptr&) const;
+        bool cellChanged() const;
+        bool menuMode() const;
+        bool playerSleeping() const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
         DialogueState* getDialogueState() const;

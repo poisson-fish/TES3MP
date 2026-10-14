@@ -192,9 +192,9 @@ namespace TES3MP::Native
     SharedWorldScript::Prepared SharedWorldScript::prepareBank(const State& committed,
         const MWScript::ExecutionContext& execution, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, MWScript::ScriptState& bank, MWScript::GlobalScriptDesc& caller,
-        MWScript::ReferenceState* referenceState) const
+        MWScript::ReferenceState* referenceState, MWScript::DialogueState* dialogue) const
     {
-        auto prepared = prepareImpl(committed, committed.tick + 1, &execution, &content, &resolver, &bank, &caller, referenceState);
+        auto prepared = prepareImpl(committed, committed.tick + 1, &execution, &content, &resolver, &bank, &caller, referenceState, dialogue);
         prepared.result.invocationTick = execution.invocation;
         return prepared;
     }
@@ -202,7 +202,7 @@ namespace TES3MP::Native
     SharedWorldScript::Prepared SharedWorldScript::prepareImpl(const State& committed, uint64_t tick,
         const MWScript::ExecutionContext* execution, const MWWorld::ESMStore* content,
         const MWScript::ReferenceResolver* resolver, MWScript::ScriptState* bank, MWScript::GlobalScriptDesc* caller,
-        MWScript::ReferenceState* referenceState) const
+        MWScript::ReferenceState* referenceState, MWScript::DialogueState* dialogue) const
     {
         Prepared prepared;
         auto& result = prepared.result;
@@ -215,7 +215,7 @@ namespace TES3MP::Native
             if (tick && tick == committed.tick)
             { result.outcome = Outcome::Committed; return prepared; }
             require(tick && committed.tick != std::numeric_limits<uint64_t>::max() && tick == committed.tick + 1);
-            auto invocation = execution ? mRuntime.execute(committed.runtime, *execution, *content, *resolver, &result.trace, bank, caller, nullptr, nullptr, nullptr, referenceState)
+            auto invocation = execution ? mRuntime.execute(committed.runtime, *execution, *content, *resolver, &result.trace, bank, caller, dialogue, nullptr, nullptr, referenceState)
                 : mRuntime.execute(committed.runtime, &result.trace);
             prepared.state = {tick, std::move(invocation.state)};
             prepared.image = encode(prepared.state);

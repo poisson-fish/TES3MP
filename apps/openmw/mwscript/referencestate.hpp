@@ -27,6 +27,12 @@ namespace MWScript
         virtual void position(const ExecutionContext&, const MWWorld::Ptr&, const std::array<float, 3>&,
             float, const ESM::RefId&)
         { throw std::invalid_argument("Position lacks relocation admission"); }
+        virtual bool cellChanged(const ExecutionContext&) const
+        { throw std::invalid_argument("CellChanged lacks staged cell admission"); }
+        virtual bool menuMode(const ExecutionContext&) const
+        { throw std::invalid_argument("MenuMode lacks staged source admission"); }
+        virtual bool playerSleeping(const ExecutionContext&) const
+        { throw std::invalid_argument("GetPCSleep lacks staged source admission"); }
     };
 }
 #endif

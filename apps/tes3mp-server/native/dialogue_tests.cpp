@@ -1,5 +1,6 @@
 #include "personal_script.hpp"
 #include <apps/openmw/mwscript/aiextensions.hpp>
+#include <apps/openmw/mwscript/cellextensions.hpp>
 #include <apps/openmw/mwgui/referenceinterface.hpp>
 #include <apps/openmw/mwbase/environment.hpp>
 #include <apps/openmw/mwclass/classes.hpp>
@@ -2061,25 +2062,30 @@ namespace
         Fixture fixture(crypto, {}, true);
         std::vector<ESM::Script> scripts;
         for (const auto& [name, body] : std::vector<std::pair<std::string, std::string>>{
-            {"ledger_v63", "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
+            {"ledger_v63", "if ( MenuMode == 1 )\nreturn\nendif\n"
+                "if ( GetPCSleep == 1 )\nset sleeping to 1\nreturn\nendif\n"
+                "set moved to CellChanged\nset stage to GetJournalIndex \"journey_t37\"\n"
+                "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
                 "if OnDeath == 1\nset credit to credit + 1\nset personal_counter to personal_counter + 1\nendif\n"
                 "set posx to GetPos x\nset posy to speaker_r29->GetPos y\nset yaw to GetAngle z"},
             {"relay_n48", "set calls to calls + 1\nset health to GetHealth\n"
                 "set ratio to speaker_r29->GetHealthGetRatio\nset blocked to speaker_r29->GetDisabled"}})
         {
             ESM::Script script; script.blank(); script.mId = id(name);
-            script.mScriptText = "begin " + name + "\nlong calls\nlong credit\nfloat timer\n"
-                "float posx\nfloat posy\nfloat yaw\nfloat health\nfloat ratio\nshort blocked\n" + body + "\nend";
+            script.mScriptText = "begin " + name + "\nlong calls\nlong credit\nlong stage\nfloat timer\n"
+                "float posx\nfloat posy\nfloat yaw\nfloat health\nfloat ratio\nshort blocked\nshort moved\nshort sleeping\n"
+                + body + "\nend";
             scripts.push_back(script);
         }
         ESM::Global global; global.blank(); global.mId = id("personal_counter");
         global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
-        for (const auto* forbidden : {"Position 200 -32 1 0", "PositionCell 200 -32 1 0 room_e87", "set v to player->GetPos x"})
+        for (const auto* forbidden : {"Position 200 -32 1 0", "PositionCell 200 -32 1 0 room_e87", "set v to player->GetPos x",
+            "Journal journey_t37 10", "SetJournalIndex journey_t37 10"})
         {
             auto invalidScript = scripts[0];
             invalidScript.mScriptText = "begin ledger_v63\nfloat v\n" + std::string(forbidden) + "\nend";
             rejects([&] { SharedWorldScript invalid(invalidScript, {global}, "npc-banks-1", crypto, scripts, id("speaker_r29"), true); },
-                "Scheduled source bank admitted position mutation or foreign reference");
+                "Scheduled source bank admitted position/journal mutation or foreign reference");
         }
         auto primary = std::make_shared<SharedWorldScript>(scripts[0], std::vector{global}, "npc-banks-1", crypto,
             scripts, id("speaker_r29"), true);
@@ -2137,8 +2143,10 @@ namespace
         auto publicTick = policy.prepareScheduled(initial, 1, both, fixture.content, scheduledResolver, &source);
         require(publicTick.result.executed && number(publicTick.state[0].runtime, "posx") == 64.f
             && number(publicTick.state[0].runtime, "posy") == -64.f && std::abs(number(publicTick.state[0].runtime, "yaw") - (.5f * 180.f / float(std::numbers::pi))) < 1e-4f
-            && number(publicTick.state[0].members[0], "health") == 15.f && number(publicTick.state[0].members[0], "ratio") == .5f,
-            "Public scheduled bank did not read public pose and health");
+            && number(publicTick.state[0].members[0], "health") == 15.f && number(publicTick.state[0].members[0], "ratio") == .5f
+            && integer(publicTick.state[0].runtime, "moved") == 0 && integer(publicTick.state[0].runtime, "sleeping") == 0
+            && integer(publicTick.state[0].runtime, "stage") == 0,
+            "Public scheduled bank did not read public pose, health, cell, sleep, and journal state");
         const auto runIntent = [&](const PersonalScripts::State& before, uint64_t character, uint64_t life, int choice = -1) {
             const auto& instance = before[character == 11 ? 0 : 1];
             resolver.expected = instance.last; ++resolver.expected.invocation;
@@ -2159,15 +2167,18 @@ namespace
         // Foreign kill of shared NPC in public scope 1 puts B into sourceWait + reservedLife=2, while A's private bank continues!
         publicStats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 0), MWWorld::TimeStamp{});
         events = {{1, 2, 11, 1, 1, 11, 1}};
-        source = {41, 1, 20, id("speaker_r29"), false, 11, 1, events, &publicStats, publicPose, &privateStats};
+        source = {41, 1, 20, id("speaker_r29"), false, 11, 1, events, &publicStats, publicPose, &privateStats, true, false, 11, 0};
         auto splitTick = policy.prepareScheduled(aliceEscort.state, 2, both, fixture.content, scheduledResolver, &source);
         require(splitTick.result.executed && !splitTick.state[0].sourceWait && splitTick.state[0].clockTicks == 2
             && number(splitTick.state[0].runtime, "posx") == 140.f && number(splitTick.state[0].runtime, "posy") == -20.f
             && std::abs(number(splitTick.state[0].runtime, "yaw") - 90.f) < 1e-3f
             && number(splitTick.state[0].members[0], "health") == 20.f && number(splitTick.state[0].members[0], "ratio") == 1.f
+            && integer(splitTick.state[0].runtime, "moved") == 1 && integer(splitTick.state[0].runtime, "sleeping") == 0
+            && integer(splitTick.state[0].runtime, "stage") == 20
             && integer(splitTick.state[0].runtime, "credit") == 0 && splitTick.state[0].deathCursor == 0
-            && splitTick.state[1].sourceWait && splitTick.state[1].reservedLife == 2,
-            "Private NPC bank stopped on public death, read public pose/dead health, or consumed post-departure public death");
+            && splitTick.state[1].sourceWait && splitTick.state[1].reservedLife == 2
+            && integer(splitTick.state[1].runtime, "stage") == 0 && integer(splitTick.state[1].runtime, "moved") == 0,
+            "Private NPC bank stopped on public death, read public pose/dead health, or failed to isolate stage/CellChanged");
         auto restored = policy.restore(splitTick.image);
         require(policy.encode(restored) == splitTick.image, "Composed NPC bank state did not round-trip");
         // Respawn in life 2: B holds reservation for life 2, so A (if still in scope 1) would be blocked, and B can relocate in life 2 and clear reservation.
@@ -2175,7 +2186,9 @@ namespace
         source = {41, 2, 0, id("speaker_r29"), true, 0, 0, events, &publicStats, publicPose, &privateStats};
         auto wakeTick = policy.prepareScheduled(restored, 20, both, fixture.content, scheduledResolver, &source);
         require(wakeTick.result.executed && !wakeTick.state[1].sourceWait && wakeTick.state[1].reservedLife == 2
-            && wakeTick.state[0].clockTicks == 3, "Wake tick did not resume B or continue A's private bank");
+            && wakeTick.state[0].clockTicks == 3
+            && integer(wakeTick.state[0].runtime, "moved") == 0 && integer(wakeTick.state[1].runtime, "stage") == 0,
+            "Wake tick did not resume B or continue A's private bank");
         auto contested = wakeTick.state; contested[0] = publicTick.state[0];
         require(runIntent(contested, 11, 2).result.outcome == SharedWorldScript::Outcome::Rejected,
             "Non-owner relocated or started activity on a reserved life");
@@ -2185,12 +2198,15 @@ namespace
             && PersonalScripts::physicalScope(bobRelocated.state, 22) == 3,
             "Reserved owner could not start private activity/relocation or leaked reservation");
         events = {{1, 2, 22, 1, 1, 22, 1}};
-        source = {41, 2, 0, id("speaker_r29"), true, 0, 0, events, &publicStats, publicPose, &privateStats};
+        source = {41, 2, 0, id("speaker_r29"), true, 0, 0, events, &publicStats, publicPose, &privateStats, false, true, 0, 11};
         auto bobPrivateTick = policy.prepareScheduled(bobRelocated.state, 21, both, fixture.content, scheduledResolver, &source);
         require(bobPrivateTick.result.executed && bobPrivateTick.state[1].deathCursor == 1
             && integer(bobPrivateTick.state[1].runtime, "credit") == 1
+            && integer(bobPrivateTick.state[1].runtime, "stage") == 20
+            && integer(bobPrivateTick.state[1].runtime, "sleeping") == 0
+            && integer(bobPrivateTick.state[0].runtime, "sleeping") == 1
             && number(bobPrivateTick.state[1].runtime, "posx") == 200.f,
-            "Relocated private bank did not read relocated pose or pre-departure life credit");
+            "Relocated private bank did not read relocated pose, journal stage, GetPCSleep, or pre-departure life credit");
         rejects([&] { (void)policy.prepareReturn(bobPrivateTick.state, 11, &fixture.content, 1); },
             "Unfinished escort activity returned before completion");
         auto completedState = bobPrivateTick.state;
@@ -2292,10 +2308,16 @@ namespace
         rejects([&] { interpreter.run(runtime.compileResult("ModDisposition 17"), scoped, 4096); },
             "Full stock installer bypassed staged NPC result ownership");
         MWScript::Misc::installOpcodes(interpreter);
+        MWScript::Cell::installOpcodes(interpreter);
         rejects([&] { interpreter.run(runtime.compileResult("Disable", true, id("speaker_r29")), scoped, 4096); },
             "Full stock installer bypassed staged physical ownership");
         rejects([&] { interpreter.run(runtime.compileResult("set calls to GetDisabled", true), scoped, 4096); },
             "Full stock installer read unscoped physical state for a scoped caller");
+        for (const int op : {Compiler::Cell::opcodeCellChanged, Compiler::Misc::opcodeMenuMode, Compiler::Misc::opcodeGetPcSleep})
+            rejects([&] {
+                const Interpreter::Program queryProgram{{(uint32_t(0x32) << 26) | uint32_t(op)}};
+                interpreter.run(queryProgram, scoped, 4096);
+            }, "Full stock installer let a scoped caller read unscoped CellChanged/MenuMode/GetPCSleep");
         fixture.actor.getPtr().getRefData().disable();
         interpreter.run(runtime.compileResult("set calls to GetDisabled", true), context, 4096);
         require(locals.mLongs.front() == 1, "Stock GetDisabled stopped reading source RefData");

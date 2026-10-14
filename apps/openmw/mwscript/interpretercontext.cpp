@@ -19,6 +19,7 @@
 #include "../mwworld/action.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
+#include "../mwworld/scene.hpp"
 
 #include "../mwmechanics/npcstats.hpp"
 
@@ -266,6 +267,36 @@ namespace MWScript
         if (!mExecution) return reference.getRefData().getPosition();
         if (!mReferenceState) throw std::invalid_argument("Position read lacks staged physical scope");
         return mReferenceState->position(*mExecution, reference);
+    }
+
+    bool InterpreterContext::cellChanged() const
+    {
+        if (mExecution)
+        {
+            if (!mReferenceState) throw std::invalid_argument("CellChanged lacks staged physical scope");
+            return mReferenceState->cellChanged(*mExecution);
+        }
+        return MWBase::Environment::get().getWorldScene()->hasCellChanged();
+    }
+
+    bool InterpreterContext::menuMode() const
+    {
+        if (mExecution)
+        {
+            if (!mReferenceState) throw std::invalid_argument("MenuMode lacks staged physical scope");
+            return mReferenceState->menuMode(*mExecution);
+        }
+        return MWBase::Environment::get().getWindowManager()->isGuiMode();
+    }
+
+    bool InterpreterContext::playerSleeping() const
+    {
+        if (mExecution)
+        {
+            if (!mReferenceState) throw std::invalid_argument("GetPCSleep lacks staged physical scope");
+            return mReferenceState->playerSleeping(*mExecution);
+        }
+        return MWBase::Environment::get().getWindowManager()->getPlayerSleeping();
     }
 
     void InterpreterContext::position(const MWWorld::Ptr& reference, const std::array<float, 3>& xyz,
