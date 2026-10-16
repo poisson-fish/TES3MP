@@ -1,6 +1,7 @@
 #include "worldscript.hpp"
 #include "aiextensions.hpp"
 #include "cellextensions.hpp"
+#include "containerextensions.hpp"
 #include "transformationextensions.hpp"
 
 #include "interpretercontext.hpp"
@@ -15,6 +16,8 @@
 #include <components/compiler/fileparser.hpp>
 #include <components/compiler/extensions.hpp>
 #include <components/compiler/extensions0.hpp>
+#include <components/compiler/generator.hpp>
+#include <components/compiler/opcodes.hpp>
 #include <components/compiler/quickfileparser.hpp>
 #include <components/compiler/exception.hpp>
 #include <components/compiler/scanner.hpp>
@@ -211,7 +214,7 @@ namespace MWScript
         std::vector<std::pair<ESM::RefId, Compiler::Locals>> members;
         require(mSource.empty() || (mBank && mSource.is<ESM::StringRefId>()), "Source query requires a script bank");
         if (!mSource.empty()) name(mSource.getRefIdString());
-        CompilerContext context(mGlobals, members, mSource);
+        CompilerContext context(mGlobals, members, mSource, !mSource.empty());
         for (const auto& member : bank)
         {
             require(member.mId.is<ESM::StringRefId>(), "Invalid bank script identity");
@@ -248,6 +251,7 @@ namespace MWScript
                 Cell::registerStateOpcodes(extensions);
                 Stats::registerHealthOpcodes(extensions);
                 Transformation::registerPositionOpcodes(extensions, false);
+                Container::registerItemOpcodes(extensions);
             }
             if (mLifeEvents) Stats::registerDeathOpcodes(extensions);
             context.setExtensions(&extensions);
@@ -268,6 +272,30 @@ namespace MWScript
         mProgram = parser.getProgram();
         require(mProgram.mInstructions.size() <= MaximumInstructions,
             "World script program exceeds bounds");
+        if (!mSource.empty())
+        {
+            for (std::size_t i = 0; i < mProgram.mInstructions.size(); ++i)
+            {
+                const auto instruction = mProgram.mInstructions[i];
+                for (const int op : {Compiler::Misc::opcodeGetDisabledExplicit, Compiler::Misc::opcodeDisableExplicit,
+                         Compiler::Misc::opcodeOnActivateExplicit, Compiler::Misc::opcodeActivateExplicit,
+                         Compiler::Stats::opcodeGetDynamicExplicit, Compiler::Stats::opcodeGetDynamicGetRatioExplicit,
+                         Compiler::Stats::opcodeOnDeathExplicit, Compiler::Transformation::opcodeGetPosExplicit,
+                         Compiler::Transformation::opcodeGetAngleExplicit})
+                    if (instruction == Compiler::Generator::segment5(op))
+                    {
+                        require(i >= 2 && (mProgram.mInstructions[i - 2] >> 24) == 0
+                                && mProgram.mInstructions[i - 1] == Compiler::Generator::segment5(4),
+                            "Invalid explicit source opcode sequence");
+                        const auto intIdx = std::size_t(mProgram.mInstructions[i - 2] & 0xffffffu);
+                        require(intIdx < mProgram.mIntegers.size(), "Explicit source integer literal out of range");
+                        const auto strIdx = std::size_t(mProgram.mIntegers[intIdx]);
+                        require(strIdx < mProgram.mStrings.size()
+                                && ESM::RefId::stringRefId(mProgram.mStrings[strIdx]) == mSource,
+                            "Scheduled source bank explicit opcode targets foreign reference");
+                    }
+            }
+        }
         std::size_t count = 0;
         for (const char kind : {'s', 'l', 'f'})
             for (const auto& local : std::as_const(mDeclarations).get(kind)) { name(local); ++count; }
@@ -354,6 +382,7 @@ namespace MWScript
         if (referenceState) Misc::installDisableOpcodes(interpreter);
         if (referenceState) Transformation::installPositionOpcodes(interpreter);
         if (referenceState) Ai::installActivityOpcodes(interpreter);
+        if (referenceState) Container::installItemOpcodes(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
         interpreter.run(program ? *program : mProgram, *context, MaximumExecutedInstructions, trace);
@@ -374,7 +403,11 @@ namespace MWScript
         Misc::registerScriptOpcodes(extensions);
         Compiler::Dialogue::registerExtensions(extensions);
         Stats::registerDispositionResultOpcode(extensions);
-        if (physical) Misc::registerDisableOpcodes(extensions);
+        if (physical)
+        {
+            Misc::registerDisableOpcodes(extensions);
+            Container::registerItemOpcodes(extensions);
+        }
         require(!restoration || (physical && !reference.empty()), "Restoration lacks bounded source");
         if (restoration) Misc::registerEnableOpcodes(extensions);
         require(!relocation || (physical && !reference.empty()), "Relocation lacks bounded source");

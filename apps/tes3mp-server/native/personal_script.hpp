@@ -24,6 +24,23 @@ namespace TES3MP::Native
         static constexpr size_t MaximumImageBytes = 1048576;
         static constexpr size_t MaximumNpcsPerStory = 64;
         static constexpr size_t MaximumLifeEvents = 256;
+        static constexpr size_t MaximumTrackedItemsPerStory = 64;
+        static constexpr size_t MaximumItemReceiptsPerStory = 64;
+        static constexpr int MaximumItemTransferCount = 100000;
+        struct ItemBalance
+        {
+            ESM::RefId item;
+            int count = 0;
+            bool operator==(const ItemBalance&) const = default;
+        };
+        struct ItemReceipt
+        {
+            uint64_t scope = 1, sourceKind = 0, sourceId = 0, step = 0;
+            bool playerTarget = true, addition = true;
+            ESM::RefId item;
+            int count = 0;
+            bool operator==(const ItemReceipt&) const = default;
+        };
         struct EncounterBinding
         {
             uint64_t reference = 0;
@@ -104,6 +121,8 @@ namespace TES3MP::Native
             std::optional<SourceWait> sourceWait; // One bounded dependency; banks remain running and unchanged.
             uint64_t deathCursor = 0; // Source life, independent of dialogue/event ordinals.
             uint64_t reservedLife = 0, reservationTick = 0; // Durable next-opportunity right, retained after waking.
+            std::vector<ItemBalance> playerItems, npcItems;
+            std::vector<ItemReceipt> itemReceipts;
         };
         struct LifeEvent
         {
@@ -112,6 +131,11 @@ namespace TES3MP::Native
             // Help-only enrollment cannot spend the helper's personal cursor.
             uint64_t owner = 0, ownerLife = 0;
             bool helper = false;
+        };
+        struct PlayerInventory
+        {
+            uint64_t character = 0;
+            std::span<const ItemBalance> items;
         };
         struct Source
         {
@@ -127,15 +151,23 @@ namespace TES3MP::Native
             uint64_t cellChangedCharacter = 0, sleepingCharacter = 0;
             bool activated = false;
             uint64_t activatedCharacter = 0;
+            std::span<const PlayerInventory> playerInventories = {};
         };
         using State = std::vector<Instance>;
         struct Prepared
         {
+            struct StagedItemTransfer
+            {
+                uint64_t character = 0, story = 0;
+                ItemReceipt receipt;
+                bool operator==(const StagedItemTransfer&) const = default;
+            };
             State state;
             std::vector<char> image;
             SharedWorldScript::Result result;
             size_t invocations = 0; // Budget charge: member calls, or one stopped-bank receipt.
             std::string response;
+            std::vector<StagedItemTransfer> itemTransfers;
         };
         struct DialogueCall
         {
@@ -182,13 +214,15 @@ namespace TES3MP::Native
             const MWMechanics::NpcStats* playerStats = nullptr,
             std::optional<std::string_view> customClassName = {},
             const MWMechanics::NpcStats* speakerStats = nullptr,
-            std::optional<MWScript::DialogueState::Stamp> journalStamp = {}, bool encounterPrepared = false) const;
+            std::optional<MWScript::DialogueState::Stamp> journalStamp = {}, bool encounterPrepared = false,
+            std::optional<std::span<const ItemBalance>> playerInventory = {}) const;
         Prepared prepareIntent(const State&, uint64_t character, uint64_t command, const DialogueIntent&,
             std::string_view cellName, const MWWorld::ESMStore&, const MWScript::ReferenceResolver&,
             size_t budget = MaximumInvocationsPerTransaction, const MWMechanics::NpcStats* playerStats = nullptr,
             std::optional<std::string_view> customClassName = {},
             const MWMechanics::NpcStats* speakerStats = nullptr,
-            std::optional<MWScript::DialogueState::Stamp> journalStamp = {}) const;
+            std::optional<MWScript::DialogueState::Stamp> journalStamp = {},
+            std::optional<std::span<const ItemBalance>> playerInventory = {}) const;
 
     private:
         uint64_t mCampaign;

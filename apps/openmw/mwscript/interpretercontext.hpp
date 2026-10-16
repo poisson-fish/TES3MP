@@ -112,6 +112,9 @@ namespace MWScript
         bool playerSleeping() const;
         bool onActivate(const MWWorld::Ptr& reference) const;
         void activate(const MWWorld::Ptr& reference) const;
+        int itemCount(const MWWorld::Ptr& reference, const ESM::RefId& item) const;
+        void addItem(const MWWorld::Ptr& reference, const ESM::RefId& item, int count) const;
+        void removeItem(const MWWorld::Ptr& reference, const ESM::RefId& item, int count) const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
         DialogueState* getDialogueState() const;

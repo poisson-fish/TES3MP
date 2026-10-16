@@ -3178,6 +3178,19 @@ namespace TES3MP::Native
                         throw std::invalid_argument("Story reservation lacks a foreign source occurrence");
                 }
             }
+            if (personalState && mBinding.mPersonalScripts->npcBanks())
+                for (const auto& story : *personalState)
+                {
+                    for (const auto& entry : story.playerItems)
+                        if (!MWWorld::inventoryItemRecord(mRuntime.mStore, entry.item).mScript.empty())
+                            throw std::invalid_argument("Story player item record invalid");
+                    for (const auto& entry : story.npcItems)
+                        if (!MWWorld::inventoryItemRecord(mRuntime.mStore, entry.item).mScript.empty())
+                            throw std::invalid_argument("Story NPC item record invalid");
+                    for (const auto& receipt : story.itemReceipts)
+                        if (!MWWorld::inventoryItemRecord(mRuntime.mStore, receipt.item).mScript.empty())
+                            throw std::invalid_argument("Story provenance receipt item record invalid");
+                }
             if (personalState) for (const auto& story : *personalState) if (story.sourceWait)
             {
                 const auto& wait = *story.sourceWait;
@@ -5313,6 +5326,151 @@ namespace TES3MP::Native
         return true;
     }
 
+    namespace
+    {
+        std::vector<PersonalScripts::ItemBalance> extractPersonalPlayerItems(const PlainEquipmentValues& values,
+            const MWWorld::ESMStore& store,
+            std::span<const PersonalScripts::Prepared::StagedItemTransfer> pending = {}, uint64_t character = 0)
+        {
+            std::vector<PersonalScripts::ItemBalance> result;
+            for (const auto& object : values.mObjects)
+            {
+                if (object.mRef.mCount <= 0) continue;
+                const auto record = MWWorld::inventoryItemRecord(store, object.mRef.mRefID);
+                if (!record.mScript.empty()) continue;
+                auto found = std::ranges::find(result, object.mRef.mRefID, &PersonalScripts::ItemBalance::item);
+                if (found == result.end())
+                {
+                    if (result.size() >= PersonalScripts::MaximumTrackedItemsPerStory
+                        || object.mRef.mCount > PersonalScripts::MaximumItemTransferCount)
+                        throw std::invalid_argument("Player inventory exceeds personal script item bounds");
+                    result.push_back({object.mRef.mRefID, object.mRef.mCount});
+                }
+                else
+                {
+                    if (found->count > PersonalScripts::MaximumItemTransferCount - object.mRef.mCount)
+                        throw std::invalid_argument("Player inventory item count exceeds personal script bounds");
+                    found->count += object.mRef.mCount;
+                }
+            }
+            for (const auto& transfer : pending)
+            {
+                if (!transfer.receipt.playerTarget || transfer.character != character) continue;
+                auto found = std::ranges::find(result, transfer.receipt.item, &PersonalScripts::ItemBalance::item);
+                if (transfer.receipt.addition)
+                {
+                    if (found == result.end())
+                    {
+                        if (result.size() >= PersonalScripts::MaximumTrackedItemsPerStory)
+                            throw std::invalid_argument("Pending personal item additions exceed bounds");
+                        result.push_back({transfer.receipt.item, transfer.receipt.count});
+                    }
+                    else
+                    {
+                        if (found->count > PersonalScripts::MaximumItemTransferCount - transfer.receipt.count)
+                            throw std::invalid_argument("Pending personal item count exceeds bounds");
+                        found->count += transfer.receipt.count;
+                    }
+                }
+                else
+                {
+                    if (found == result.end() || found->count < transfer.receipt.count)
+                        throw std::invalid_argument("Pending personal item removal exceeds balance");
+                    found->count -= transfer.receipt.count;
+                    if (found->count == 0) result.erase(found);
+                }
+            }
+            return result;
+        }
+
+        std::vector<size_t> stagePersonalItemTransfers(EquipmentSessionValues& values, const MWWorld::ESMStore& store,
+            const std::array<PlayerId, 2>& players,
+            std::span<const PersonalScripts::Prepared::StagedItemTransfer> transfers)
+        {
+            std::vector<size_t> owners;
+            auto counter = values.mActors[0].mLastGenerated;
+            for (const auto& transfer : transfers)
+            {
+                if (!transfer.receipt.playerTarget) continue;
+                const size_t owner = transfer.character == players[0].value() ? 0 : 1;
+                if (transfer.character != players[owner].value())
+                    throw std::invalid_argument("Personal item transfer character unbound");
+                if (std::ranges::find(owners, owner) == owners.end()) owners.push_back(owner);
+                auto& saved = values.mActors[owner];
+                const auto info = MWWorld::inventoryItemRecord(store, transfer.receipt.item);
+                if (!info.mScript.empty() || transfer.receipt.count <= 0
+                    || transfer.receipt.count > PersonalScripts::MaximumItemTransferCount)
+                    throw std::invalid_argument("Personal item transfer record or count invalid");
+                if (transfer.receipt.addition)
+                {
+                    auto existing = saved.mObjects.end();
+                    if (info.mSlots.mFirst < 0 || info.mSlots.mStack)
+                        existing = std::ranges::find_if(saved.mObjects, [&](const auto& obj) {
+                            return obj.mRef.mRefID == transfer.receipt.item && obj.mRef.mCount > 0
+                                && obj.mRef.mChargeInt == -1 && obj.mRef.mEnchantmentCharge == -1.f
+                                && obj.mRef.mSoul.empty() && obj.mLocals.mVariables.empty()
+                                && std::ranges::find(saved.mSlots, obj.mRef.mRefNum) == saved.mSlots.end()
+                                && saved.mSelected != obj.mRef.mRefNum;
+                        });
+                    if (existing != saved.mObjects.end())
+                    {
+                        if (existing->mRef.mCount > INT32_MAX - transfer.receipt.count)
+                            throw std::invalid_argument("Personal item stack count overflow");
+                        existing->mRef.mCount += transfer.receipt.count;
+                    }
+                    else
+                    {
+                        if (saved.mObjects.size() >= PlainEquipmentValues::MaxItems || counter.mIndex == UINT32_MAX
+                            || counter.mContentFile != -1)
+                            throw std::invalid_argument("Personal item addition exceeds inventory capacity");
+                        ESM::ObjectState object;
+                        object.blank();
+                        object.mRef.mRefID = transfer.receipt.item;
+                        object.mRef.mRefNum = {++counter.mIndex, -1};
+                        object.mRef.mCount = transfer.receipt.count;
+                        object.mEnabled = 1;
+                        object.mHasCustomState = false;
+                        saved.mObjects.push_back(std::move(object));
+                    }
+                }
+                else
+                {
+                    int remaining = transfer.receipt.count;
+                    for (const bool allowEquipped : {false, true})
+                    {
+                        for (auto& obj : saved.mObjects)
+                        {
+                            if (remaining <= 0) break;
+                            if (obj.mRef.mRefID != transfer.receipt.item || obj.mRef.mCount <= 0) continue;
+                            const bool equipped
+                                = std::ranges::find(saved.mSlots, obj.mRef.mRefNum) != saved.mSlots.end();
+                            if (equipped != allowEquipped) continue;
+                            const int take = std::min(remaining, obj.mRef.mCount);
+                            obj.mRef.mCount -= take;
+                            remaining -= take;
+                            if (obj.mRef.mCount == 0)
+                            {
+                                for (auto& slot : saved.mSlots)
+                                    if (slot == obj.mRef.mRefNum) slot = {};
+                                if (saved.mSelected == obj.mRef.mRefNum) saved.mSelected = {};
+                            }
+                        }
+                    }
+                    if (remaining != 0)
+                        throw std::invalid_argument("Personal item removal exceeds player inventory");
+                    std::erase_if(saved.mObjects, [](const auto& obj) { return obj.mRef.mCount <= 0; });
+                }
+            }
+            if (!owners.empty())
+            {
+                for (auto& actor : values.mActors) actor.mLastGenerated = counter;
+                for (auto& container : values.mContainers) container.mLastGenerated = counter;
+                if (values.mWorldItems) values.mWorldItems->mLastGenerated = counter;
+            }
+            return owners;
+        }
+    }
+
     class InventoryService::DialogueTransaction final : public PreparedNativeInventory
     {
     public:
@@ -5320,6 +5478,7 @@ namespace TES3MP::Native
         EquipmentBytes before;
         PersonalScripts::State state;
         std::vector<ReliablePersonalDialogue> outputs;
+        std::vector<PersonalScripts::Prepared::StagedItemTransfer> itemTransfers;
         size_t invocations = 0;
         DialogueTransaction(InventoryService& owner)
             : service(owner)
@@ -5495,12 +5654,45 @@ namespace TES3MP::Native
         speakerStats.getMagicEffects().add(MWMechanics::EffectKey(ESM::MagicEffect::Charm),
             MWMechanics::EffectParam(committedDisposition(mRuntime.mStore,
                 ptr.getCellRef().getRefId(), mTimedEffects, npc).charm));
+        std::vector<PersonalScripts::ItemBalance> playerInventory;
+        std::optional<std::span<const PersonalScripts::ItemBalance>> stagedPlayerInventory;
+        if (mBinding.mPersonalScripts->npcBanks())
+        {
+            try
+            {
+                playerInventory = extractPersonalPlayerItems(mRuntime.installedValues(self), mRuntime.mStore,
+                    prior->itemTransfers, session->playerId().value());
+                stagedPlayerInventory = std::span<const PersonalScripts::ItemBalance>(playerInventory);
+            }
+            catch (const std::exception& error)
+            {
+                return reject(error.what());
+            }
+        }
         auto prepared = mBinding.mPersonalScripts->prepareIntent(prior->state, session->playerId().value(),
             proposal.commandId().value(), request, cell.getCellName(mRuntime.mStore), mRuntime.mStore, resolver,
             PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats, customClassName, &speakerStats,
-            journalStamp);
+            journalStamp, stagedPlayerInventory);
         if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
             return reject(prepared.result.diagnostic.c_str());
+        if (prepared.result.executed && !prepared.itemTransfers.empty())
+        {
+            try
+            {
+                EquipmentSessionValues testValues;
+                std::ignore = stagedWeaponCore({}, nullptr, {}, nullptr, {}, &testValues);
+                auto combined = prior->itemTransfers;
+                combined.insert(combined.end(), prepared.itemTransfers.begin(), prepared.itemTransfers.end());
+                const auto owners = stagePersonalItemTransfers(testValues, mRuntime.mStore, mBinding.mPlayers, combined);
+                for (const size_t idx : owners)
+                    testValues.mActors[idx].validate(
+                        mRuntime.mStore, testValues.mActors[idx].mActor, mRuntime.mScriptLocals.get());
+            }
+            catch (const std::exception& error)
+            {
+                return reject(error.what());
+            }
+        }
         if (prepared.result.executed && mBinding.mPersonalScripts->activities())
         {
             auto& story = *std::ranges::find_if(prepared.state, [&](const auto& value) {
@@ -5548,6 +5740,8 @@ namespace TES3MP::Native
         {
             prior->state = std::move(prepared.state);
             prior->invocations += prepared.invocations;
+            prior->itemTransfers.insert(prior->itemTransfers.end(),
+                prepared.itemTransfers.begin(), prepared.itemTransfers.end());
             ReliablePersonalDialogue output{ proposal.sessionId(), proposal.sessionGeneration(), ServerTick::initial(),
                 CanonicalRevision::initial() };
             output.story = request.story;
@@ -6420,6 +6614,8 @@ namespace TES3MP::Native
                 std::optional<PersonalScripts::Source> source;
                 std::optional<MWMechanics::NpcStats> sourceStats, privateSourceStats;
                 std::vector<PersonalScripts::LifeEvent> lifeEvents;
+                std::array<std::vector<PersonalScripts::ItemBalance>, 2> playerItemStorage;
+                std::vector<PersonalScripts::PlayerInventory> playerInventories;
                 if (mBinding.mPersonalScripts->sourceWaits())
                 {
                     if (!native->life || !native->combat || native->combat->npcPlacements.size() != 1)
@@ -6446,6 +6642,18 @@ namespace TES3MP::Native
                                 event.killerKind == 1 ? event.killer : 0, event.killerKind == 1 ? event.killerLife : 0});
                         source->events = lifeEvents;
                     }
+                    if (mBinding.mPersonalScripts->npcBanks())
+                    {
+                        for (size_t i = 0; i < 2; ++i)
+                        {
+                            const auto values = native->loot && native->loot->replaces(i)
+                                ? native->loot->values(i)
+                                : combatEquipmentValues(i, native->command.get());
+                            playerItemStorage[i] = extractPersonalPlayerItems(values, mRuntime.mStore);
+                            playerInventories.push_back({mBinding.mPlayers[i].value(), playerItemStorage[i]});
+                        }
+                        source->playerInventories = playerInventories;
+                    }
                 }
                 auto scripts
                     = mBinding.mPersonalScripts->prepareScheduled(*personalState(transaction.get()),
@@ -6464,6 +6672,44 @@ namespace TES3MP::Native
                     if (native->personalInvocations + scripts.invocations
                         > PersonalScripts::MaximumInvocationsPerTransaction)
                         throw std::invalid_argument("Dialogue and scheduled invocation budget exceeded");
+                    if (!scripts.itemTransfers.empty())
+                    {
+                        EquipmentSessionValues values;
+                        std::ignore = stagedWeaponCore(
+                            native->wear, native->command.get(), native->charges, native->respawn.get(), {}, &values, nullptr);
+                        if (native->loot)
+                            for (size_t i = 0; i < values.mContainers.size() + 2; ++i)
+                                if (native->loot->replaces(i))
+                                    (i < 2 ? values.mActors[i] : values.mContainers[i - 2]) = native->loot->values(i);
+                        const auto modified
+                            = stagePersonalItemTransfers(values, mRuntime.mStore, mBinding.mPlayers, scripts.itemTransfers);
+                        if (!modified.empty())
+                        {
+                            if (values.mRevision <= mWorld.getPtrRegistryRevision())
+                                values.mRevision = mWorld.getPtrRegistryRevision() + 1;
+                            const auto& bound = native->membership ? *native->membership : mBinding;
+                            std::vector<EquipmentContainerBinding> all, dynamic;
+                            for (size_t i = 0; i < bound.mContainers.size(); ++i)
+                            {
+                                const auto& c = bound.mContainers[i];
+                                all.push_back({c.mBase, c.mPlacement});
+                                if (i >= mBinding.mStaticContainers) dynamic.push_back(all.back());
+                            }
+                            mRuntime.encodeSession(values, native->wornCore, all);
+                            std::vector<size_t> owners;
+                            for (size_t i = 0; i < values.mContainers.size() + 2; ++i)
+                                if (native->membership || (native->loot && native->loot->replaces(i))
+                                    || std::ranges::find(modified, i) != modified.end())
+                                    owners.push_back(i);
+                            native->loot = native->membership
+                                ? mRuntime.prepareProjectileLoot(values, owners, mBinding.mStaticContainers, dynamic)
+                                : mRuntime.prepareProjectileLoot(values, owners);
+                        }
+                    }
+                    if (native->personalScripts && !native->personalScripts->itemTransfers.empty())
+                        scripts.itemTransfers.insert(scripts.itemTransfers.begin(),
+                            native->personalScripts->itemTransfers.begin(),
+                            native->personalScripts->itemTransfers.end());
                     native->personalInvocations += scripts.invocations;
                     native->personalScripts = std::move(scripts);
                 }
@@ -12734,12 +12980,52 @@ namespace TES3MP::Native
                 > PersonalScripts::MaximumInvocationsPerTransaction)
                 throw std::invalid_argument("Dialogue and scheduled invocation budget exceeded");
             transaction->personalInvocations += dialogue->invocations;
+            if (!dialogue->itemTransfers.empty())
+            {
+                EquipmentSessionValues values;
+                std::ignore = stagedWeaponCore(
+                    transaction->wear, transaction->command.get(), transaction->charges, transaction->respawn.get(), {}, &values, nullptr);
+                if (transaction->loot)
+                    for (size_t i = 0; i < values.mContainers.size() + 2; ++i)
+                        if (transaction->loot->replaces(i))
+                            (i < 2 ? values.mActors[i] : values.mContainers[i - 2]) = transaction->loot->values(i);
+                const auto modified
+                    = stagePersonalItemTransfers(values, mRuntime.mStore, mBinding.mPlayers, dialogue->itemTransfers);
+                if (!modified.empty())
+                {
+                    if (values.mRevision <= mWorld.getPtrRegistryRevision())
+                        values.mRevision = mWorld.getPtrRegistryRevision() + 1;
+                    const auto& bound = transaction->membership ? *transaction->membership : mBinding;
+                    std::vector<EquipmentContainerBinding> all, dynamic;
+                    for (size_t i = 0; i < bound.mContainers.size(); ++i)
+                    {
+                        const auto& c = bound.mContainers[i];
+                        all.push_back({c.mBase, c.mPlacement});
+                        if (i >= mBinding.mStaticContainers) dynamic.push_back(all.back());
+                    }
+                    mRuntime.encodeSession(values, transaction->wornCore, all);
+                    std::vector<size_t> owners;
+                    for (size_t i = 0; i < values.mContainers.size() + 2; ++i)
+                        if (transaction->membership || (transaction->loot && transaction->loot->replaces(i))
+                            || std::ranges::find(modified, i) != modified.end())
+                            owners.push_back(i);
+                    transaction->loot = transaction->membership
+                        ? mRuntime.prepareProjectileLoot(values, owners, mBinding.mStaticContainers, dynamic)
+                        : mRuntime.prepareProjectileLoot(values, owners);
+                }
+            }
             if (!transaction->personalScripts)
             {
                 PersonalScripts::Prepared state;
                 state.state = std::move(dialogue->state);
                 state.image = mBinding.mPersonalScripts->encode(state.state);
+                state.itemTransfers = std::move(dialogue->itemTransfers);
                 transaction->personalScripts = std::move(state);
+            }
+            else if (!dialogue->itemTransfers.empty())
+            {
+                transaction->personalScripts->itemTransfers.insert(transaction->personalScripts->itemTransfers.begin(),
+                    dialogue->itemTransfers.begin(), dialogue->itemTransfers.end());
             }
             transaction->dialogueOutputs = std::move(dialogue->outputs);
             for (const auto& output : transaction->dialogueOutputs)

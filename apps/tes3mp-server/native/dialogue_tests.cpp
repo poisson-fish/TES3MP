@@ -1,6 +1,7 @@
 #include "personal_script.hpp"
 #include <apps/openmw/mwscript/aiextensions.hpp>
 #include <apps/openmw/mwscript/cellextensions.hpp>
+#include <apps/openmw/mwscript/containerextensions.hpp>
 #include <apps/openmw/mwgui/referenceinterface.hpp>
 #include <apps/openmw/mwbase/environment.hpp>
 #include <apps/openmw/mwclass/classes.hpp>
@@ -31,6 +32,9 @@
 #include <components/esm3/loadclas.hpp>
 #include <components/esm3/loadfact.hpp>
 #include <components/esm3/loadcell.hpp>
+#include <components/esm3/loadbook.hpp>
+#include <components/esm3/loadclot.hpp>
+#include <components/esm3/loadmisc.hpp>
 #include <components/esm3/loadgmst.hpp>
 #include <components/esm3/loadregn.hpp>
 #include <components/esm3/loadscpt.hpp>
@@ -2294,8 +2298,160 @@ namespace
         require(postDepartureTick.result.executed && postDepartureTick.state[0].clockTicks == 2
             && postDepartureTick.state[1].clockTicks == 3,
             "Scheduled terminal Disable did not suspend subsequent source-bank ticks for the departed story");
-        std::cout << "npc banks: unified M5 policy (Disable/Enable/return, relocation/activity/return, wait/life-event/opportunity); "
-            "private pose/health/timer/activation/scheduled-Disable continuation across public death; exact recovery\n";
+        for (const char* ringName : {"ring_keley", "ring_nuccius", "extravagant_ring_processus"})
+        {
+            ESM::Clothing ring; ring.blank(); ring.mId = id(ringName);
+            ring.mData.mType = ESM::Clothing::Ring; ring.mData.mWeight = .1f; ring.mData.mValue = 50;
+            fixture.content.insertStatic(ring);
+        }
+        {
+            ESM::Miscellaneous gold; gold.blank(); gold.mId = id("gold_001");
+            gold.mData.mWeight = 0.f; gold.mData.mValue = 1;
+            fixture.content.insertStatic(gold);
+            ESM::Book taxRecord; taxRecord.blank(); taxRecord.mId = id("tax record");
+            taxRecord.mData.mWeight = 1.f; taxRecord.mData.mValue = 5;
+            fixture.content.insertStatic(taxRecord);
+            ESM::NPC arrille; arrille.blank(); arrille.mId = id("arrille"); arrille.mNpdt.mDisposition = 50;
+            fixture.content.insertStatic(arrille);
+            ESM::NPC speakerWithLoot; speakerWithLoot.blank(); speakerWithLoot.mId = id("speaker_items_r29");
+            speakerWithLoot.mNpdt.mDisposition = 50;
+            speakerWithLoot.mInventory.mList.push_back({50, id("gold_001")});
+            fixture.content.insertStatic(speakerWithLoot);
+        }
+        MWWorld::ManualRef itemActor(fixture.content, id("speaker_items_r29"));
+        resolver.actor = itemActor.getPtr();
+        std::vector<ESM::Script> itemBankScripts;
+        {
+            ESM::Script primaryItemScript; primaryItemScript.blank(); primaryItemScript.mId = id("ledger_v63");
+            primaryItemScript.mScriptText = "begin ledger_v63\nlong calls\nlong playerGold\nlong npcGold\n"
+                "set calls to calls + 1\n"
+                "set playerGold to player->GetItemCount \"gold_001\"\n"
+                "if ( calls == 1 )\nAddItem \"gold_001\" 10\nRemoveItem \"gold_001\" 5\nendif\n"
+                "set npcGold to GetItemCount \"gold_001\"\nend";
+            ESM::Script relayItemScript; relayItemScript.blank(); relayItemScript.mId = id("relay_n48");
+            relayItemScript.mScriptText = "begin relay_n48\nlong calls\nlong npcGold\n"
+                "set calls to calls + 1\nset npcGold to speaker_items_r29->GetItemCount \"gold_001\"\nend";
+            itemBankScripts = {primaryItemScript, relayItemScript};
+        }
+        auto itemPrimary = std::make_shared<SharedWorldScript>(
+            itemBankScripts[0], std::vector{global}, "npc-banks-items", crypto, itemBankScripts, id("speaker_items_r29"), true);
+        auto itemRelay = std::make_shared<SharedWorldScript>(
+            itemBankScripts[1], std::vector{global}, "npc-banks-items", crypto, itemBankScripts, id("speaker_items_r29"), true);
+        std::vector<PersonalScripts::Definition> itemDefs;
+        for (const uint64_t character : {11, 22})
+        {
+            auto dialogues = records();
+            auto& topic = dialogues[1];
+            topic.mInfo.clear();
+            ESM::DialInfo fargothBranch; fargothBranch.blank(); fargothBranch.mId = id("fargoth_ring_100");
+            fargothBranch.mActor = id("speaker_items_r29");
+            fargothBranch.mSelects = {
+                condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 0),
+                condition(ESM::DialogueCondition::Function_Item, "ring_keley", 1)};
+            fargothBranch.mResponse = "You found my ring!";
+            fargothBranch.mResultScript = "Journal journey_t37 10\n\"arrille\"->ModDisposition 40\n"
+                "ModDisposition 50\nplayer->RemoveItem \"ring_keley\" 1";
+            topic.mInfo.push_back(fargothBranch);
+            ESM::DialInfo nucciusBranch; nucciusBranch.blank(); nucciusBranch.mId = id("nuccius_ring_20");
+            nucciusBranch.mActor = id("speaker_items_r29");
+            nucciusBranch.mSelects = {condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 10)};
+            nucciusBranch.mResponse = "Take this cursed ring.";
+            nucciusBranch.mResultScript = "Journal journey_t37 20\nplayer->AddItem \"ring_nuccius\" 1\n"
+                "player->RemoveItem \"gold_001\" 100";
+            topic.mInfo.push_back(nucciusBranch);
+            ESM::DialInfo taxmanBranch; taxmanBranch.blank(); taxmanBranch.mId = id("taxman_riddles_40");
+            taxmanBranch.mActor = id("speaker_items_r29");
+            taxmanBranch.mSelects = {
+                condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 20),
+                condition(ESM::DialogueCondition::Function_Item, "tax record", 1)};
+            taxmanBranch.mResponse = "Justice and riddles answered.";
+            taxmanBranch.mResultScript = "Journal journey_t37 40\n"
+                "if ( player->GetItemCount \"tax record\" >= 1 )\n"
+                "player->RemoveItem \"tax record\" 1\n"
+                "player->RemoveItem \"extravagant_ring_processus\" 1\n"
+                "player->AddItem \"gold_001\" 200\n"
+                "RemoveItem \"gold_001\" 20\n"
+                "endif";
+            topic.mInfo.push_back(taxmanBranch);
+            itemDefs.push_back({character, 31, itemPrimary, {{itemRelay, true}}, true,
+                dialogues, PersonalScripts::EncounterBinding{41, id("speaker_items_r29"), id("room_e87")}});
+        }
+        PersonalScripts itemPolicy(7, itemDefs, crypto, true, true, true, true, true, true, true, true, true, true, true);
+        auto itemState = itemPolicy.initial();
+        MWMechanics::NpcStats speakerItemStats(fixture.content);
+        speakerItemStats.setBaseDisposition(50);
+        const auto runItemIntent = [&](const PersonalScripts::State& before, uint64_t character, uint64_t command,
+            std::optional<std::span<const PersonalScripts::ItemBalance>> inv = {}) {
+            const auto& instance = before[character == 11 ? 0 : 1];
+            resolver.expected = instance.last; ++resolver.expected.invocation;
+            resolver.expected.causalEvent = instance.eventCursor + 1;
+            resolver.expected.sourceReference = 41; resolver.expected.sourceLife = 1; resolver.sourceLife = 1;
+            return itemPolicy.prepareIntent(before, character, command,
+                {31, 41, 1, instance.dialogueRevision, "passage_k61", -1},
+                "Room", fixture.content, resolver, 16, nullptr, {}, &speakerItemStats, JournalDate, inv);
+        };
+        const std::array<PersonalScripts::ItemBalance, 1> noRing{{{id("gold_001"), 50}}};
+        const auto missingRing = runItemIntent(itemState, 11, 201, std::span<const PersonalScripts::ItemBalance>(noRing));
+        require(missingRing.result.outcome == SharedWorldScript::Outcome::Rejected && missingRing.state.empty()
+            && missingRing.itemTransfers.empty(),
+            "Fargoth ring completion succeeded without ring_keley in staged inventory");
+        const std::array<PersonalScripts::ItemBalance, 2> withRing{{{id("ring_keley"), 1}, {id("gold_001"), 50}}};
+        auto fargothDone = runItemIntent(itemState, 11, 202, std::span<const PersonalScripts::ItemBalance>(withRing));
+        require(fargothDone.result.executed && fargothDone.state[0].dialogue.quests.front().mState == 10
+            && fargothDone.state[0].playerItems == std::vector<PersonalScripts::ItemBalance>{{id("gold_001"), 50}}
+            && fargothDone.state[0].itemReceipts.size() == 1
+            && fargothDone.state[0].itemReceipts[0] == PersonalScripts::ItemReceipt{1, 1, 41, 1, true, false, id("ring_keley"), 1}
+            && fargothDone.itemTransfers.size() == 1
+            && fargothDone.state[1].playerItems.empty() && fargothDone.state[1].itemReceipts.empty(),
+            "Fargoth ring completion did not remove ring_keley or record provenance receipt");
+        const auto insufficientGold = runItemIntent(fargothDone.state, 11, 203);
+        require(insufficientGold.result.outcome == SharedWorldScript::Outcome::Rejected && insufficientGold.state.empty()
+            && insufficientGold.itemTransfers.empty()
+            && fargothDone.state[0].dialogue.quests.front().mState == 10
+            && fargothDone.state[0].itemReceipts.size() == 1,
+            "Insufficient gold for Nuccius purchase leaked ring_nuccius or journal progress");
+        const std::array<PersonalScripts::ItemBalance, 1> enoughGold{{{id("gold_001"), 120}}};
+        auto nucciusDone = runItemIntent(fargothDone.state, 11, 204, std::span<const PersonalScripts::ItemBalance>(enoughGold));
+        require(nucciusDone.result.executed && nucciusDone.state[0].dialogue.quests.front().mState == 20
+            && nucciusDone.state[0].playerItems == std::vector<PersonalScripts::ItemBalance>{{id("gold_001"), 20}, {id("ring_nuccius"), 1}}
+            && nucciusDone.state[0].itemReceipts.size() == 3
+            && nucciusDone.itemTransfers.size() == 2
+            && nucciusDone.itemTransfers[0].receipt == PersonalScripts::ItemReceipt{1, 1, 41, 2, true, true, id("ring_nuccius"), 1}
+            && nucciusDone.itemTransfers[1].receipt == PersonalScripts::ItemReceipt{1, 1, 41, 2, true, false, id("gold_001"), 100},
+            "Vodunius Nuccius purchase did not atomically grant ring_nuccius and deduct 100 gold");
+        const std::array<PersonalScripts::ItemBalance, 4> taxmanInv{{
+            {id("gold_001"), 20}, {id("ring_nuccius"), 1}, {id("tax record"), 1}, {id("extravagant_ring_processus"), 1}}};
+        auto taxmanDone = runItemIntent(nucciusDone.state, 11, 205, std::span<const PersonalScripts::ItemBalance>(taxmanInv));
+        require(taxmanDone.result.executed && taxmanDone.state[0].dialogue.quests.front().mState == 40
+            && taxmanDone.state[0].playerItems == std::vector<PersonalScripts::ItemBalance>{{id("gold_001"), 220}, {id("ring_nuccius"), 1}}
+            && taxmanDone.state[0].npcItems == std::vector<PersonalScripts::ItemBalance>{{id("gold_001"), 30}}
+            && taxmanDone.state[0].itemReceipts.size() == 7 && taxmanDone.itemTransfers.size() == 4,
+            "Death of a Taxman / Duel of Riddles item transfers did not update player/NPC balances and receipts");
+        const std::array<PersonalScripts::ItemBalance, 1> bobInv{{{id("gold_001"), 75}}};
+        const std::array<PersonalScripts::PlayerInventory, 2> scheduledInvs{{
+            {11, taxmanDone.state[0].playerItems}, {22, bobInv}}};
+        publicStats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 18), MWWorld::TimeStamp{});
+        events.clear();
+        source = {41, 1, 0, id("speaker_items_r29"), true, 0, 0, events, &publicStats, publicPose, &privateStats,
+            false, false, 0, 0, false, 0, scheduledInvs};
+        auto itemScheduled = itemPolicy.prepareScheduled(taxmanDone.state, 1, both, fixture.content, scheduledResolver, &source);
+        require(itemScheduled.result.executed
+            && integer(itemScheduled.state[0].runtime, "playergold") == 220
+            && integer(itemScheduled.state[0].runtime, "npcgold") == 35
+            && integer(itemScheduled.state[0].members[0], "npcgold") == 35
+            && integer(itemScheduled.state[1].runtime, "playergold") == 75
+            && integer(itemScheduled.state[1].runtime, "npcgold") == 55
+            && integer(itemScheduled.state[1].members[0], "npcgold") == 55
+            && itemScheduled.itemTransfers.size() == 4
+            && itemPolicy.encode(itemPolicy.restore(itemScheduled.image)) == itemScheduled.image,
+            "Scheduled source bank GetItemCount/AddItem/RemoveItem failed isolation or round-trip");
+        auto duplicateGrantState = itemScheduled.state;
+        duplicateGrantState[0].dialogue.quests.front().mState = 10;
+        const auto duplicateGrant = runItemIntent(duplicateGrantState, 11, 206);
+        require(duplicateGrant.result.outcome == SharedWorldScript::Outcome::Rejected && duplicateGrant.state.empty(),
+            "Duplicate provenance item grant was not rejected");
+        std::cout << "npc banks: unified M5 policy (Disable/Enable/return, relocation/activity/return, wait/life-event/opportunity, provenance items); "
+            "private pose/health/timer/activation/item/scheduled-Disable continuation across public death; exact recovery\n";
     }
 
     void stock(CredentialCrypto& crypto)
@@ -2361,10 +2517,16 @@ namespace
             "Full stock installer bypassed staged explicit NPC result ownership");
         MWScript::Misc::installOpcodes(interpreter);
         MWScript::Cell::installOpcodes(interpreter);
+        MWScript::Container::installOpcodes(interpreter);
         rejects([&] { interpreter.run(runtime.compileResult("Disable", true, id("speaker_r29")), scoped, 4096); },
             "Full stock installer bypassed staged physical ownership");
         rejects([&] { interpreter.run(runtime.compileResult("set calls to GetDisabled", true), scoped, 4096); },
             "Full stock installer read unscoped physical state for a scoped caller");
+        for (const char* itemSource : {"set calls to GetItemCount \"gold_001\"", "AddItem \"gold_001\" 1",
+                 "RemoveItem \"gold_001\" 1", "set calls to player->GetItemCount \"gold_001\"",
+                 "player->AddItem \"gold_001\" 1", "player->RemoveItem \"gold_001\" 1"})
+            rejects([&] { interpreter.run(runtime.compileResult(itemSource, true, id("speaker_r29")), scoped, 4096); },
+                "Full stock installer let a scoped caller read/write unscoped container inventory");
         for (const int op : {Compiler::Cell::opcodeCellChanged, Compiler::Misc::opcodeMenuMode, Compiler::Misc::opcodeGetPcSleep,
                  Compiler::Misc::opcodeOnActivate, Compiler::Misc::opcodeActivate})
             rejects([&] {

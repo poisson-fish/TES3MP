@@ -567,9 +567,9 @@ namespace
             });
             require(finish != topic->mInfo.end(), "Unchanged ring completion branch missing");
             const auto unchanged = runtime.encode(runtime.initial());
-            blocked([&] { (void)runtime.compileResult(finish->mResultScript, true, npc->mId); },
-                "line ", "Seyda Neen ring completion (AddItem/RemoveItem)");
-            require(runtime.encode(runtime.initial()) == unchanged, "Rejected stock quest changed script state");
+            require(!runtime.compileResult(finish->mResultScript, true, npc->mId).mInstructions.empty()
+                    && runtime.encode(runtime.initial()) == unchanged,
+                "Seyda Neen ring completion result failed admission or mutated state");
             const auto* departure = loadout.store().get<ESM::NPC>().find(id("vodunius nuccius"));
             const auto* departureScript = loadout.store().get<ESM::Script>().find(departure->mScript);
             const std::vector<ESM::Script> departureBank{*departureScript};
@@ -577,7 +577,7 @@ namespace
             require(source.encode(source.restore(source.encode(source.initial()))) == source.encode(source.initial()),
                 "Seyda Neen departure source-bank failed admission");
         }
-        std::cout << "Quest completion remains open; no journal/reward/source life was executed or copied\n";
+        std::cout << "Quest content preflight passed; no journal/reward/source life was executed or copied\n";
     }
 
     void questAudit(CredentialCrypto& crypto)
@@ -627,22 +627,39 @@ namespace
             "player->Disable",
             "Journal \"TR_M1_GS_MQ_4\" 10",
             "SetJournalIndex \"TR_M1_GS_MQ_4\" 10",
-            "if ( player->GetItemCount \"ring_keley\" >= 1 )\nset state to 1\nendif"})
+            "player->Equip \"ring_keley\""})
             rejects([&] {
                 auto candidate = makeBankScript(query);
                 SharedWorldScript blocked(candidate, {eldaleDead}, "quest-audit-v95", crypto,
                     std::vector<ESM::Script>{candidate, hortDeath}, id("TR_m1_T_Eldale"), true);
-            }, "Unadmitted foreign activation/disable, journal write, or item opcode compiled in source bank");
+            }, "Unadmitted foreign activation/disable, journal write, or Equip opcode compiled in source bank");
+        auto eldaleWithItems = makeBankScript(
+            "if ( player->GetItemCount \"ring_keley\" >= 1 )\n"
+            "set state to GetItemCount \"gold_001\"\n"
+            "AddItem \"gold_001\" 10\n"
+            "RemoveItem \"gold_001\" 5\n"
+            "player->AddItem \"gold_001\" 25\n"
+            "player->RemoveItem \"ring_keley\" 1\n"
+            "endif");
+        SharedWorldScript admittedItems(eldaleWithItems, {eldaleDead}, "quest-audit-items", crypto,
+            std::vector<ESM::Script>{eldaleWithItems, hortDeath}, id("TR_m1_T_Eldale"), true);
+        require(admittedItems.encode(admittedItems.restore(admittedItems.encode(admittedItems.initial())))
+                == admittedItems.encode(admittedItems.initial()),
+            "Batch-3 provenance item opcodes in source bank failed admission or round-trip");
         for (const auto* resultOp : {
-            "if ( player->GetItemCount \"ring_keley\" >= 1 )\nset doOnce to 1\nendif",
-            "player->AddItem \"gold_001\" 100",
-            "player->RemoveItem \"ring_keley\" 1"})
-            rejects([&] { (void)admittedBank.compileResult(resultOp, true, id("TR_m1_T_Eldale"), false, true, true); },
-                "Unadmitted Batch-3 provenance item opcode compiled in dialogue result");
-        std::cout << "quest audit: V95+Batch-1/2 admits source-bank GetJournalIndex/CellChanged/MenuMode/GetPCSleep/"
-            "OnActivate/Activate/Disable/OnDeath/StartScript/StopScript/GetSecondsPassed/GetDisabled/GetPos/GetAngle/GetHealth "
-            "and result Journal/SetJournalIndex/GetJournalIndex/AddTopic/Choice/ModDisposition/foreign-ModDisposition/Disable/Enable/Position/PositionCell/AiTravel/AiEscort; "
-            "remaining quest batch isolated to (3) provenance GetItemCount/AddItem/RemoveItem\n";
+            "Journal MS_FargothRing 100\n\"arrille\"->ModDisposition 40\nModDisposition 50\nplayer->RemoveItem \"ring_keley\" 1",
+            "Journal MS_Nuccius 20\nplayer->AddItem \"ring_nuccius\" 1\nplayer->RemoveItem \"gold_001\" 100",
+            "if ( player->GetItemCount \"tax record\" >= 1 )\nplayer->RemoveItem \"tax record\" 1\n"
+            "player->RemoveItem \"extravagant_ring_processus\" 1\nplayer->AddItem \"gold_001\" 500\nendif\n"
+            "if ( GetItemCount \"gold_001\" >= 50 )\nRemoveItem \"gold_001\" 50\nplayer->AddItem \"gold_001\" 50\nendif"})
+            require(!admittedBank.compileResult(resultOp, true, id("TR_m1_T_Eldale"), false, true, true).mInstructions.empty(),
+                "Batch-3 provenance item opcode failed admission in dialogue result");
+        rejects([&] { (void)admittedBank.compileResult("player->Equip \"ring_keley\"", true, id("TR_m1_T_Eldale"), false, true, true); },
+            "Unadmitted Container Equip opcode compiled in dialogue result");
+        std::cout << "quest audit: V95+Batch-1/2/3 admits source-bank GetJournalIndex/CellChanged/MenuMode/GetPCSleep/"
+            "OnActivate/Activate/Disable/OnDeath/StartScript/StopScript/GetSecondsPassed/GetDisabled/GetPos/GetAngle/GetHealth/"
+            "GetItemCount/AddItem/RemoveItem and result Journal/SetJournalIndex/GetJournalIndex/AddTopic/Choice/ModDisposition/"
+            "foreign-ModDisposition/Disable/Enable/Position/PositionCell/AiTravel/AiEscort/GetItemCount/AddItem/RemoveItem\n";
     }
 }
 

@@ -343,6 +343,36 @@ namespace MWScript
         mReferenceState->activate(*mExecution, reference);
     }
 
+    int InterpreterContext::itemCount(const MWWorld::Ptr& reference, const ESM::RefId& item) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference()
+            || !item.is<ESM::StringRefId>() || item.empty()
+            || item.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || item.getRefIdString().find('\0') != std::string_view::npos)
+            throw std::invalid_argument("GetItemCount lacks scoped inventory transaction");
+        return mReferenceState->itemCount(*mExecution, reference, item);
+    }
+
+    void InterpreterContext::addItem(const MWWorld::Ptr& reference, const ESM::RefId& item, int count) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference()
+            || !item.is<ESM::StringRefId>() || item.empty()
+            || item.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || item.getRefIdString().find('\0') != std::string_view::npos || count <= 0)
+            throw std::invalid_argument("AddItem lacks scoped inventory transaction");
+        mReferenceState->addItem(*mExecution, reference, item, count);
+    }
+
+    void InterpreterContext::removeItem(const MWWorld::Ptr& reference, const ESM::RefId& item, int count) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference()
+            || !item.is<ESM::StringRefId>() || item.empty()
+            || item.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || item.getRefIdString().find('\0') != std::string_view::npos || count <= 0)
+            throw std::invalid_argument("RemoveItem lacks scoped inventory transaction");
+        mReferenceState->removeItem(*mExecution, reference, item, count);
+    }
+
     void InterpreterContext::position(const MWWorld::Ptr& reference, const std::array<float, 3>& xyz,
         float yaw, const ESM::RefId& cell) const
     {

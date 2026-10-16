@@ -302,6 +302,7 @@ bool MWDialogue::Filter::testSelectStruct(const SelectWrapper& select) const
             case ESM::DialogueCondition::Function_Local:
             case ESM::DialogueCondition::Function_NotLocal:
             case ESM::DialogueCondition::Function_Journal:
+            case ESM::DialogueCondition::Function_Item:
             case ESM::DialogueCondition::Function_Choice:
             case ESM::DialogueCondition::Function_TalkedToPc:
             case ESM::DialogueCondition::Function_NotId:
@@ -418,6 +419,8 @@ int MWDialogue::Filter::getSelectStructInteger(const SelectWrapper& select) cons
 
         case ESM::DialogueCondition::Function_Item:
         {
+            if (mScoped)
+                return mScoped->script.itemCount(mScoped->script.resolveReferenceName("player"), select.getId());
             MWWorld::ContainerStore& store = player.getClass().getContainerStore(player);
 
             return store.count(select.getId());

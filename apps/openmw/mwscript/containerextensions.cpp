@@ -6,6 +6,7 @@
 
 #include <components/debug/debuglog.hpp>
 
+#include <components/compiler/extensions.hpp>
 #include <components/compiler/opcodes.hpp>
 
 #include <components/interpreter/interpreter.hpp>
@@ -81,12 +82,22 @@ namespace MWScript
 {
     namespace Container
     {
+        namespace
+        {
+            void requireUnscopedContainer(Interpreter::Runtime& runtime)
+            {
+                if (static_cast<InterpreterContext&>(runtime.getContext()).getExecutionContext())
+                    throw std::runtime_error("Container service lacks scoped transaction");
+            }
+        }
+
         template <class R>
         class OpAddItem : public Interpreter::Opcode0
         {
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
                 MWWorld::Ptr ptr = R()(runtime);
 
                 ESM::RefId item = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
@@ -94,6 +105,12 @@ namespace MWScript
 
                 Interpreter::Type_Integer count = runtime[0].mInteger;
                 runtime.pop();
+
+                if (context.getExecutionContext())
+                {
+                    context.addItem(ptr, item, count);
+                    return;
+                }
 
                 if (!MWBase::Environment::get().getESMStore()->find(item))
                 {
@@ -189,10 +206,17 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                MWWorld::Ptr ptr = R()(runtime, false);
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                MWWorld::Ptr ptr = R()(runtime, context.getExecutionContext() != nullptr);
 
                 ESM::RefId item = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
+
+                if (context.getExecutionContext())
+                {
+                    runtime.push(context.itemCount(ptr, item));
+                    return;
+                }
 
                 if (ptr.isEmpty() || (ptr.getType() != ESM::Container::sRecordId && !ptr.getClass().isActor()))
                 {
@@ -215,6 +239,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
                 MWWorld::Ptr ptr = R()(runtime);
 
                 ESM::RefId item = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
@@ -222,6 +247,12 @@ namespace MWScript
 
                 Interpreter::Type_Integer count = runtime[0].mInteger;
                 runtime.pop();
+
+                if (context.getExecutionContext())
+                {
+                    context.removeItem(ptr, item, count);
+                    return;
+                }
 
                 if (!MWBase::Environment::get().getESMStore()->find(item))
                 {
@@ -310,6 +341,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireUnscopedContainer(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 ESM::RefId item = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
@@ -357,6 +389,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireUnscopedContainer(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 Interpreter::Type_Integer location = runtime[0].mInteger;
@@ -429,6 +462,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireUnscopedContainer(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 ESM::RefId item = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
@@ -454,6 +488,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireUnscopedContainer(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 ESM::RefId name = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
@@ -478,6 +513,7 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                requireUnscopedContainer(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
                 const MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore(ptr);
@@ -508,7 +544,15 @@ namespace MWScript
             }
         };
 
-        void installOpcodes(Interpreter::Interpreter& interpreter)
+        void registerItemOpcodes(Compiler::Extensions& extensions)
+        {
+            using namespace Compiler::Container;
+            extensions.registerInstruction("additem", "clX", opcodeAddItem, opcodeAddItemExplicit);
+            extensions.registerFunction("getitemcount", 'l', "cX", opcodeGetItemCount, opcodeGetItemCountExplicit);
+            extensions.registerInstruction("removeitem", "clX", opcodeRemoveItem, opcodeRemoveItemExplicit);
+        }
+
+        void installItemOpcodes(Interpreter::Interpreter& interpreter)
         {
             interpreter.installSegment5<OpAddItem<ImplicitRef>>(Compiler::Container::opcodeAddItem);
             interpreter.installSegment5<OpAddItem<ExplicitRef>>(Compiler::Container::opcodeAddItemExplicit);
@@ -516,6 +560,11 @@ namespace MWScript
             interpreter.installSegment5<OpGetItemCount<ExplicitRef>>(Compiler::Container::opcodeGetItemCountExplicit);
             interpreter.installSegment5<OpRemoveItem<ImplicitRef>>(Compiler::Container::opcodeRemoveItem);
             interpreter.installSegment5<OpRemoveItem<ExplicitRef>>(Compiler::Container::opcodeRemoveItemExplicit);
+        }
+
+        void installOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            installItemOpcodes(interpreter);
             interpreter.installSegment5<OpEquip<ImplicitRef>>(Compiler::Container::opcodeEquip);
             interpreter.installSegment5<OpEquip<ExplicitRef>>(Compiler::Container::opcodeEquipExplicit);
             interpreter.installSegment5<OpGetArmorType<ImplicitRef>>(Compiler::Container::opcodeGetArmorType);

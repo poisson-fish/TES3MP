@@ -10,6 +10,7 @@
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/esmstore.hpp>
+#include <apps/openmw/mwworld/inventoryitem.hpp>
 #include <bit>
 #include <cmath>
 #include <components/esm3/esmwriter.hpp>
@@ -250,8 +251,8 @@ namespace TES3MP::Native
             FilterContext(const MWScript::ExecutionContext& execution, const MWWorld::ESMStore& content,
                 const MWScript::ReferenceResolver& resolver, Bank& bank, MWScript::DialogueState& dialogue,
                 const std::vector<ESM::Global>& values, MWMechanics::NpcStats* playerStats, std::string_view cell,
-                std::optional<std::string_view> customClass)
-                : InterpreterContext(nullptr, execution, content, resolver, playerStats, &bank, &dialogue)
+                std::optional<std::string_view> customClass, MWScript::ReferenceState* referenceState = nullptr)
+                : InterpreterContext(nullptr, execution, content, resolver, playerStats, &bank, &dialogue, nullptr, referenceState)
                 , globals(values), cellName(cell), customClassName(customClass) {}
             std::string_view getPCClass() const override
             {
@@ -367,6 +368,196 @@ namespace TES3MP::Native
             a.steps = 0; a.completed = false; a.validate(); a.steps = steps; a.completed = completed;
             if (state) { a.actorImage.assign(image.begin(), image.end()); state->activity = std::move(a); }
         }
+        void items(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        {
+            const auto writeBalances = [&](const std::vector<PersonalScripts::ItemBalance>& balances) {
+                word(bytes, balances.size());
+                for (const auto& entry : balances)
+                {
+                    ref(bytes, entry.item);
+                    word(bytes, std::bit_cast<uint32_t>(entry.count));
+                }
+            };
+            writeBalances(state.playerItems);
+            writeBalances(state.npcItems);
+            word(bytes, state.itemReceipts.size());
+            for (const auto& receipt : state.itemReceipts)
+            {
+                word(bytes, receipt.scope);
+                word(bytes, receipt.sourceKind);
+                word(bytes, receipt.sourceId);
+                word(bytes, receipt.step);
+                word(bytes, receipt.playerTarget);
+                word(bytes, receipt.addition);
+                ref(bytes, receipt.item);
+                word(bytes, std::bit_cast<uint32_t>(receipt.count));
+            }
+        }
+        void items(Cursor& input, PersonalScripts::Instance* state)
+        {
+            const auto readBalances = [&](std::vector<PersonalScripts::ItemBalance>* target) {
+                const auto count = input.word();
+                require(count <= PersonalScripts::MaximumTrackedItemsPerStory);
+                for (size_t i = 0; i < count; ++i)
+                {
+                    const auto id = ref(input);
+                    const auto rawCount = input.word();
+                    require(!id.empty() && rawCount <= uint64_t(PersonalScripts::MaximumItemTransferCount));
+                    if (target) target->push_back({id, int(rawCount)});
+                }
+            };
+            readBalances(state ? &state->playerItems : nullptr);
+            readBalances(state ? &state->npcItems : nullptr);
+            const auto receiptCount = input.word();
+            require(receiptCount <= PersonalScripts::MaximumItemReceiptsPerStory);
+            for (size_t i = 0; i < receiptCount; ++i)
+            {
+                PersonalScripts::ItemReceipt receipt;
+                receipt.scope = input.word();
+                receipt.sourceKind = input.word();
+                receipt.sourceId = input.word();
+                receipt.step = input.word();
+                const auto playerTarget = input.word(), addition = input.word();
+                require(playerTarget <= 1 && addition <= 1);
+                receipt.playerTarget = playerTarget;
+                receipt.addition = addition;
+                receipt.item = ref(input);
+                const auto rawCount = input.word();
+                require(!receipt.item.empty() && rawCount >= 1
+                    && rawCount <= uint64_t(PersonalScripts::MaximumItemTransferCount));
+                receipt.count = int(rawCount);
+                if (state) state->itemReceipts.push_back(std::move(receipt));
+            }
+        }
+        void validateInventoryItem(const MWWorld::ESMStore& content, const ESM::RefId& item)
+        {
+            require(item.is<ESM::StringRefId>() && !item.empty()
+                && item.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                && item.getRefIdString().find('\0') == std::string_view::npos);
+            const auto record = MWWorld::inventoryItemRecord(content, item);
+            require(record.mScript.empty());
+            MWWorld::visitInventoryRecord(content, item, [](const auto& base) {
+                require(std::isfinite(base.mData.mWeight) && base.mData.mWeight >= 0.f && base.mData.mValue >= 0);
+            });
+        }
+        void seedPlayerItems(const MWWorld::ESMStore& content, std::vector<PersonalScripts::ItemBalance>& target,
+            std::span<const PersonalScripts::ItemBalance> input)
+        {
+            require(input.size() <= PersonalScripts::MaximumTrackedItemsPerStory);
+            std::vector<PersonalScripts::ItemBalance> seeded;
+            seeded.reserve(input.size());
+            for (size_t i = 0; i < input.size(); ++i)
+            {
+                const auto& entry = input[i];
+                require(entry.count > 0 && entry.count <= PersonalScripts::MaximumItemTransferCount
+                    && std::ranges::none_of(
+                        std::span(input).first(i), [&](const auto& prev) { return prev.item == entry.item; }));
+                validateInventoryItem(content, entry.item);
+                seeded.push_back(entry);
+            }
+            target = std::move(seeded);
+        }
+        struct StoryItemTransaction
+        {
+            const MWWorld::ESMStore* content = nullptr;
+            const MWScript::ReferenceResolver* resolver = nullptr;
+            ESM::RefId sourceRecord;
+            uint64_t character = 0, story = 0, sourceReference = 0, sourceKind = 0;
+            MWWorld::Ptr sourceActor;
+            std::vector<PersonalScripts::ItemBalance>* playerItems = nullptr;
+            std::vector<PersonalScripts::ItemBalance>* npcItems = nullptr;
+            std::vector<PersonalScripts::ItemReceipt>* receipts = nullptr;
+            std::vector<PersonalScripts::Prepared::StagedItemTransfer>* transfers = nullptr;
+            bool isPlayer(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const
+            {
+                require(content && resolver && playerItems && npcItems && receipts && transfers
+                    && !ptr.isEmpty() && ptr.hasLiveReference());
+                if (!sourceActor.isEmpty() && ptr == sourceActor)
+                    return false;
+                const auto player = resolver->resolve(execution, ESM::RefId::stringRefId("player"), false);
+                require(!player.isEmpty() && player.hasLiveReference() && ptr == player);
+                return true;
+            }
+            int baseNpcCount(const ESM::RefId& item) const
+            {
+                const auto* npc = content->get<ESM::NPC>().search(sourceRecord);
+                require(npc != nullptr);
+                int64_t total = 0;
+                for (const auto& entry : npc->mInventory.mList)
+                    if (entry.mItem == item)
+                    {
+                        require(entry.mCount > 0 && entry.mCount <= PersonalScripts::MaximumItemTransferCount);
+                        total += entry.mCount;
+                        require(total <= PersonalScripts::MaximumItemTransferCount);
+                    }
+                return int(total);
+            }
+            int itemCount(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item) const
+            {
+                validateInventoryItem(*content, item);
+                if (isPlayer(execution, ptr))
+                {
+                    const auto found = std::ranges::find(*playerItems, item, &PersonalScripts::ItemBalance::item);
+                    return found == playerItems->end() ? 0 : found->count;
+                }
+                const auto found = std::ranges::find(*npcItems, item, &PersonalScripts::ItemBalance::item);
+                return found == npcItems->end() ? baseNpcCount(item) : found->count;
+            }
+            void addItem(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item, int count)
+            {
+                validateInventoryItem(*content, item);
+                require(count > 0 && count <= PersonalScripts::MaximumItemTransferCount
+                    && receipts->size() < PersonalScripts::MaximumItemReceiptsPerStory);
+                const bool playerTarget = isPlayer(execution, ptr);
+                int64_t priorGrantNet = 0;
+                bool priorStepGrant = false;
+                for (const auto& r : *receipts)
+                    if (r.sourceKind == sourceKind && r.sourceId == sourceReference && r.playerTarget == playerTarget
+                        && r.item == item)
+                    {
+                        if (r.step < execution.invocation && r.addition) priorStepGrant = true;
+                        priorGrantNet += r.addition ? r.count : -r.count;
+                    }
+                require(!priorStepGrant || priorGrantNet <= 0);
+                auto& balances = playerTarget ? *playerItems : *npcItems;
+                auto found = std::ranges::find(balances, item, &PersonalScripts::ItemBalance::item);
+                if (found == balances.end())
+                {
+                    require(balances.size() < PersonalScripts::MaximumTrackedItemsPerStory);
+                    balances.push_back({item, playerTarget ? 0 : baseNpcCount(item)});
+                    found = std::prev(balances.end());
+                }
+                require(found->count <= PersonalScripts::MaximumItemTransferCount - count);
+                found->count += count;
+                const PersonalScripts::ItemReceipt receipt{execution.physicalScope, sourceKind, sourceReference,
+                    execution.invocation, playerTarget, true, item, count};
+                receipts->push_back(receipt);
+                transfers->push_back({character, story, receipt});
+            }
+            void removeItem(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item, int count)
+            {
+                validateInventoryItem(*content, item);
+                require(count > 0 && count <= PersonalScripts::MaximumItemTransferCount
+                    && receipts->size() < PersonalScripts::MaximumItemReceiptsPerStory);
+                const bool playerTarget = isPlayer(execution, ptr);
+                auto& balances = playerTarget ? *playerItems : *npcItems;
+                auto found = std::ranges::find(balances, item, &PersonalScripts::ItemBalance::item);
+                if (found == balances.end())
+                {
+                    require(!playerTarget && balances.size() < PersonalScripts::MaximumTrackedItemsPerStory);
+                    balances.push_back({item, baseNpcCount(item)});
+                    found = std::prev(balances.end());
+                }
+                require(found->count >= count);
+                found->count -= count;
+                if (playerTarget && found->count == 0)
+                    balances.erase(found);
+                const PersonalScripts::ItemReceipt receipt{execution.physicalScope, sourceKind, sourceReference,
+                    execution.invocation, playerTarget, false, item, count};
+                receipts->push_back(receipt);
+                transfers->push_back({character, story, receipt});
+            }
+        };
     }
 
     PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
@@ -730,6 +921,55 @@ namespace TES3MP::Native
         if (mIntents)
             require(!encodeReliablePersonalDialogue(view(state, *SessionId::fromValue(1), SessionGeneration::initial(),
                 ServerTick::initial(), CanonicalRevision::initial())).empty());
+        if (mNpcBanks)
+        {
+            const auto validateBalances = [&](const std::vector<ItemBalance>& balances, bool nonZero) {
+                require(balances.size() <= MaximumTrackedItemsPerStory);
+                for (size_t i = 0; i < balances.size(); ++i)
+                {
+                    const auto& entry = balances[i];
+                    require(entry.item.is<ESM::StringRefId>() && !entry.item.empty()
+                        && entry.item.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                        && entry.item.getRefIdString().find('\0') == std::string_view::npos
+                        && entry.count >= (nonZero ? 1 : 0) && entry.count <= MaximumItemTransferCount
+                        && std::ranges::none_of(
+                            std::span(balances).first(i), [&](const auto& prev) { return prev.item == entry.item; }));
+                }
+            };
+            validateBalances(state.playerItems, true);
+            validateBalances(state.npcItems, false);
+            require(state.itemReceipts.size() <= MaximumItemReceiptsPerStory);
+            uint64_t previousStep = 0;
+            for (size_t i = 0; i < state.itemReceipts.size(); ++i)
+            {
+                const auto& r = state.itemReceipts[i];
+                require((r.scope == 1 || r.scope == index + 2) && (r.sourceKind == 1 || r.sourceKind == 2)
+                    && expected.encounter && r.sourceId == expected.encounter->reference && r.step >= 1
+                    && r.step <= last.invocation && r.step >= previousStep && r.item.is<ESM::StringRefId>()
+                    && !r.item.empty() && r.item.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                    && r.item.getRefIdString().find('\0') == std::string_view::npos && r.count >= 1
+                    && r.count <= MaximumItemTransferCount);
+                if (r.addition)
+                {
+                    int64_t priorNet = 0;
+                    bool priorGrant = false;
+                    for (size_t j = 0; j < i; ++j)
+                    {
+                        const auto& prev = state.itemReceipts[j];
+                        if (prev.sourceKind == r.sourceKind && prev.sourceId == r.sourceId
+                            && prev.playerTarget == r.playerTarget && prev.item == r.item)
+                        {
+                            if (prev.step < r.step && prev.addition) priorGrant = true;
+                            priorNet += prev.addition ? prev.count : -prev.count;
+                        }
+                    }
+                    require(!priorGrant || priorNet <= 0);
+                }
+                previousStep = r.step;
+            }
+        }
+        else
+            require(state.playerItems.empty() && state.npcItems.empty() && state.itemReceipts.empty());
     }
 
     void PersonalScripts::Instance::Activity::validate() const
@@ -802,6 +1042,7 @@ namespace TES3MP::Native
                     }
                 }
                 if (mActivities) activity(bytes, state[i]);
+                if (mNpcBanks) items(bytes, state[i]);
             }
         }
         require(bytes.size() <= MaximumImageBytes);
@@ -870,6 +1111,7 @@ namespace TES3MP::Native
                     }
                 }
                 if (mActivities) activity(preflight, nullptr);
+                if (mNpcBanks) items(preflight, nullptr);
             }
         }
         require(preflight.bytes.empty());
@@ -909,6 +1151,7 @@ namespace TES3MP::Native
                     entry.relocation->yaw = std::bit_cast<float>(uint32_t(input.word()));
                 }
                 if (mActivities) activity(input, &entry);
+                if (mNpcBanks) items(input, &entry);
             }
             validate(entry, i); state.push_back(std::move(entry));
         }
@@ -1112,7 +1355,8 @@ namespace TES3MP::Native
         bool talkedToPlayer, std::string_view cellName, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats,
         std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats,
-        std::optional<MWScript::DialogueState::Stamp> journalStamp, bool encounterPrepared) const
+        std::optional<MWScript::DialogueState::Stamp> journalStamp, bool encounterPrepared,
+        std::optional<std::span<const ItemBalance>> playerInventory) const
     {
         Prepared prepared; auto& result = prepared.result; result.invocationTick = execution.invocation;
         try
@@ -1139,6 +1383,11 @@ namespace TES3MP::Native
                 && current.last.invocation != UINT64_MAX && execution.invocation == current.last.invocation + 1
                 && execution.causalEvent > current.eventCursor && current.runtime.tick != UINT64_MAX);
             prepared.state = before; auto& state = prepared.state[index];
+            if (playerInventory)
+            {
+                require(mNpcBanks);
+                seedPlayerItems(content, state.playerItems, *playerInventory);
+            }
             auto runningExecution = execution;
             if (encounterPrepared) runningExecution.physicalScope = index + 2;
             const auto origin = mEncounters ? resolver.resolve(execution, {}, false) : MWWorld::Ptr{};
@@ -1153,6 +1402,22 @@ namespace TES3MP::Native
                 ESM::RefId cell;
                 std::array<float, 3> origin{};
                 std::optional<Instance::Relocation> relocation;
+                StoryItemTransaction items;
+                int itemCount(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item) const override
+                {
+                    require(npcBanks && execution == expected);
+                    return items.itemCount(execution, ptr, item);
+                }
+                void addItem(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item, int count) override
+                {
+                    require(npcBanks && execution == expected);
+                    items.addItem(execution, ptr, item, count);
+                }
+                void removeItem(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item, int count) override
+                {
+                    require(npcBanks && execution == expected);
+                    items.removeItem(execution, ptr, item, count);
+                }
                 const ESM::Position& position(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
                 { validate(execution, ptr); require(relocations); return source.getRefData().getPosition(); }
                 void position(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr,
@@ -1214,7 +1479,7 @@ namespace TES3MP::Native
                 {
                     require(execution == scene.expected);
                     auto ptr = upstream.resolve(originExecution, id, activeOnly);
-                    if (ptr == origin)
+                    if (id != "player" && ptr == origin)
                         return activeOnly && scene.removed ? MWWorld::Ptr{} : scene.source;
                     return ptr;
                 }
@@ -1232,6 +1497,9 @@ namespace TES3MP::Native
                 scene.relocations = mRelocations; scene.activities = mActivities; scene.npcBanks = mNpcBanks;
                 scene.cell = found->encounter->cell;
                 std::copy(std::begin(origin.getRefData().getPosition().pos), std::end(origin.getRefData().getPosition().pos), scene.origin.begin());
+                scene.items = {&content, &scopedResolver, found->encounter->record, execution.character, execution.story,
+                    execution.sourceReference, 1, scene.source, &state.playerItems, &state.npcItems, &state.itemReceipts,
+                    &prepared.itemTransfers};
             }
 
             const MWScript::ReferenceResolver& runningResolver = mEncounters ? scopedResolver : resolver;
@@ -1243,7 +1511,7 @@ namespace TES3MP::Native
             std::optional<MWMechanics::NpcStats> stats;
             if (playerStats) stats.emplace(*playerStats);
             FilterContext script(runningExecution, content, runningResolver, bank, dialogue, state.runtime.runtime.globals,
-                stats ? &*stats : nullptr, cellName, customClassName);
+                stats ? &*stats : nullptr, cellName, customClassName, mEncounters ? &scene : nullptr);
             JournalText journalText(script, journalStamp.value_or(MWScript::DialogueState::Stamp{}));
             if (mIntents) dialogue.setJournalText(journalText);
             const auto actor = script.resolveReference({});
@@ -1368,12 +1636,13 @@ namespace TES3MP::Native
             if (budget < 2)
             {
                 prepared.state.clear(); prepared.image.clear(); prepared.response.clear(); result.presentation.clear();
+                prepared.itemTransfers.clear();
                 result.outcome = SharedWorldScript::Outcome::Rejected; result.executed = false;
                 result.diagnostic = "Encounter discovery/retry exceeds invocation budget";
                 return prepared;
             }
             auto retry = prepareDialogue(before, execution, topic, choice, disposition, talkedToPlayer, cellName,
-                content, resolver, budget - 1, playerStats, customClassName, speakerStats, journalStamp, true);
+                content, resolver, budget - 1, playerStats, customClassName, speakerStats, journalStamp, true, playerInventory);
             retry.result.trace.executed += result.trace.executed;
             if (retry.result.executed) ++retry.invocations;
             return retry;
@@ -1381,13 +1650,13 @@ namespace TES3MP::Native
         catch (const MWScript::ScriptContextUnavailable& error)
         {
             prepared.state.clear(); prepared.image.clear(); prepared.invocations = 0;
-            prepared.response.clear(); result.presentation.clear(); result.executed = false;
+            prepared.response.clear(); result.presentation.clear(); prepared.itemTransfers.clear(); result.executed = false;
             result.outcome = SharedWorldScript::Outcome::Deferred; result.diagnostic = error.what();
         }
         catch (const std::exception& error)
         {
             prepared.state.clear(); prepared.image.clear(); prepared.invocations = 0;
-            prepared.response.clear(); result.presentation.clear();
+            prepared.response.clear(); result.presentation.clear(); prepared.itemTransfers.clear();
             result.outcome = SharedWorldScript::Outcome::Rejected; result.executed = false;
             result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
         }
@@ -1398,7 +1667,8 @@ namespace TES3MP::Native
         const DialogueIntent& request, std::string_view cellName, const MWWorld::ESMStore& content,
         const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats,
         std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats,
-        std::optional<MWScript::DialogueState::Stamp> journalStamp) const
+        std::optional<MWScript::DialogueState::Stamp> journalStamp,
+        std::optional<std::span<const ItemBalance>> playerInventory) const
     {
         Prepared rejected;
         try
@@ -1439,7 +1709,8 @@ namespace TES3MP::Native
             const bool talked
                 = std::ranges::find(found->talkedSpeakers, request.speaker) != found->talkedSpeakers.end();
             auto prepared = prepareDialogue(before, execution, ESM::RefId::stringRefId(request.topic), request.choice,
-                0, talked, cellName, content, resolver, budget, playerStats, customClassName, speakerStats, journalStamp);
+                0, talked, cellName, content, resolver, budget, playerStats, customClassName, speakerStats, journalStamp,
+                false, playerInventory);
             if (prepared.result.outcome != SharedWorldScript::Outcome::Committed || !prepared.result.executed)
                 return prepared;
             auto& state = prepared.state[size_t(found - before.begin())];
@@ -1500,8 +1771,18 @@ namespace TES3MP::Native
                 && source->record == mDefinitions.front().encounter->record && source->life
                 && (source->living ? !source->respawnTick : bool(source->respawnTick))));
             if (mNpcBanks)
+            {
                 require(std::ranges::all_of(source->position.pos, [](float v) { return std::isfinite(v); })
-                    && std::ranges::all_of(source->position.rot, [](float v) { return std::isfinite(v); }));
+                    && std::ranges::all_of(source->position.rot, [](float v) { return std::isfinite(v); })
+                    && source->playerInventories.size() <= MaximumInstances);
+                for (size_t p = 0; p < source->playerInventories.size(); ++p)
+                    require(source->playerInventories[p].character
+                        && std::ranges::none_of(std::span(source->playerInventories).first(p), [&](const auto& prev) {
+                               return prev.character == source->playerInventories[p].character;
+                           }));
+            }
+            else
+                require(!source || source->playerInventories.empty());
             if (mLifeEvents)
             {
                 require(source->events.size() <= MaximumLifeEvents && source->life <= MaximumLifeEvents + 1
@@ -1530,12 +1811,15 @@ namespace TES3MP::Native
             {
                 const Source& source;
                 MWWorld::ManualRef reference;
+                MWWorld::ManualRef playerReference;
                 bool events, encounters;
                 uint64_t cursor = 0, expectedScope = 1, expectedLife = 0;
                 bool privateScope = false, reservedByOther = false, removed = false, activated = false;
+                StoryItemTransaction items;
+                std::vector<Prepared::StagedItemTransfer> transfers;
                 SourceResolver(const Source& value, const MWWorld::ESMStore& store, bool lifeEvents, bool allowEncounters)
-                    : source(value), reference(store, value.record), events(lifeEvents), encounters(allowEncounters)
-                    , expectedLife(value.life)
+                    : source(value), reference(store, value.record), playerReference(store, value.record)
+                    , events(lifeEvents), encounters(allowEncounters), expectedLife(value.life)
                 {
                     reference.getPtr().getRefData().setPosition(value.position);
                 }
@@ -1554,7 +1838,8 @@ namespace TES3MP::Native
                 MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool) const override
                 {
                     require(execution.physicalScope == expectedScope && execution.sourceReference == source.reference
-                        && execution.sourceLife == expectedLife && (id.empty() || id == source.record));
+                        && execution.sourceLife == expectedLife
+                        && (id.empty() || id == source.record || (encounters && id == "player")));
                     if (!privateScope && !source.living && !events)
                     {
                         require(source.killer && (source.killerKind == 1 || source.killerKind == 2));
@@ -1564,6 +1849,8 @@ namespace TES3MP::Native
                         if (source.killerKind != 1 || source.killer != execution.character)
                             throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
                     }
+                    if (id == "player")
+                        return playerReference.getPtr();
                     return reference.getPtr();
                 }
                 const ESM::Position& position(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
@@ -1656,6 +1943,24 @@ namespace TES3MP::Native
                     validateScope(execution);
                     return source.sleeping && (!source.sleepingCharacter || source.sleepingCharacter == execution.character);
                 }
+                int itemCount(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item) const override
+                {
+                    require(encounters);
+                    validateScope(execution);
+                    return items.itemCount(execution, ptr, item);
+                }
+                void addItem(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item, int count) override
+                {
+                    require(encounters);
+                    validateScope(execution);
+                    items.addItem(execution, ptr, item, count);
+                }
+                void removeItem(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, const ESM::RefId& item, int count) override
+                {
+                    require(encounters);
+                    validateScope(execution);
+                    items.removeItem(execution, ptr, item, count);
+                }
             };
             std::unique_ptr<SourceResolver> sourceResolver;
             if (mSourceWaits)
@@ -1697,6 +2002,18 @@ namespace TES3MP::Native
                         pose.rot[2] = current.relocation->yaw;
                     }
                     sourceResolver->reference.getPtr().getRefData().setPosition(pose);
+                    if (mNpcBanks)
+                    {
+                        const auto inv = std::ranges::find(
+                            source->playerInventories, execution.character, &PlayerInventory::character);
+                        if (inv != source->playerInventories.end())
+                            seedPlayerItems(content, prepared.state[i].playerItems, inv->items);
+                        sourceResolver->transfers.clear();
+                        sourceResolver->items = {&content, sourceResolver.get(), source->record, execution.character,
+                            execution.story, source->reference, 2, sourceResolver->reference.getPtr(),
+                            &prepared.state[i].playerItems, &prepared.state[i].npcItems,
+                            &prepared.state[i].itemReceipts, &sourceResolver->transfers};
+                    }
                     require((sourceResolver->privateScope ? current.encounterLife : source->life) >= current.last.sourceLife);
                     execution.sourceReference = source->reference;
                     execution.sourceLife = sourceResolver->expectedLife;
@@ -1732,6 +2049,9 @@ namespace TES3MP::Native
                     const auto& dependency = *result.sourceWait;
                     require(dependency.reference == source->reference && dependency.life == source->life);
                     auto& state = prepared.state[i];
+                    state.playerItems = current.playerItems;
+                    state.npcItems = current.npcItems;
+                    state.itemReceipts = current.itemReceipts;
                     const auto since = state.sourceWait ? state.sourceWait->sinceTick : worldTick;
                     state.sourceWait = Instance::SourceWait{execution, result.script, result.trace.instruction,
                         since, dependency.respawnTick};
@@ -1752,13 +2072,16 @@ namespace TES3MP::Native
                         + std::to_string(execution.sourceReference) + " life=" + std::to_string(execution.sourceLife)
                         + " " + result.diagnostic;
                     result.diagnostic.resize(std::min(result.diagnostic.size(), SharedWorldScript::MaximumDiagnosticBytes));
-                    prepared.state.clear(); prepared.invocations = 0; result.executed = false;
+                    prepared.state.clear(); prepared.invocations = 0; prepared.itemTransfers.clear(); result.executed = false;
                     return prepared;
                 }
                 prepared.state.swap(invocation.state);
                 prepared.state[i].scheduledTick = worldTick;
                 if (mSourceWaits)
                 {
+                    if (mNpcBanks && !sourceResolver->transfers.empty())
+                        prepared.itemTransfers.insert(prepared.itemTransfers.end(),
+                            sourceResolver->transfers.begin(), sourceResolver->transfers.end());
                     if (mLifeEvents) prepared.state[i].deathCursor = sourceResolver->cursor;
                     if (mFairOpportunities && prepared.state[i].reservedLife
                         && prepared.state[i].deathCursor >= prepared.state[i].reservedLife)
@@ -1814,7 +2137,7 @@ namespace TES3MP::Native
         }
         catch (const std::exception& error)
         {
-            prepared.state.clear(); prepared.image.clear(); prepared.invocations = 0;
+            prepared.state.clear(); prepared.image.clear(); prepared.invocations = 0; prepared.itemTransfers.clear();
             result.outcome = SharedWorldScript::Outcome::Rejected; result.executed = false; result.presentation.clear();
             result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
         }

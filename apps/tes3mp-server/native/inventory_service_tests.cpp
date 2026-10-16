@@ -6309,7 +6309,7 @@ namespace TES3MP::Native::Testing
                         script.mScriptText = "begin " + name + "\nshort token\nlong calls\nfloat phase\n"
                             + (lifeEvents ? "long deaths\n" : "")
                             + (healthReads ? "float health\nfloat ratio\n" : "")
-                            + (npcBanks ? "long stage\nfloat posx\nfloat posy\nfloat yaw\n" : "")
+                            + (npcBanks ? "long stage\nlong items\nfloat posx\nfloat posy\nfloat yaw\n" : "")
                             + (sourceWaits ? name == "ledger_x73"
                                 ? "set calls to calls + 1\nset phase to phase + GetSecondsPassed\n"
                                   "set ambient_counter_83 to ambient_counter_83 + 1\nset relay_q19.calls to relay_q19.calls + 7\n"
@@ -6323,8 +6323,10 @@ namespace TES3MP::Native::Testing
                             + (npcBanks ? name == "ledger_x73"
                                 ? "if ( MenuMode == 1 )\nreturn\nendif\nif ( GetPCSleep == 1 )\nreturn\nendif\n"
                                   "if ( CellChanged == 1 )\nreturn\nendif\nset stage to GetJournalIndex \"journey_t37\"\n"
+                                  "set items to player->GetItemCount \"common_shirt_01\" + GetItemCount \"common_shirt_01\"\n"
                                   "set posx to GetPos x\nset posy to GetPos y\nset yaw to GetAngle z\n"
                                 : "set stage to GetJournalIndex \"journey_t37\"\n"
+                                  "set items to player->GetItemCount \"common_shirt_01\" + npc_door_actor->GetItemCount \"common_shirt_01\"\n"
                                   "set posx to npc_door_actor->GetPos x\nset posy to npc_door_actor->GetPos y\nset yaw to npc_door_actor->GetAngle z\n" : "")
                             + "\nend " + name;
                         out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
@@ -6374,7 +6376,14 @@ namespace TES3MP::Native::Testing
                                 info.mSelects.push_back(select);
                                 info.mResponse = "A private passage for %PCName|%PCClass|%cell|%ambient_counter_83|%pccrimelevel.";
                                 info.mResultScript += storyActivity
-                                    ? (escortActivity ? "AiEscort player 0 320 -32 1\n" : "AiTravel 320 -32 1\n")
+                                    ? (escortActivity
+                                            ? std::string(npcBanks ? "player->AddItem \"common_shirt_01\" 2\n"
+                                                                     "player->RemoveItem \"common_shirt_01\" 1\n"
+                                                                     "AddItem \"common_shirt_01\" 3\n"
+                                                                     "RemoveItem \"common_shirt_01\" 1\n"
+                                                                   : "")
+                                                + "AiEscort player 0 320 -32 1\n"
+                                            : "AiTravel 320 -32 1\n")
                                     : storyRelocation
                                     ? "PositionCell 200 -32 1 5400 \"NPC Door Contact Test\"\nset ambient_counter_83 to npc_door_actor->GetPos x\n"
                                     : storyEncounter ? "Disable\nset ambient_counter_83 to GetDisabled\n" : "Choice \"Proceed\" 7\n";
@@ -10072,6 +10081,11 @@ namespace TES3MP::Native::Testing
                         const auto initialActivity = alice(resumed);
                         if (npcBanks)
                             require(initialActivity.clockTicks == 4 && initialActivity.scheduledTick == 5
+                                && initialActivity.itemReceipts.size() == 4
+                                && number(initialActivity.runtime, "items") >= 3.f
+                                && number(initialActivity.members[0], "items") == number(initialActivity.runtime, "items")
+                                && state(resumed)[1].itemReceipts.empty()
+                                && number(state(resumed)[1].runtime, "items") < number(initialActivity.runtime, "items")
                                 && number(initialActivity.runtime, "posx") == initialActivity.relocation->position[0]
                                 && number(initialActivity.runtime, "posy") == initialActivity.relocation->position[1]
                                 && number(initialActivity.members[0], "posx") == initialActivity.relocation->position[0]
@@ -10081,7 +10095,7 @@ namespace TES3MP::Native::Testing
                                 && number(initialActivity.runtime, "stage") == 10.f
                                 && number(initialActivity.members[0], "stage") == 10.f
                                 && number(state(resumed)[1].runtime, "stage") == 0.f,
-                                "Relocated/escorting NPC bank did not read its own private pose, journal stage, and living stats");
+                                "Relocated/escorting NPC bank did not read its own private pose, journal stage, provenance items, and living stats");
                         std::vector<CanonicalSessionProgress> remaining;
                         for (const auto& session : authority.activeSessions()) if (session.playerId() == id<PlayerId>(2)) remaining.push_back(session);
                         const auto disconnected = std::get<CanonicalServerState>(createCanonicalServerState(authority.players(), remaining));
@@ -10191,9 +10205,12 @@ namespace TES3MP::Native::Testing
                             && (!npcBanks || (number(state(bobOwner)[1].runtime, "posx") == state(bobOwner)[1].relocation->position[0]
                                 && number(state(bobOwner)[1].members[0], "posx") == state(bobOwner)[1].relocation->position[0]
                                 && number(state(bobOwner)[1].runtime, "stage") == 10.f
+                                && state(bobOwner)[1].itemReceipts.size() == 4
+                                && alice(bobOwner).itemReceipts.size() == 4
+                                && number(state(bobOwner)[1].runtime, "items") == number(alice(bobOwner).runtime, "items")
                                 && number(alice(bobOwner).runtime, "posx") == arrived.relocation->position[0])),
                             "B could not finish independently or A's destination/bank reset");
-                        std::cout << (npcBanks ? "story npc banks host: stock AiEscort player + private bank/member continuation, GetSecondsPassed, GetPos/GetAngle, GetHealth/GetHealthGetRatio; "
+                        std::cout << (npcBanks ? "story npc banks host: stock AiEscort player + private bank/member continuation, GetSecondsPassed, GetPos/GetAngle, GetHealth/GetHealthGetRatio, provenance GetItemCount/AddItem/RemoveItem; "
                             : (std::string("story activity host: stock ") + (escortActivity ? "AiEscort player" : "AiTravel") + "; "))
                             << "A reaches destination, B retains and completes original opportunity; rejected/uncertain start/step writes; "
                             "disconnect suspension, exact mid-route/arrival/two-scope restart; no duplicate life/public loot or completion rewards\n";

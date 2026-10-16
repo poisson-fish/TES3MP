@@ -37,6 +37,12 @@ namespace MWScript
         { throw std::invalid_argument("OnActivate lacks staged activation admission"); }
         virtual void activate(const ExecutionContext&, const MWWorld::Ptr&)
         { throw std::invalid_argument("Activate lacks staged activation admission"); }
+        virtual int itemCount(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&) const
+        { throw std::invalid_argument("GetItemCount lacks staged inventory admission"); }
+        virtual void addItem(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&, int)
+        { throw std::invalid_argument("AddItem lacks staged inventory admission"); }
+        virtual void removeItem(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&, int)
+        { throw std::invalid_argument("RemoveItem lacks staged inventory admission"); }
     };
 }
 #endif

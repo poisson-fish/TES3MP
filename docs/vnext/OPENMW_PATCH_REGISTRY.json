@@ -78,6 +78,8 @@
         "apps/openmw/mwscript/referencestate.hpp",
         "apps/openmw/mwscript/transformationextensions.cpp",
         "apps/openmw/mwscript/transformationextensions.hpp",
+        "apps/openmw/mwscript/containerextensions.cpp",
+        "apps/openmw/mwscript/containerextensions.hpp",
         "apps/openmw/mwscript/aiextensions.cpp",
         "apps/openmw/mwscript/aiextensions.hpp",
         "apps/openmw/mwmechanics/aitravel.cpp",

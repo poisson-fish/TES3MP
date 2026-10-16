@@ -118,11 +118,12 @@ suspend; arrival retains private destination without auto-credit/loot.
 Filters: `activities`, `story-activities`, `story-departure`.
 V95 (`native-inventory-95`, capabilities 41–42): unifies V85–95 (Disable/Enable/safe
 returns, relocation, activities, source waits, OnDeath and fair opportunities); admits
-source-bank GetPos/GetAngle/GetJournalIndex/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable
-and foreign-NPC result ModDisposition (rejects `player`, journal writes, and Position/PositionCell in banks),
-steps private NPC banks against private relocated/activity pose, staged journal/activation state and detached
-spawn stats after activity substeps, suspends terminal Disable banks until safe-return
-Enable, and enforces fair-opportunity reservations on relocation/travel/Disable.
+source-bank GetPos/GetAngle/GetJournalIndex/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
+foreign-NPC result ModDisposition and provenance GetItemCount/AddItem/RemoveItem
+(plus Function_Item; rejects `player` non-item ops, journal writes and Position/PositionCell in banks),
+steps private NPC banks against private pose, staged journal/activation/item state and detached
+spawn stats after activity substeps, commits item receipts atomically,
+suspends terminal Disable banks until safe-return Enable, and enforces fair-opportunity reservations.
 Filters: `npc-banks`, `story-npc-banks`, `script-banks`, `quest-audit`.
 Desktop captures emit `player_appearance_sample` across join/reentry/reconnect/restart.
 
