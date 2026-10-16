@@ -1,5 +1,6 @@
 #include "plainequipment.hpp"
 
+#include <climits>
 #include <cmath>
 #include <limits>
 #include <tuple>

@@ -51,6 +51,7 @@
 #include <tes3mp/melee_combat.hpp>
 #include <algorithm>
 #include <bit>
+#include <climits>
 #include <cstdlib>
 #include <cmath>
 #include <limits>
