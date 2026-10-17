@@ -2450,6 +2450,56 @@ namespace
         const auto duplicateGrant = runItemIntent(duplicateGrantState, 11, 206);
         require(duplicateGrant.result.outcome == SharedWorldScript::Outcome::Rejected && duplicateGrant.state.empty(),
             "Duplicate provenance item grant was not rejected");
+        {
+            ESM::NPC scriptedNpc; scriptedNpc.blank(); scriptedNpc.mId = id("fargoth");
+            scriptedNpc.mScript = id("ledger_v63"); scriptedNpc.mNpdt.mDisposition = 50;
+            fixture.content.insertStatic(scriptedNpc);
+            ESM::NPC secondNpc; secondNpc.blank(); secondNpc.mId = id("TR_m1_T_Eldale");
+            secondNpc.mScript = id("relay_n48"); secondNpc.mNpdt.mDisposition = 50;
+            fixture.content.insertStatic(secondNpc);
+            ESM::Script fargothScript = itemBankScripts[0];
+            ESM::Script eldaleScript; eldaleScript.blank(); eldaleScript.mId = id("relay_n48");
+            eldaleScript.mScriptText = "begin relay_n48\nlong calls\nset calls to calls + 1\nend";
+            const std::vector<ESM::Script> fargothBank{fargothScript, eldaleScript};
+            auto fargothPrimary = std::make_shared<const SharedWorldScript>(
+                fargothScript, std::vector{global}, "npc-bank-fargoth", crypto, fargothBank, id("fargoth"), true);
+            auto fargothMember = std::make_shared<const SharedWorldScript>(
+                eldaleScript, std::vector{global}, "npc-bank-fargoth", crypto, fargothBank, id("fargoth"), true);
+            const std::vector<ESM::Script> eldaleBank{eldaleScript, fargothScript};
+            auto eldalePrimary = std::make_shared<const SharedWorldScript>(
+                eldaleScript, std::vector{global}, "npc-bank-eldale", crypto, eldaleBank, id("TR_m1_T_Eldale"), true);
+            auto eldaleMember = std::make_shared<const SharedWorldScript>(
+                fargothScript, std::vector{global}, "npc-bank-eldale", crypto, eldaleBank, id("TR_m1_T_Eldale"), true);
+            std::vector<PersonalScripts::Definition> multiDefs;
+            for (uint64_t character : {11ull, 22ull})
+            {
+                multiDefs.push_back({character, 951, fargothPrimary, {{fargothMember, true}}, true,
+                    records(), PersonalScripts::EncounterBinding{41, id("fargoth"), ESM::RefId::esm3ExteriorCell(-2, -9)}});
+                multiDefs.push_back({character, 952, eldalePrimary, {{eldaleMember, true}}, true,
+                    records(), PersonalScripts::EncounterBinding{42, id("TR_m1_T_Eldale"), id("Eldale")}});
+            }
+            PersonalScripts multiPolicy(77, multiDefs, crypto, true, true, true, true, true, true, true, true, true, true, true);
+            const std::array<PersonalScripts::Source, 2> multiSources{{
+                {41, 1, 0, id("fargoth"), true, 0, 0, events, &publicStats, publicPose, &privateStats,
+                    false, false, 0, 0, false, 0, scheduledInvs},
+                {42, 1, 0, id("TR_m1_T_Eldale"), true, 0, 0, events, &publicStats, publicPose, &privateStats,
+                    false, false, 0, 0, false, 0, scheduledInvs}
+            }};
+            auto multiScheduled = multiPolicy.prepareScheduled(
+                multiPolicy.initial(), 1, both, fixture.content, scheduledResolver, &multiSources[0], multiSources);
+            require(multiScheduled.result.executed && multiScheduled.state.size() == 4
+                && multiPolicy.encode(multiPolicy.restore(multiScheduled.image)) == multiScheduled.image,
+                "Per-story multi-cell scripted-NPC scheduled banks failed execution or round-trip");
+            auto disabledFargoth = multiScheduled.state;
+            disabledFargoth[0].encounterLife = 1;
+            disabledFargoth[0].last.sourceReference = 41;
+            disabledFargoth[0].last.sourceLife = 1;
+            disabledFargoth[0].last.physicalScope = 2;
+            auto enabledFargoth = multiPolicy.prepareReturn(disabledFargoth, 11, &fixture.content, 1);
+            require(enabledFargoth.result.executed && enabledFargoth.state[0].encounterReturned
+                && enabledFargoth.state[0].encounterEnabled,
+                "Safe-return Enable rejected a scripted NPC whose script is bound in the story bank");
+        }
         std::cout << "npc banks: unified M5 policy (Disable/Enable/return, relocation/activity/return, wait/life-event/opportunity, provenance items); "
             "private pose/health/timer/activation/item/scheduled-Disable continuation across public death; exact recovery\n";
     }

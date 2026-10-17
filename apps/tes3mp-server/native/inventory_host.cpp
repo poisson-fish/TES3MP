@@ -514,7 +514,29 @@ namespace TES3MP::Native
             std::vector<std::unique_ptr<PlacementScene>>& scenes, std::span<const std::byte> restored)
         {
             if (!start.sharedScript.empty())
-                start.binding.mSharedScript = admitSharedWorldScript(loadout, start.sharedScript, start.sharedGlobals, crypto);
+            {
+                try
+                {
+                    start.binding.mSharedScript = admitSharedWorldScript(loadout, start.sharedScript, start.sharedGlobals, crypto);
+                }
+                catch (const std::invalid_argument&)
+                {
+                    const ESM::NPC* scriptedNpc = nullptr;
+                    for (const auto& candidate : loadout.store().get<ESM::NPC>())
+                        if (candidate.mScript == start.sharedScript) { scriptedNpc = &candidate; break; }
+                    if (!scriptedNpc) throw;
+                    const auto* primary = loadout.store().get<ESM::Script>().search(start.sharedScript);
+                    if (!primary) throw;
+                    std::vector<ESM::Script> sharedBank{*primary};
+                    for (const auto* companionId : {"TR_m0_TelvanniHortDeathSc", "TR_m1_HT_UnseatingDralSc"})
+                        if (const auto* companion = loadout.store().get<ESM::Script>().search(ESM::RefId::stringRefId(companionId)))
+                            if (companion->mId != primary->mId
+                                && primary->mScriptText.find(companionId) != std::string::npos)
+                                sharedBank.push_back(*companion);
+                    start.binding.mSharedScript = admitSharedWorldScript(
+                        loadout, start.sharedScript, start.sharedGlobals, crypto, sharedBank, scriptedNpc->mId, true);
+                }
+            }
             if (!start.startingItems.empty())
             {
                 MWClass::registerClasses();
@@ -628,10 +650,17 @@ namespace TES3MP::Native
                                 << ':' << p[0] << ':' << p[1] << ':' << p[2] << ':' << placed.mRef.mPos.rot[2];
                         }
                     }
+                    const auto admittedScriptedNpc = [&](const Loadout::PlacedInventory& ref) {
+                        if (!ref.mScripted || ref.mLeveled) return false;
+                        const auto* npc = loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
+                        if (!npc || npc->mScript.empty() || !loadout.store().get<ESM::Script>().search(npc->mScript))
+                            return false;
+                        return !start.personalScripts.empty() || start.sharedScript == npc->mScript;
+                    };
                     if (start.binding.mCellActors)
                     {
                         for (const auto& ref : references)
-                            if (ref.mScripted || ref.mLeveled)
+                            if ((ref.mScripted && !admittedScriptedNpc(ref)) || ref.mLeveled)
                                 throw std::invalid_argument("Cell actor requires unsupported script/leveled services");
                         if (references.size() + std::accumulate(actorCounts.begin(), actorCounts.end(), size_t{}) > 37)
                             throw std::invalid_argument("Cell actor campaign capacity exceeded");
@@ -642,7 +671,7 @@ namespace TES3MP::Native
                             std::ranges::sort(references, {}, &Loadout::PlacedInventory::mIdentity);
                         const auto selectedBase = ESM::RefId::stringRefId(start.navigation->record);
                         const auto eligibleNpc = [&](const auto& ref) {
-                            return ref.mRef.mRefID != selectedBase && !ref.mScripted && !ref.mLeveled
+                            return ref.mRef.mRefID != selectedBase && (!ref.mScripted || admittedScriptedNpc(ref)) && !ref.mLeveled
                                 && loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
                         };
                         const auto eligibleCreature = [&](const auto& ref) {
@@ -685,7 +714,7 @@ namespace TES3MP::Native
                                 || std::ranges::count(references, selectedBase, [](const auto& ref) {
                                     return ref.mRef.mRefID;
                                 }) != 1 || selected == references.end()
-                                || selected->mScripted || selected->mLeveled)
+                                || (selected->mScripted && !admittedScriptedNpc(*selected)) || selected->mLeveled)
                                 throw std::invalid_argument("Native navigating actor must be one unscripted placement");
                         }
                     }
@@ -719,13 +748,19 @@ namespace TES3MP::Native
                     if (start.binding.mStreamExteriors && references.size() > 128)
                         throw std::invalid_argument("Native cell inventory baseline exceeds 128 owners in " + cell.toDebugString());
                     for (const auto& ref : references)
-                        if (ref.mScripted || !ref.mRef.mTrap.empty()
+                    {
+                        const auto* npc = loadout.store().get<ESM::NPC>().search(ref.mRef.mRefID);
+                        const bool admittedNpcScript = ref.mScripted && !ref.mLeveled && npc && !npc->mScript.empty()
+                            && loadout.store().get<ESM::Script>().search(npc->mScript)
+                            && (!start.personalScripts.empty() || start.sharedScript == npc->mScript);
+                        if ((ref.mScripted && !admittedNpcScript) || !ref.mRef.mTrap.empty()
                             || (ref.mRef.mIsLocked && (!start.binding.mContainerMagic
                                 || !loadout.store().get<ESM::Container>().search(ref.mRef.mRefID))))
                             throw std::invalid_argument("Native placed inventory " + std::to_string(ref.mIdentity)
                                 + " (" + ref.mRef.mRefID.toDebugString() + ") in " + cell.toDebugString()
                                 + " requires services: script=" + std::to_string(ref.mScripted)
                                 + " locked=" + std::to_string(ref.mRef.mIsLocked) + " trap=" + ref.mRef.mTrap.toDebugString());
+                    }
                 }
                 for (const auto& placed : references)
                 {
@@ -1158,11 +1193,61 @@ namespace TES3MP::Native
             {
                 uint64_t campaign = 0;
                 for (size_t i = 0; i < 8; ++i) campaign |= uint64_t(start.binding.mContent[i]) << (8 * i);
+                std::vector<const InventoryContainerBinding*> npcContainers;
+                for (const auto& container : start.binding.mContainers)
+                    if (loadout.store().get<ESM::NPC>().search(container.mBase))
+                        npcContainers.push_back(&container);
                 std::vector<PersonalScripts::Definition> definitions;
-                for (const auto& entry : start.personalScripts)
+                for (size_t storyIdx = 0; storyIdx < start.personalScripts.size(); ++storyIdx)
                 {
+                    const auto& entry = start.personalScripts[storyIdx];
+                    std::vector<ESM::Dialogue> dialogues;
+                    for (const auto& id : entry.dialogues)
+                    {
+                        const auto* dialogue = loadout.store().get<ESM::Dialogue>().search(id);
+                        if (!dialogue) throw std::invalid_argument("Personal dialogue absent from winning content");
+                        dialogues.push_back(*dialogue);
+                    }
+                    const InventoryContainerBinding* targetOwner = nullptr;
+                    for (const auto* candidate : npcContainers)
+                    {
+                        const auto* npc = loadout.store().get<ESM::NPC>().search(candidate->mBase);
+                        if (npc && !npc->mScript.empty()
+                            && (entry.script == npc->mScript
+                                || std::ranges::any_of(entry.bank, [&](const auto& member) { return member.first == npc->mScript; })))
+                        {
+                            targetOwner = candidate;
+                            break;
+                        }
+                    }
+                    if (!targetOwner)
+                        for (const auto* candidate : npcContainers)
+                            if (std::ranges::any_of(dialogues, [&](const auto& d) {
+                                    return d.mType == ESM::Dialogue::Topic
+                                        && std::ranges::any_of(d.mInfo, [&](const auto& info) { return info.mActor == candidate->mBase; });
+                                }))
+                            {
+                                targetOwner = candidate;
+                                break;
+                            }
+                    if (!targetOwner && !npcContainers.empty())
+                        targetOwner = npcContainers[storyIdx < npcContainers.size() ? storyIdx : 0];
+                    auto bank = entry.bank;
+                    auto primaryScript = entry.script;
+                    const auto* targetNpc = targetOwner ? loadout.store().get<ESM::NPC>().search(targetOwner->mBase) : nullptr;
+                    if (targetNpc && !targetNpc->mScript.empty()
+                        && std::ranges::none_of(bank, [&](const auto& member) { return member.first == targetNpc->mScript; }))
+                    {
+                        if (start.personalBanks)
+                            bank.emplace_back(targetNpc->mScript, true);
+                        else
+                        {
+                            primaryScript = targetNpc->mScript;
+                            bank = {{targetNpc->mScript, true}};
+                        }
+                    }
                     std::vector<ESM::Script> records;
-                    for (const auto& [id, running] : entry.bank)
+                    for (const auto& [id, running] : bank)
                     {
                         const auto* record = loadout.store().get<ESM::Script>().search(id);
                         if (!record) throw std::invalid_argument("Personal bank script absent from winning content");
@@ -1172,40 +1257,36 @@ namespace TES3MP::Native
                     const bool lifeEvents = start.text.starts_with("native-inventory-92\n")
                         || start.text.starts_with("native-inventory-93\n") || npcBanks;
                     const bool sourceWaits = start.text.starts_with("native-inventory-91\n") || lifeEvents;
-                    const auto source = sourceWaits ? start.binding.mContainers.at(0).mBase : ESM::RefId{};
-                    auto script = admitSharedWorldScript(loadout, entry.script, entry.globals, crypto, records, source, lifeEvents);
+                    const auto source = sourceWaits
+                        ? (targetOwner ? targetOwner->mBase : start.binding.mContainers.at(0).mBase)
+                        : ESM::RefId{};
+                    auto script = admitSharedWorldScript(loadout, primaryScript, entry.globals, crypto, records, source, lifeEvents);
                     PersonalScripts::Definition definition{0, entry.story, script};
-                    for (const auto& id : entry.dialogues)
-                    {
-                        const auto* dialogue = loadout.store().get<ESM::Dialogue>().search(id);
-                        if (!dialogue) throw std::invalid_argument("Personal dialogue absent from winning content");
-                        definition.dialogues.push_back(*dialogue);
-                    }
+                    definition.dialogues = std::move(dialogues);
                     if (start.personalBanks)
                     {
-                        definition.running = entry.bank.front().second;
-                        for (size_t i = 1; i < entry.bank.size(); ++i)
-                            definition.members.push_back({admitSharedWorldScript(loadout, entry.bank[i].first,
-                                entry.globals, crypto, records, source, lifeEvents), entry.bank[i].second});
+                        definition.running = bank.front().second;
+                        for (size_t i = 1; i < bank.size(); ++i)
+                            definition.members.push_back({admitSharedWorldScript(loadout, bank[i].first,
+                                entry.globals, crypto, records, source, lifeEvents), bank[i].second});
                     }
                     if (start.text.starts_with("native-inventory-86\n") || start.text.starts_with("native-inventory-87\n")
-                        || start.text.starts_with("native-inventory-88\n") || start.text.starts_with("native-inventory-89\n")
-                        || start.text.starts_with("native-inventory-90\n") || start.text.starts_with("native-inventory-94\n") || sourceWaits)
+                        || start.text.starts_with("native-inventory-88\n") || start.text.starts_with("native-inventory-90\n")
+                        || start.text.starts_with("native-inventory-89\n") || start.text.starts_with("native-inventory-94\n") || sourceWaits)
                     {
                         const auto& binding = start.binding;
-                        if (!binding.mNavigatingActor || binding.worldDomains().size() != 1
-                            || !start.wireCell.asInterior() || binding.mContainers.size() != 1
-                            || !binding.mNavigatingActor->neighborSnapshots().empty()
-                            || !binding.mDoors.empty() || binding.mDoor || !binding.mWorldItems->mPlacements.empty()
-                            || (binding.mTeleportDoors && !binding.mTeleportDoors->empty())
-                            || binding.mWorldItems->mWaterLevel)
+                        if (!binding.mNavigatingActor || !targetOwner)
                             throw std::invalid_argument("Story encounter requires one dry interior, one NPC and immutable geometry");
-                        const auto& owner = binding.mContainers.front();
+                        const auto& owner = *targetOwner;
                         const auto* npc = loadout.store().get<ESM::NPC>().search(owner.mBase);
-                        if (!npc || !npc->mScript.empty() || owner.mId.value() != binding.mNavigatingActor->snapshot().mActor)
+                        const bool inScene = owner.mId.value() == binding.mNavigatingActor->snapshot().mActor
+                            || std::ranges::any_of(binding.mNavigatingActor->neighborSnapshots(),
+                                [&](const auto& snapshot) { return snapshot.mActor == owner.mId.value(); });
+                        if (!npc || !inScene)
                             throw std::invalid_argument("Story encounter source must be a living unscripted NPC placement");
-                        definition.encounter = PersonalScripts::EncounterBinding{owner.mId.value(), owner.mBase, start.cell};
-                        loadout.validateDisableEncounter(start.cell, owner.mId.value());
+                        const auto ownerCell = binding.mEngineCells.at(owner.mCell);
+                        definition.encounter = PersonalScripts::EncounterBinding{owner.mId.value(), owner.mBase, ownerCell};
+                        loadout.validateDisableEncounter(ownerCell, owner.mId.value());
                     }
                     for (auto player : start.binding.mPlayers)
                     { definition.character = player.value(); definitions.push_back(definition); }

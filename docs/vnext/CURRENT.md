@@ -64,7 +64,9 @@ Synthetic two-desktop V92–93 waiting/reserved/earned recovery:
 
 **V94–95:** stock escort/travel; A/B independently arrive. V95 (`native-inventory-95`)
 unifies V85–95 (Disable/Enable/safe returns, relocation, activities, source-wait clocks,
-OnDeath and fair-opportunity reservations) and admits source-bank
+OnDeath and fair-opportunity reservations), binds placed `npc->mScript` into personal/shared
+banks (`fargoth`, `vodunius nuccius`, `TR_m1_T_Eldale`), supports per-story `EncounterBinding`
+targets in multi-cell/multi-actor scenes, and admits source-bank
 GetJournalIndex/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
 foreign-NPC result ModDisposition and provenance GetItemCount/AddItem/RemoveItem
 (plus Function_Item) so a private story's NPC bank, timer,
@@ -74,10 +76,10 @@ life-cursor coexist while public deaths/respawns leave the private scope untouch
 Durable scopes, offline suspension and failed writes/restart preserve original lives/loot.
 Native: `build/logs/m5-{activity-host,departure-host}-final.log`,
 `build/logs/m5-activity-state-final.log`, `build/logs/m5-npc-bank-{state,script}.log`,
-`build/logs/m5-npc-state.log`, `build/logs/m5-dialogue-stock.log`, `build/logs/m5-quest-audit.log`.
+`build/logs/m5-npc-state.log`, `build/logs/m5-dialogue-stock.log`, `build/logs/m5-quest-audit.log`,
+`build/logs/m5-multi-cell-build.log`.
 
-**Next:** admit multi-cell scripted-NPC binding (`fargoth`, `vodunius nuccius`, `TR_m1_T_Eldale`).
-Unchanged Seyda Neen/TR (Duel of Riddles) completion awaits multi-cell scripted-NPC placement.
+**Next:** run unchanged Seyda Neen and TR (Duel of Riddles) real-content quest verification.
 Source/result preflights: `build/logs/m5-{seyda,tr}-quest-preflight.log`;
 routines: `build/logs/m5-seyda-content-preflight-final.log`.
 Package replacement/cross-cell AI remain closed; M5 stays open.

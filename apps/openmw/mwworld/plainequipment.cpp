@@ -579,7 +579,10 @@ namespace MWWorld
             const auto owner = resolution.mOwner;
             const bool placedActor = owner.getCellRef().getRefNum().hasContentFile() && owner.getClass().isActor()
                 && sameReference(owner, context.mActor) && !sameReference(owner, context.mPlayer);
-            if (placedActor && (context.mNpcStats || !owner.getClass().getScript(owner).empty()
+            if (placedActor && (context.mNpcStats
+                || (!owner.getClass().getScript(owner).empty()
+                    && !(owner.getType() == ESM::NPC::sRecordId
+                        && context.mStore.get<ESM::Script>().search(owner.getClass().getScript(owner))))
                 || owner.getRefData().getCustomData()
                 || (owner.getType() == ESM::NPC::sRecordId
                     ? context.mStore.get<ESM::NPC>().search(owner.getCellRef().getRefId()) != owner.get<ESM::NPC>()->mBase

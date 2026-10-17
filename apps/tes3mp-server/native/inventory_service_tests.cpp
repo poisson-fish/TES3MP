@@ -5755,7 +5755,8 @@ namespace TES3MP::Native::Testing
             }
 
             auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
-            npc.mId = ESM::RefId::stringRefId("npc_door_actor"); npc.mScript = {};
+            npc.mId = ESM::RefId::stringRefId("npc_door_actor");
+            npc.mScript = npcBanks ? ESM::RefId::stringRefId("ledger_x73") : ESM::RefId{};
             npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
             std::array<ESM::Enchantment, 4> passiveEnchantments;
             std::array<ESM::Clothing, 4> passiveShirts;
@@ -6435,6 +6436,62 @@ namespace TES3MP::Native::Testing
                             out.startRecord("INFO");
                             info.save(out);
                             out.endRecord("INFO");
+                        }
+                    }
+                    if (npcBanks)
+                    {
+                        for (const auto& [scriptId, scriptText] : std::vector<std::pair<const char*, const char*>>{
+                            {"fargothScript", "begin fargothScript\nshort ring\nlong calls\nset calls to calls + 1\n"
+                                "if ( GetJournalIndex \"MS_FargothRing\" >= 100 )\nset ring to 1\nendif\nend fargothScript\n"},
+                            {"nucciusScript", "begin nucciusScript\nshort state\nlong calls\nset calls to calls + 1\n"
+                                "if ( CellChanged == 0 )\nreturn\nendif\n"
+                                "if ( GetJournalIndex \"MS_Nuccius\" >= 100 )\nDisable\nset state to 1\nendif\nend nucciusScript\n"},
+                            {"TR_m0_TelvanniHortDeathSc", "begin TR_m0_TelvanniHortDeathSc\nshort stop\nset stop to 1\n"
+                                "StopScript TR_m0_TelvanniHortDeathSc\nend TR_m0_TelvanniHortDeathSc\n"},
+                            {"TR_m1_T_EldaleSc", "begin TR_m1_T_EldaleSc\nshort doOnce\nlong calls\nfloat timer\n"
+                                "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
+                                "if ( OnDeath == 1 )\nset ambient_counter_83 to 1\nStartScript TR_m0_TelvanniHortDeathSc\nendif\n"
+                                "if ( GetJournalIndex \"TR_M1_GS_MQ_4\" >= 10 )\nset doOnce to 2\nendif\nend TR_m1_T_EldaleSc\n"}})
+                        {
+                            ESM::Script s; s.blank(); s.mId = ESM::RefId::stringRefId(scriptId); s.mScriptText = scriptText;
+                            out.startRecord(ESM::Script::sRecordId, 0); s.save(out); out.endRecord(ESM::Script::sRecordId);
+                        }
+                        for (const auto& [npcId, scriptId] : std::vector<std::pair<const char*, const char*>>{
+                            {"fargoth", "fargothScript"},
+                            {"vodunius nuccius", "nucciusScript"},
+                            {"TR_m1_T_Eldale", "TR_m1_T_EldaleSc"}})
+                        {
+                            ESM::NPC questNpc = npc;
+                            questNpc.mId = ESM::RefId::stringRefId(npcId);
+                            questNpc.mScript = ESM::RefId::stringRefId(scriptId);
+                            out.startRecord(ESM::NPC::sRecordId, 0); questNpc.save(out); out.endRecord(ESM::NPC::sRecordId);
+                        }
+                        for (const auto& [dialId, isJournal, actorId, resultScript] : std::vector<std::tuple<const char*, bool, const char*, const char*>>{
+                            {"MS_FargothRing", true, "", ""},
+                            {"ring", false, "fargoth", "Journal MS_FargothRing 100\nModDisposition 50\nplayer->AddItem \"common_shirt_01\" 1\n"},
+                            {"MS_Nuccius", true, "", ""},
+                            {"nuccius_topic", false, "vodunius nuccius", "Journal MS_Nuccius 100\nplayer->AddItem \"common_shirt_01\" 1\n"},
+                            {"TR_M1_GS_MQ_4", true, "", ""},
+                            {"puzzling riddles", false, "TR_m1_T_Eldale", "Journal TR_M1_GS_MQ_4 10\nModDisposition 10\n"}})
+                        {
+                            ESM::Dialogue dial; dial.mId = ESM::RefId::stringRefId(dialId); dial.mStringId = dialId;
+                            dial.blank(); dial.mType = isJournal ? ESM::Dialogue::Journal : ESM::Dialogue::Topic;
+                            out.startRecord("DIAL"); dial.save(out); out.endRecord("DIAL");
+                            ESM::DialInfo info; info.blank();
+                            info.mId = ESM::RefId::stringRefId(std::string(dialId) + "_info");
+                            if (isJournal)
+                            {
+                                info.mData.mJournalIndex = std::string_view(dialId) == "TR_M1_GS_MQ_4" ? 10 : 100;
+                                info.mQuestStatus = ESM::DialInfo::QS_Finished;
+                                info.mResponse = "Quest journal entry.";
+                            }
+                            else
+                            {
+                                info.mActor = ESM::RefId::stringRefId(actorId);
+                                info.mResponse = "Quest topic response.";
+                                info.mResultScript = resultScript;
+                            }
+                            out.startRecord("INFO"); info.save(out); out.endRecord("INFO");
                         }
                     }
                 }
@@ -7850,7 +7907,7 @@ namespace TES3MP::Native::Testing
             }
             for (auto record : {placedActor, floor.mId, door.mId})
             {
-                if (storyEncounter && record == door.mId) continue;
+                if (storyEncounter && !npcBanks && record == door.mId) continue;
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                 // Leave the door clear for the two-desktop Touch capture.
                 if (record == placedActor) placed.mPos = worldCollision
@@ -7977,7 +8034,30 @@ namespace TES3MP::Native::Testing
                     ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                     placed.save(out);
                 }
+                if (npcBanks)
+                {
+                    for (const auto& [npcId, x, y] : std::vector<std::tuple<const char*, float, float>>{
+                        {"fargoth", 60.f, -32.f}, {"vodunius nuccius", -60.f, -100.f}})
+                    {
+                        ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0};
+                        placed.mRefID = ESM::RefId::stringRefId(npcId);
+                        placed.mPos = {{x, y, 1}, {0, 0, 0}};
+                        placed.save(out);
+                    }
+                }
                 out.endRecord(ESM::Cell::sRecordId);
+                if (npcBanks)
+                {
+                    cell.mName = "NPCDoorRecallMulti"; cell.updateId();
+                    out.startRecord(ESM::Cell::sRecordId, 0); cell.save(out);
+                    for (const auto record : {floor.mId, door.mId, ESM::RefId::stringRefId("TR_m1_T_Eldale")})
+                    {
+                        ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
+                        if (record == ESM::RefId::stringRefId("TR_m1_T_Eldale")) placed.mPos = {{60, -32, 1}, {0, 0, 0}};
+                        placed.save(out);
+                    }
+                    out.endRecord(ESM::Cell::sRecordId);
+                }
             }
             if (objectTravel)
             {
@@ -10210,6 +10290,71 @@ namespace TES3MP::Native::Testing
                                 && number(state(bobOwner)[1].runtime, "items") == number(alice(bobOwner).runtime, "items")
                                 && number(alice(bobOwner).runtime, "posx") == arrived.relocation->position[0])),
                             "B could not finish independently or A's destination/bank reset");
+                        if (npcBanks)
+                        {
+                            const auto multiDescriptor = scratch / "native-multi-quest.txt";
+                            {
+                                std::ofstream out(multiDescriptor, std::ios::binary);
+                                out << "native-inventory-95\nmanifest ";
+                                const auto manifestId = testContentManifestId();
+                                for (auto byte : manifestId.bytes())
+                                    out << std::hex << std::setw(2) << std::setfill('0') << std::to_integer<unsigned>(byte);
+                                out << std::dec << "\nconfig \"openmw\"\nplayers 1 2\nactors \"npc_door_actor\" \"npc_door_actor\"\nloot 1 0\n"
+                                    << "interior \"NPC Empty Interior Test\"\ndoors auto\ncell interior:9\n"
+                                    << "areas 2\ninterior \"NPCDoorRecallMulti\"\ncell interior:8\n"
+                                    << "actors auto " << std::quoted(actorSettings.string()) << "\nrespawn 20\n"
+                                    << "starting_items 2\n\"common_shirt_01\" 1 8\n\"iron longsword\" 1 16\n"
+                                    << "shared_script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\"\n"
+                                    << "personal_scripts 3 "
+                                    << "story 951 scripts 1 script \"relay_q19\" running 1 globals 1 \"ambient_counter_83\" "
+                                       "dialogues 2 \"MS_FargothRing\" \"ring\" "
+                                    << "story 952 scripts 1 script \"nucciusScript\" running 1 globals 1 \"ambient_counter_83\" "
+                                       "dialogues 2 \"MS_Nuccius\" \"nuccius_topic\" "
+                                    << "story 953 scripts 2 script \"TR_m1_T_EldaleSc\" running 1 script \"TR_m0_TelvanniHortDeathSc\" running 0 "
+                                       "globals 1 \"ambient_counter_83\" dialogues 2 \"TR_M1_GS_MQ_4\" \"puzzling riddles\"\n";
+                            }
+                            InventoryHost multiHost(multiDescriptor, manifest, *establishedRegistry, *crypto, {});
+                            auto& multiService = dynamic_cast<InventoryService&>(multiHost.service());
+                            const auto& defs = multiService.characterBinding().mPersonalScripts->definitions();
+                            require(defs.size() == 6
+                                && defs[0].encounter && defs[0].encounter->record == ESM::RefId::stringRefId("fargoth")
+                                && defs[0].encounter->cell == ESM::RefId::stringRefId("NPC Empty Interior Test")
+                                && defs[0].members.size() == 1
+                                && defs[0].members[0].script->initial().runtime.script.mId == ESM::RefId::stringRefId("fargothScript")
+                                && defs[2].encounter && defs[2].encounter->record == ESM::RefId::stringRefId("vodunius nuccius")
+                                && defs[2].encounter->cell == ESM::RefId::stringRefId("NPC Empty Interior Test")
+                                && defs[4].encounter && defs[4].encounter->record == ESM::RefId::stringRefId("TR_m1_T_Eldale")
+                                && defs[4].encounter->cell == ESM::RefId::stringRefId("NPCDoorRecallMulti")
+                                && defs[0].encounter->reference != defs[2].encounter->reference
+                                && defs[2].encounter->reference != defs[4].encounter->reference,
+                                "Multi-cell scripted-NPC stories did not bind per-story EncounterBinding targets or npc->mScript");
+                            std::vector<CanonicalPlayerEntityState> multiPlayers(authority.players().begin(), authority.players().end());
+                            for (size_t i = 0; i < multiPlayers.size(); ++i)
+                                multiPlayers[i] = CanonicalPlayerEntityState(multiPlayers[i].playerId(), multiPlayers[i].entityId(),
+                                    multiPlayers[i].appearanceId(),
+                                    Transform(CellId::interior(id<CellSpaceId>(9)), Position3(int64_t((i ? -60 : 60) * 1024), -80 * 1024, 1024),
+                                        multiPlayers[i].transform().orientation()),
+                                    LinearVelocity3(0, 0, 0), id<EntityRevision>(1), id<AuthorityEpoch>(1), id<ServerTick>(1));
+                            auto multiAuthority = std::get<CanonicalServerState>(
+                                createCanonicalServerState(multiPlayers, authority.activeSessions()));
+                            multiService.synchronizeCells(multiAuthority);
+                            auto scheduledStep = multiService.prepareNativePlayerTick(
+                                multiAuthority, id<ServerTick>(2), 1.f / 30, {}, &world, {}, {});
+                            require(scheduledStep
+                                && scheduledStep->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                    == CanonicalDurabilityResult::Committed,
+                                "Multi-cell scripted-NPC scheduled player tick failed");
+                            const auto multiStories = state(multiService);
+                            require(multiStories.size() == 6
+                                && number(multiStories[0].members[0], "calls") == 1.f
+                                && number(multiStories[2].runtime, "calls") == 1.f
+                                && number(multiStories[4].runtime, "calls") == 1.f,
+                                "Multi-cell scripted-NPC scheduled banks did not advance per-story NPC scripts");
+                            const auto multiSaved = image(multiService);
+                            InventoryHost multiRestart(multiDescriptor, manifest, *establishedRegistry, *crypto, multiSaved);
+                            require(image(multiRestart.service()) == multiSaved,
+                                "Multi-cell scripted-NPC campaign failed exact recovery");
+                        }
                         std::cout << (npcBanks ? "story npc banks host: stock AiEscort player + private bank/member continuation, GetSecondsPassed, GetPos/GetAngle, GetHealth/GetHealthGetRatio, provenance GetItemCount/AddItem/RemoveItem; "
                             : (std::string("story activity host: stock ") + (escortActivity ? "AiEscort player" : "AiTravel") + "; "))
                             << "A reaches destination, B retains and completes original opportunity; rejected/uncertain start/step writes; "

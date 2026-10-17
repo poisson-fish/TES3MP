@@ -484,6 +484,7 @@ namespace TES3MP::Native
                     throw std::invalid_argument("Unresolved leveled actor in interior collision domain");
                 if (id == actor && (!actorBody || initialCorpse(ptr)
                     || (!cls.getScript(ptr).empty()
+                        && !(npc && mStore.get<ESM::Script>().search(cls.getScript(ptr)))
                         && !(std::ranges::any_of(dynamic, [id](const auto& body) { return body.actor == id; })
                             && !stockActorSpawnDisease(cls.getScript(ptr), mStore).empty()))))
                     throw std::invalid_argument("Selected actor requires unsupported corpse/script services");

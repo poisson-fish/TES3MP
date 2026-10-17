@@ -30,12 +30,12 @@ namespace TES3MP::Native
         size_t count = 0, npcs = 0;
         loaded.forEach([&](const MWWorld::Ptr& ptr) {
             if (!ptr.getRefData().isEnabled() || ptr.getRefData().isDeletedByContentFile()) return true;
-            if (++count > 8192 || (ptr.getType() != ESM::Static::sRecordId && ptr.getType() != ESM::NPC::sRecordId)
-                || !ptr.getClass().getScript(ptr).empty())
+            if (++count > 8192)
                 throw std::invalid_argument("Disable encounter has an unbounded or mutable scene dependency");
-            if (ptr.getType() == ESM::NPC::sRecordId)
+            if (ptr.getType() == ESM::NPC::sRecordId
+                && MWWorld::placedRefId(ptr.getCellRef().getRefNum(), mOptions.mContent) == source)
             {
-                if (++npcs > 1 || MWWorld::placedRefId(ptr.getCellRef().getRefNum(), mOptions.mContent) != source)
+                if (++npcs > 1)
                     throw std::invalid_argument("Disable encounter must contain exactly its source NPC");
             }
             return true;

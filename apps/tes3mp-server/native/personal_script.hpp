@@ -194,7 +194,8 @@ namespace TES3MP::Native
         bool fairOpportunities() const { return mFairOpportunities; }
         bool activities() const { return mActivities; }
         bool npcBanks() const { return mNpcBanks; }
-        static uint64_t reservationOwner(const State&, uint64_t life);
+        const std::vector<Definition>& definitions() const { return mDefinitions; }
+        static uint64_t reservationOwner(const State&, uint64_t life, uint64_t reference = 0);
         static const Instance::Relocation* relocation(const State&, uint64_t character);
         static uint64_t physicalScope(const State&, uint64_t character);
         Prepared prepareReturn(const State&, uint64_t character, const MWWorld::ESMStore* = nullptr,
@@ -207,7 +208,8 @@ namespace TES3MP::Native
             const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction,
             MWScript::ReferenceState* = nullptr) const;
         Prepared prepareScheduled(const State&, uint64_t worldTick, std::span<const uint64_t> activeCharacters,
-            const MWWorld::ESMStore&, const MWScript::ReferenceResolver&, const Source* = nullptr) const;
+            const MWWorld::ESMStore&, const MWScript::ReferenceResolver&, const Source* = nullptr,
+            std::span<const Source> sources = {}) const;
         Prepared prepareDialogue(const State&, const MWScript::ExecutionContext&, const ESM::RefId& topic,
             int choice, int disposition, bool talkedToPlayer, std::string_view cellName,
             const MWWorld::ESMStore&, const MWScript::ReferenceResolver&, size_t budget = MaximumInvocationsPerTransaction,

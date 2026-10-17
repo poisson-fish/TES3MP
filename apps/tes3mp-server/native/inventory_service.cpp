@@ -3152,33 +3152,49 @@ namespace TES3MP::Native
             if (personalState && std::ranges::any_of(*personalState,
                     [&](const auto& entry) { return entry.scheduledTick > decoded.tick; }))
                 throw std::invalid_argument("Personal schedule exceeds durable world tick");
-            if (personalState && mBinding.mPersonalScripts->sourceWaits()
-                && (!decoded.life || std::ranges::any_of(*personalState, [&](const auto& story) {
-                    return story.last.sourceLife > decoded.life->generation;
-                })))
-                throw std::invalid_argument("Story source receipt exceeds canonical life");
-            if (personalState && mBinding.mPersonalScripts->lifeEvents()) for (const auto& story : *personalState)
-            {
-                if (!decoded.life || decoded.life->deaths.size() > PersonalScripts::MaximumLifeEvents
-                    || story.deathCursor > decoded.life->deaths.size())
-                    throw std::invalid_argument("Story cursor exceeds canonical death history");
-                if (story.deathCursor)
+            const auto storySourceLife = [&](size_t storyIdx, uint64_t fallbackRef = 0) -> const ActorCampaignLife* {
+                if (!decoded.life || !decoded.combat || decoded.combat->npcPlacements.empty()) return nullptr;
+                const auto& defs = mBinding.mPersonalScripts->definitions();
+                const uint64_t ref = (storyIdx < defs.size() && defs[storyIdx].encounter)
+                    ? defs[storyIdx].encounter->reference
+                    : (fallbackRef ? fallbackRef : decoded.combat->npcPlacements.front());
+                const auto placement = std::ranges::find(decoded.combat->npcPlacements, ref);
+                if (placement == decoded.combat->npcPlacements.end()) return nullptr;
+                const size_t idx = size_t(placement - decoded.combat->npcPlacements.begin());
+                return idx ? (idx - 1 < decoded.neighborLives.size() ? &decoded.neighborLives[idx - 1] : nullptr) : &*decoded.life;
+            };
+            if (personalState && mBinding.mPersonalScripts->sourceWaits())
+                for (size_t s = 0; s < personalState->size(); ++s)
                 {
-                    const auto& death = decoded.life->deaths[size_t(story.deathCursor - 1)];
-                    if (death.killerKind != 1 || death.killer != story.last.character || death.tick > story.scheduledTick)
-                        throw std::invalid_argument("Story cursor lacks an eligible causal death");
+                    const auto* life = storySourceLife(s, (*personalState)[s].last.sourceReference);
+                    if (!life || (*personalState)[s].last.sourceLife > life->generation)
+                        throw std::invalid_argument("Story source receipt exceeds canonical life");
                 }
-                if (story.reservedLife && (story.reservedLife > decoded.life->generation + bool(decoded.life->respawnTick)
-                    || story.reservedLife < 2 || story.reservedLife - 1 > decoded.life->deaths.size()
-                    || !story.reservationTick || story.reservationTick > decoded.tick))
-                    throw std::invalid_argument("Story reservation exceeds canonical next opportunity");
-                if (story.reservedLife)
+            if (personalState && mBinding.mPersonalScripts->lifeEvents())
+                for (size_t s = 0; s < personalState->size(); ++s)
                 {
-                    const auto& blocked = decoded.life->deaths[size_t(story.reservedLife - 2)];
-                    if (blocked.tick > story.reservationTick || (blocked.killerKind == 1 && blocked.killer == story.last.character))
-                        throw std::invalid_argument("Story reservation lacks a foreign source occurrence");
+                    const auto& story = (*personalState)[s];
+                    const auto* life = storySourceLife(s, story.last.sourceReference);
+                    if (!life || life->deaths.size() > PersonalScripts::MaximumLifeEvents
+                        || story.deathCursor > life->deaths.size())
+                        throw std::invalid_argument("Story cursor exceeds canonical death history");
+                    if (story.deathCursor)
+                    {
+                        const auto& death = life->deaths[size_t(story.deathCursor - 1)];
+                        if (death.killerKind != 1 || death.killer != story.last.character || death.tick > story.scheduledTick)
+                            throw std::invalid_argument("Story cursor lacks an eligible causal death");
+                    }
+                    if (story.reservedLife && (story.reservedLife > life->generation + bool(life->respawnTick)
+                        || story.reservedLife < 2 || story.reservedLife - 1 > life->deaths.size()
+                        || !story.reservationTick || story.reservationTick > decoded.tick))
+                        throw std::invalid_argument("Story reservation exceeds canonical next opportunity");
+                    if (story.reservedLife)
+                    {
+                        const auto& blocked = life->deaths[size_t(story.reservedLife - 2)];
+                        if (blocked.tick > story.reservationTick || (blocked.killerKind == 1 && blocked.killer == story.last.character))
+                            throw std::invalid_argument("Story reservation lacks a foreign source occurrence");
+                    }
                 }
-            }
             if (personalState && mBinding.mPersonalScripts->npcBanks())
                 for (const auto& story : *personalState)
                 {
@@ -3192,20 +3208,25 @@ namespace TES3MP::Native
                         if (!MWWorld::inventoryItemRecord(mRuntime.mStore, receipt.item).mScript.empty())
                             throw std::invalid_argument("Story provenance receipt item record invalid");
                 }
-            if (personalState) for (const auto& story : *personalState) if (story.sourceWait)
+            if (personalState) for (size_t s = 0; s < personalState->size(); ++s) if ((*personalState)[s].sourceWait)
             {
+                const auto& story = (*personalState)[s];
                 const auto& wait = *story.sourceWait;
-                if (!decoded.life || !decoded.combat || decoded.combat->npcPlacements.size() != 1
-                    || wait.invocation.sourceReference != decoded.combat->npcPlacements.front()
-                    || wait.invocation.sourceLife > decoded.life->deaths.size()
+                const auto& defs = mBinding.mPersonalScripts->definitions();
+                const uint64_t expectedRef = (s < defs.size() && defs[s].encounter)
+                    ? defs[s].encounter->reference
+                    : (decoded.combat && !decoded.combat->npcPlacements.empty() ? decoded.combat->npcPlacements.front() : 0);
+                const auto* life = storySourceLife(s, wait.invocation.sourceReference);
+                if (!life || !decoded.combat || wait.invocation.sourceReference != expectedRef
+                    || wait.invocation.sourceLife > life->deaths.size()
                     || wait.sinceTick > decoded.tick)
                     throw std::invalid_argument("Story wait differs from canonical source history");
-                const auto& death = decoded.life->deaths.at(size_t(wait.invocation.sourceLife - 1));
+                const auto& death = life->deaths.at(size_t(wait.invocation.sourceLife - 1));
                 if (!death.killer || (death.killerKind == 1 && death.killer == story.last.character)
                     || death.tick > story.scheduledTick
                     || wait.respawnTick <= death.tick
-                    || (wait.invocation.sourceLife == decoded.life->generation
-                        && wait.respawnTick != decoded.life->respawnTick))
+                    || (wait.invocation.sourceLife == life->generation
+                        && wait.respawnTick != life->respawnTick))
                     throw std::invalid_argument("Story wait lacks a foreign respawning death");
             }
             EquipmentBytes personalImage(decoded.personalScripts.begin(), decoded.personalScripts.end());
@@ -3256,17 +3277,23 @@ namespace TES3MP::Native
                 if (!decoded.combat || decoded.combat->npcPlacements != placements)
                     throw std::invalid_argument("Native combat placements differ from bound actors");
             }
-            if (personalState) for (const auto& story : *personalState) if (story.encounterLife)
+            if (personalState) for (size_t s = 0; s < personalState->size(); ++s) if ((*personalState)[s].encounterLife)
             {
-                if (!decoded.combat || !decoded.life || story.encounterLife > decoded.life->generation
-                    || decoded.combat->npcPlacements.size() != 1
-                    || story.last.sourceReference != decoded.combat->npcPlacements.front())
+                const auto& story = (*personalState)[s];
+                const auto& defs = mBinding.mPersonalScripts->definitions();
+                const uint64_t expectedRef = (s < defs.size() && defs[s].encounter)
+                    ? defs[s].encounter->reference
+                    : (decoded.combat && !decoded.combat->npcPlacements.empty() ? decoded.combat->npcPlacements.front() : 0);
+                const auto* life = storySourceLife(s, story.last.sourceReference);
+                if (!decoded.combat || !life || story.encounterLife > life->generation
+                    || story.last.sourceReference != expectedRef)
                     throw std::invalid_argument("Encounter origin differs from durable NPC placement/life");
                 if (story.activity)
                 {
                     if (story.activity->tick > decoded.tick || story.activity->actorImage.empty())
                         throw std::invalid_argument("Activity clock/frame differs from durable gameplay");
-                    const auto activityFrame = mBinding.mNavigatingActor->prepareRestore(story.activity->actorImage);
+                    const auto activityFrame = mBinding.mNavigatingActor->forActor(story.last.sourceReference)
+                        .prepareRestore(story.activity->actorImage);
                     if (activityFrame->snapshot().mPosition != story.relocation->position
                         || activityFrame->snapshot().mYaw != story.relocation->yaw
                         || (story.activity->steps && activityFrame->destination() != story.activity->destination))
@@ -3295,7 +3322,9 @@ namespace TES3MP::Native
                 const auto& sourceLife = index ? decoded.neighborLives.at(index - 1) : *decoded.life;
                 const auto ptr = mRuntime.mContainers.at(size_t(owner - mBinding.mContainers.begin()))->mReference->getPtr();
                 if (!ptr.hasLiveReference() || ptr.getType() != ESM::NPC::sRecordId
-                    || ptr.getCellRef().getRefId() != npc.record || !ptr.getClass().getScript(ptr).empty()
+                    || ptr.getCellRef().getRefId() != npc.record
+                    || (!ptr.getClass().getScript(ptr).empty()
+                        && !mRuntime.mStore.get<ESM::Script>().search(ptr.getClass().getScript(ptr)))
                     || npc.life > sourceLife.generation)
                     throw std::invalid_argument("Story NPC record/life differs from physical source");
             }
@@ -5571,7 +5600,9 @@ namespace TES3MP::Native
                     { frame.mPosition[0], frame.mPosition[1], frame.mPosition[2] + 64.f }))
             return reject("speaker reach or sight");
         const auto ptr = mRuntime.mContainers.at(size_t(owner - mBinding.mContainers.begin()))->mReference->getPtr();
-        if (!ptr.hasLiveReference() || ptr.getType() != ESM::NPC::sRecordId || !ptr.getClass().getScript(ptr).empty())
+        if (!ptr.hasLiveReference() || ptr.getType() != ESM::NPC::sRecordId
+            || (!ptr.getClass().getScript(ptr).empty()
+                && !mRuntime.mStore.get<ESM::Script>().search(ptr.getClass().getScript(ptr))))
             return reject("speaker content");
         struct Resolver final : MWScript::ReferenceResolver
         {
@@ -5714,14 +5745,14 @@ namespace TES3MP::Native
                     const auto value = speakerStats.getMagicEffects().get(MWMechanics::EffectKey(effect));
                     return value ? value->getMagnitude() : 0.f;
                 };
-                const float weight = std::max(0.f, mRuntime.storage(mCombatNpcOwner).getWeight()
+                const float weight = std::max(0.f, mRuntime.storage(2 + size_t(owner - mBinding.mContainers.begin())).getWeight()
                     - magnitude(ESM::MagicEffect::Feather) + magnitude(ESM::MagicEffect::Burden));
                 const float encumbrance = MWClass::normalizedEncumbrance(weight,
                     speakerStats.getAttribute(ESM::Attribute::Strength).getModified() * setting("fEncumbranceStrMult"));
                 if (encumbrance > 1.f) return reject("activity source overencumbered");
                 story.activity->walkSpeed = MWClass::npcWalkSpeed(speakerStats.getAttribute(ESM::Attribute::Speed).getModified(),
                     encumbrance, setting("fMinWalkSpeed"), setting("fMaxWalkSpeed"), setting("fEncumberedMoveEffect"));
-                story.activity->actorImage = mBinding.mNavigatingActor->selectedImage();
+                story.activity->actorImage = mBinding.mNavigatingActor->forActor(request.speaker).selectedImage();
                 story.activity->validate();
             }
         }
@@ -6424,7 +6455,13 @@ namespace TES3MP::Native
             const auto scope = physicalScope(player->playerId());
             const auto* stories = personalState();
             const auto* pose = stories ? PersonalScripts::relocation(*stories, player->playerId().value()) : nullptr;
-            if (scope != 1 && !pose) hidden.push_back(scene->snapshot().mActor);
+            uint64_t encounterRef = scene->snapshot().mActor;
+            if (stories)
+                if (const auto activeStory = std::ranges::find_if(*stories, [&](const auto& s) {
+                        return s.last.character == player->playerId().value() && s.encounterLife && !s.encounterReturned;
+                    }); activeStory != stories->end() && activeStory->last.sourceReference)
+                    encounterRef = activeStory->last.sourceReference;
+            if (scope != 1 && !pose) hidden.push_back(encounterRef);
             for (size_t peer = 0; peer < 2; ++peer)
                 if (peer != i && scene->hasPlayer(PlayerHullBase + peer)
                     && physicalScope(mBinding.mPlayers[peer]) != scope) hidden.push_back(PlayerHullBase + peer);
@@ -6433,7 +6470,7 @@ namespace TES3MP::Native
                     const auto prepare = [&] { step = body.prepareControlled(movement,
                         {float(state.controls.right) / 1024, float(state.controls.forward) / 1024, float(state.controls.vertical) / 1024},
                         radians(state.controls.pitch), radians(state.facing), actorDoorFrames(command.get())); };
-                    if (pose) scene->withActorPose(scene->snapshot().mActor, pose->position, pose->yaw, prepare);
+                    if (pose) scene->withActorPose(encounterRef, pose->position, pose->yaw, prepare);
                     else prepare();
                 });
             });
@@ -6553,23 +6590,31 @@ namespace TES3MP::Native
             std::vector<std::pair<uint64_t, const InteriorActorScene::Prepared*>> activityHulls;
             for (size_t i = 0; i < 2; ++i)
                 if (transaction->steps[i]) activityHulls.emplace_back(PlayerHullBase + i, transaction->steps[i].get());
-            for (auto& story : stories)
+            for (size_t s = 0; s < stories.size(); ++s)
             {
+                auto& story = stories[s];
                 if (!story.activity || story.activity->completed || story.activity->tick >= tick.value()) continue;
                 const auto owner = PlayerId::fromValue(story.last.character).value();
                 const size_t index = actor(owner);
                 const auto* player = inputPlayers.findPlayer(owner);
+                const auto& defs = mBinding.mPersonalScripts->definitions();
+                const uint64_t sourceRef = (s < defs.size() && defs[s].encounter)
+                    ? defs[s].encounter->reference : story.last.sourceReference;
+                const auto containerIt = std::ranges::find(mBinding.mContainers, sourceRef,
+                    [](const auto& c) { return c.mId.value(); });
                 if (!player || !transaction->states[index].root || !room.hasPlayer(PlayerHullBase + index)
                     || std::ranges::none_of(inputPlayers.activeSessions(), [&](const auto& session) { return session.playerId() == owner; })
                     || !native->combat || native->combat->actors[index][8][2] <= 0
-                    || transaction->states[index].root->cell() != mBinding.mContainers.front().mCell)
+                    || containerIt == mBinding.mContainers.end()
+                    || transaction->states[index].root->cell() != containerIt->mCell)
                     continue; // Offline/absent owners suspend; never catch up or reset.
+                auto& actorRoom = room.forActor(sourceRef);
                 auto& activity = *story.activity;
                 const auto& pose = *story.relocation;
                 const auto p = transaction->states[index].root->position();
                 const osg::Vec3f follower(float(double(p.x()) / 1024), float(double(p.y()) / 1024), float(double(p.z()) / 1024));
                 const osg::Vec3f leader(pose.position[0], pose.position[1], pose.position[2]);
-                const auto extents = room.selectedActorHalfExtents();
+                const auto extents = actorRoom.selectedActorHalfExtents();
                 const float maxExtent = std::max({extents[0], extents[1], extents[2]});
                 const bool moving = !activity.escort || MWMechanics::AiEscort::followerInRange(leader, follower, activity.followDistance);
                 std::vector<uint64_t> hidden;
@@ -6577,7 +6622,7 @@ namespace TES3MP::Native
                     if (peer != index && room.hasPlayer(PlayerHullBase + peer)) hidden.push_back(PlayerHullBase + peer);
                 std::unique_ptr<InteriorActorScene::Prepared> step;
                 room.withPlayerHulls(activityHulls, [&] { room.withHiddenActors(hidden, [&] {
-                    step = room.prepareScopedNavigation(activity.actorImage,
+                    step = actorRoom.prepareScopedNavigation(activity.actorImage,
                         ActorMovement{.enabled = true, .walkSpeed = moving ? activity.walkSpeed : 0.f}, activity.destination);
                 }); });
                 const auto frame = step->snapshot();
@@ -6612,39 +6657,16 @@ namespace TES3MP::Native
                             [&](const auto& session) { return session.playerId() == mBinding.mPlayers[i]; }))
                         active[count++] = mBinding.mPlayers[i].value();
                 PersonalReferenceResolver resolver;
-                std::optional<PersonalScripts::Source> source;
-                std::optional<MWMechanics::NpcStats> sourceStats, privateSourceStats;
-                std::vector<PersonalScripts::LifeEvent> lifeEvents;
+                std::vector<PersonalScripts::Source> sources;
+                std::vector<MWMechanics::NpcStats> sourceStats, privateSourceStats;
+                std::vector<std::vector<PersonalScripts::LifeEvent>> lifeEvents;
                 std::array<std::vector<PersonalScripts::ItemBalance>, 2> playerItemStorage;
                 std::vector<PersonalScripts::PlayerInventory> playerInventories;
                 if (mBinding.mPersonalScripts->sourceWaits())
                 {
-                    if (!native->life || !native->combat || native->combat->npcPlacements.size() != 1)
+                    if (!native->life || !native->combat || native->combat->npcPlacements.empty())
                         throw std::invalid_argument("Story wait source snapshot absent");
-                    const auto& life = *native->life;
-                    const auto& owner = mBinding.mContainers.front();
-                    const auto death = life.respawnTick ? life.deaths.back() : ActorDeathEvent{};
-                    source = PersonalScripts::Source{owner.mId.value(), life.generation, life.respawnTick, owner.mBase,
-                        !life.respawnTick && native->combat->actors[2][8][2] > 0, death.killer, death.killerKind};
-                    const auto frame = native->actor ? native->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
-                    std::copy(frame.mPosition.begin(), frame.mPosition.end(), source->position.pos);
-                    source->position.rot[2] = frame.mYaw;
-                    sourceStats.emplace(loadCombatStats(mRuntime.mStore, native->combat->actors[2], native->timedEffects, 2));
-                    privateSourceStats.emplace(loadCombatStats(mRuntime.mStore, life.spawnStats, {}, 2));
-                    source->stats = &*sourceStats;
-                    source->privateStats = &*privateSourceStats;
-                    if (mBinding.mPersonalScripts->lifeEvents())
-                    {
-                        if (life.deaths.size() > PersonalScripts::MaximumLifeEvents)
-                            throw std::invalid_argument("Story life-event history capacity exhausted");
-                        lifeEvents.reserve(life.deaths.size());
-                        for (const auto& event : life.deaths)
-                            lifeEvents.push_back({event.life, event.tick, event.killer, event.killerKind, event.killerLife,
-                                event.killerKind == 1 ? event.killer : 0, event.killerKind == 1 ? event.killerLife : 0});
-                        source->events = lifeEvents;
-                    }
                     if (mBinding.mPersonalScripts->npcBanks())
-                    {
                         for (size_t i = 0; i < 2; ++i)
                         {
                             const auto values = native->loot && native->loot->replaces(i)
@@ -6653,12 +6675,53 @@ namespace TES3MP::Native
                             playerItemStorage[i] = extractPersonalPlayerItems(values, mRuntime.mStore);
                             playerInventories.push_back({mBinding.mPlayers[i].value(), playerItemStorage[i]});
                         }
-                        source->playerInventories = playerInventories;
+                    const size_t nPlacements = native->combat->npcPlacements.size();
+                    sources.reserve(nPlacements);
+                    sourceStats.reserve(nPlacements);
+                    privateSourceStats.reserve(nPlacements);
+                    lifeEvents.resize(nPlacements);
+                    const auto neighborFrames = native->actor
+                        ? native->actor->neighborSnapshots()
+                        : mBinding.mNavigatingActor->neighborSnapshots();
+                    for (size_t k = 0; k < nPlacements; ++k)
+                    {
+                        const uint64_t placementId = native->combat->npcPlacements[k];
+                        const auto ownerIt = std::ranges::find(mBinding.mContainers, placementId,
+                            [](const auto& c) { return c.mId.value(); });
+                        if (ownerIt == mBinding.mContainers.end())
+                            throw std::invalid_argument("Story wait source snapshot absent");
+                        const auto& life = k == 0 ? *native->life : native->neighborLives.at(k - 1);
+                        const auto death = life.respawnTick ? life.deaths.back() : ActorDeathEvent{};
+                        PersonalScripts::Source src{ownerIt->mId.value(), life.generation, life.respawnTick, ownerIt->mBase,
+                            !life.respawnTick && native->combat->actors.at(2 + k)[8][2] > 0, death.killer, death.killerKind};
+                        const auto frame = k == 0
+                            ? (native->actor ? native->actor->snapshot() : mBinding.mNavigatingActor->snapshot())
+                            : neighborFrames.at(k - 1);
+                        std::copy(frame.mPosition.begin(), frame.mPosition.end(), src.position.pos);
+                        src.position.rot[2] = frame.mYaw;
+                        sourceStats.push_back(loadCombatStats(mRuntime.mStore, native->combat->actors.at(2 + k), native->timedEffects, 2 + k));
+                        privateSourceStats.push_back(loadCombatStats(mRuntime.mStore, life.spawnStats, {}, 2 + k));
+                        src.stats = &sourceStats.back();
+                        src.privateStats = &privateSourceStats.back();
+                        if (mBinding.mPersonalScripts->lifeEvents())
+                        {
+                            if (life.deaths.size() > PersonalScripts::MaximumLifeEvents)
+                                throw std::invalid_argument("Story life-event history capacity exhausted");
+                            lifeEvents[k].reserve(life.deaths.size());
+                            for (const auto& event : life.deaths)
+                                lifeEvents[k].push_back({event.life, event.tick, event.killer, event.killerKind, event.killerLife,
+                                    event.killerKind == 1 ? event.killer : 0, event.killerKind == 1 ? event.killerLife : 0});
+                            src.events = lifeEvents[k];
+                        }
+                        if (mBinding.mPersonalScripts->npcBanks())
+                            src.playerInventories = playerInventories;
+                        sources.push_back(src);
                     }
                 }
                 auto scripts
                     = mBinding.mPersonalScripts->prepareScheduled(*personalState(transaction.get()),
-                        tick.value(), std::span(active).first(count), mRuntime.mStore, resolver, source ? &*source : nullptr);
+                        tick.value(), std::span(active).first(count), mRuntime.mStore, resolver,
+                        sources.empty() ? nullptr : &sources.front(), sources);
                 if (scripts.result.outcome != SharedWorldScript::Outcome::Committed)
                 {
                     const auto& result = scripts.result;
@@ -6722,15 +6785,12 @@ namespace TES3MP::Native
         // life. V90 also clears the private destination hull and retains its pose
         // dormant, without Enable or a source move. Completed banks stay frozen.
         if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->returns() && native->combat
-            && (!(mBinding.mPersonalScripts->enables() || mBinding.mPersonalScripts->relocations())
-                || (native->life && native->combat->actors[2][8][2] > 0))
             && !native->casting && native->projectiles.empty() && !native->target && native->relocations.empty()
             && std::ranges::none_of(native->timedEffects, [](const auto& effect) { return effect.sourceKind != 3 && effect.sourceKind != 5; })
             && std::ranges::none_of(native->combat->swings, [](const auto& swing) { return swing && swing->pending(); })
             && std::ranges::none_of(native->combat->playerCasts, [](const auto& cast) { return bool(cast); })
             && std::ranges::none_of(native->combat->arrows, [](const auto& arrow) { return !arrow.terminal; }))
         {
-            const auto source = mBinding.mNavigatingActor->snapshot();
             for (size_t i = 0; i < 2; ++i)
             {
                 const auto player = mBinding.mPlayers[i];
@@ -6740,12 +6800,27 @@ namespace TES3MP::Native
                     || native->combat->knockedDown[i] || native->combat->hitRecoveryTicks[i]
                     || std::ranges::none_of(inputPlayers.activeSessions(), [&](const auto& session) { return session.playerId() == player; }))
                     continue;
+                const auto* stories = personalState(transaction.get());
+                const auto activeStory = std::ranges::find_if(*stories, [&](const auto& story) {
+                    return story.last.character == player.value() && story.encounterLife && !story.encounterReturned;
+                });
+                const uint64_t sourceRef = (activeStory != stories->end() && activeStory->last.sourceReference)
+                    ? activeStory->last.sourceReference : mBinding.mNavigatingActor->snapshot().mActor;
+                const auto placementIt = std::ranges::find(native->combat->npcPlacements, sourceRef);
+                const size_t npcIndex = placementIt == native->combat->npcPlacements.end()
+                    ? 0 : size_t(placementIt - native->combat->npcPlacements.begin());
+                const auto* storyLife = !native->life ? nullptr
+                    : (npcIndex == 0 ? &*native->life : &native->neighborLives.at(npcIndex - 1));
+                if ((mBinding.mPersonalScripts->enables() || mBinding.mPersonalScripts->relocations())
+                    && (!storyLife || native->combat->actors.at(2 + npcIndex)[8][2] <= 0))
+                    continue;
+                const auto source = mBinding.mNavigatingActor->forActor(sourceRef).snapshot();
                 const auto p = body.root->position();
                 const double x = double(p.x()) / 1024, y = double(p.y()) / 1024;
                 const double selfRadius = transaction->scene->forPlayer(PlayerHullBase + i).selectedActorHorizontalRadius();
-                const double npcDistance = std::max(256., selfRadius + transaction->scene->selectedActorHorizontalRadius() + 32.);
+                const double npcDistance = std::max(256.,
+                    selfRadius + transaction->scene->forActor(sourceRef).selectedActorHorizontalRadius() + 32.);
                 if (std::hypot(x - source.mPosition[0], y - source.mPosition[1]) < npcDistance) continue;
-                const auto* stories = personalState(transaction.get());
                 const auto* pose = PersonalScripts::relocation(*stories, player.value());
                 if (pose && std::hypot(x - pose->position[0], y - pose->position[1]) < npcDistance) continue;
                 const auto& peer = transaction->states[1 - i];
@@ -6762,10 +6837,10 @@ namespace TES3MP::Native
                     && invocations >= PersonalScripts::MaximumInvocationsPerTransaction) continue;
                 if ((mBinding.mPersonalScripts->enables() || pose) && std::ranges::any_of(*stories, [&](const auto& story) {
                     return story.last.character == player.value() && story.encounterLife
-                        && (story.activity || story.encounterLife != native->life->generation);
+                        && (story.activity || story.encounterLife != storyLife->generation);
                 })) continue;
                 auto returned = mBinding.mPersonalScripts->prepareReturn(*stories, player.value(),
-                    &mRuntime.mStore, native->life ? native->life->generation : 0);
+                    &mRuntime.mStore, storyLife ? storyLife->generation : 0);
                 if (returned.result.executed)
                 {
                     returned.invocations += invocations;
@@ -12927,39 +13002,58 @@ namespace TES3MP::Native
                         [&](const auto& session) { return session.playerId() == player; }))
                     active[count++] = player.value();
             PersonalReferenceResolver resolver;
-            std::optional<PersonalScripts::Source> source;
-            std::optional<MWMechanics::NpcStats> sourceStats, privateSourceStats;
-            std::vector<PersonalScripts::LifeEvent> lifeEvents;
+            std::vector<PersonalScripts::Source> sources;
+            std::vector<MWMechanics::NpcStats> sourceStats, privateSourceStats;
+            std::vector<std::vector<PersonalScripts::LifeEvent>> lifeEvents;
             if (mBinding.mPersonalScripts->sourceWaits())
             {
-                if (!transaction->life || !transaction->combat || transaction->combat->npcPlacements.size() != 1)
+                if (!transaction->life || !transaction->combat || transaction->combat->npcPlacements.empty())
                     throw std::invalid_argument("Story wait source snapshot absent");
-                const auto& life = *transaction->life;
-                const auto& owner = mBinding.mContainers.front();
-                const auto death = life.respawnTick ? life.deaths.back() : ActorDeathEvent{};
-                source = PersonalScripts::Source{owner.mId.value(), life.generation, life.respawnTick, owner.mBase,
-                    !life.respawnTick && transaction->combat->actors[2][8][2] > 0, death.killer, death.killerKind};
-                const auto frame = transaction->actor ? transaction->actor->snapshot() : mBinding.mNavigatingActor->snapshot();
-                std::copy(frame.mPosition.begin(), frame.mPosition.end(), source->position.pos);
-                source->position.rot[2] = frame.mYaw;
-                sourceStats.emplace(loadCombatStats(mRuntime.mStore, transaction->combat->actors[2], transaction->timedEffects, 2));
-                privateSourceStats.emplace(loadCombatStats(mRuntime.mStore, life.spawnStats, {}, 2));
-                source->stats = &*sourceStats;
-                source->privateStats = &*privateSourceStats;
-                if (mBinding.mPersonalScripts->lifeEvents())
+                const size_t nPlacements = transaction->combat->npcPlacements.size();
+                sources.reserve(nPlacements);
+                sourceStats.reserve(nPlacements);
+                privateSourceStats.reserve(nPlacements);
+                lifeEvents.resize(nPlacements);
+                const auto neighborFrames = transaction->actor
+                    ? transaction->actor->neighborSnapshots()
+                    : mBinding.mNavigatingActor->neighborSnapshots();
+                for (size_t k = 0; k < nPlacements; ++k)
                 {
-                    if (life.deaths.size() > PersonalScripts::MaximumLifeEvents)
-                        throw std::invalid_argument("Story life-event history capacity exhausted");
-                    lifeEvents.reserve(life.deaths.size());
-                    for (const auto& event : life.deaths)
-                        lifeEvents.push_back({event.life, event.tick, event.killer, event.killerKind, event.killerLife,
-                            event.killerKind == 1 ? event.killer : 0, event.killerKind == 1 ? event.killerLife : 0});
-                    source->events = lifeEvents;
+                    const uint64_t placementId = transaction->combat->npcPlacements[k];
+                    const auto ownerIt = std::ranges::find(mBinding.mContainers, placementId,
+                        [](const auto& c) { return c.mId.value(); });
+                    if (ownerIt == mBinding.mContainers.end())
+                        throw std::invalid_argument("Story wait source snapshot absent");
+                    const auto& life = k == 0 ? *transaction->life : transaction->neighborLives.at(k - 1);
+                    const auto death = life.respawnTick ? life.deaths.back() : ActorDeathEvent{};
+                    PersonalScripts::Source src{ownerIt->mId.value(), life.generation, life.respawnTick, ownerIt->mBase,
+                        !life.respawnTick && transaction->combat->actors.at(2 + k)[8][2] > 0, death.killer, death.killerKind};
+                    const auto frame = k == 0
+                        ? (transaction->actor ? transaction->actor->snapshot() : mBinding.mNavigatingActor->snapshot())
+                        : neighborFrames.at(k - 1);
+                    std::copy(frame.mPosition.begin(), frame.mPosition.end(), src.position.pos);
+                    src.position.rot[2] = frame.mYaw;
+                    sourceStats.push_back(loadCombatStats(mRuntime.mStore, transaction->combat->actors.at(2 + k), transaction->timedEffects, 2 + k));
+                    privateSourceStats.push_back(loadCombatStats(mRuntime.mStore, life.spawnStats, {}, 2 + k));
+                    src.stats = &sourceStats.back();
+                    src.privateStats = &privateSourceStats.back();
+                    if (mBinding.mPersonalScripts->lifeEvents())
+                    {
+                        if (life.deaths.size() > PersonalScripts::MaximumLifeEvents)
+                            throw std::invalid_argument("Story life-event history capacity exhausted");
+                        lifeEvents[k].reserve(life.deaths.size());
+                        for (const auto& event : life.deaths)
+                            lifeEvents[k].push_back({event.life, event.tick, event.killer, event.killerKind, event.killerLife,
+                                event.killerKind == 1 ? event.killer : 0, event.killerKind == 1 ? event.killerLife : 0});
+                        src.events = lifeEvents[k];
+                    }
+                    sources.push_back(src);
                 }
             }
             auto scripts
                 = mBinding.mPersonalScripts->prepareScheduled(dialogue ? dialogue->state : *mPersonalScriptState,
-                    tick.value(), std::span(active).first(count), mRuntime.mStore, resolver, source ? &*source : nullptr);
+                    tick.value(), std::span(active).first(count), mRuntime.mStore, resolver,
+                    sources.empty() ? nullptr : &sources.front(), sources);
             if (scripts.result.outcome != SharedWorldScript::Outcome::Committed)
             {
                 const auto& result = scripts.result;
@@ -13151,6 +13245,12 @@ namespace TES3MP::Native
             if (view.physicalScope != 1)
             {
                 const auto* stories = personalState(scopeCandidate);
+                uint64_t encounterRef = mBinding.mNavigatingActor->snapshot().mActor;
+                if (stories)
+                    if (const auto activeStory = std::ranges::find_if(*stories, [&](const auto& s) {
+                            return s.last.character == session->playerId().value() && s.encounterLife && !s.encounterReturned;
+                        }); activeStory != stories->end() && activeStory->last.sourceReference)
+                        encounterRef = activeStory->last.sourceReference;
                 const auto* pose = stories ? PersonalScripts::relocation(*stories, session->playerId().value()) : nullptr;
                 if (pose)
                 {
@@ -13163,12 +13263,14 @@ namespace TES3MP::Native
                     const auto* previous = mPersonalScriptState ? PersonalScripts::relocation(*mPersonalScriptState, session->playerId().value()) : nullptr;
                     if (activity != stories->end() && !activity->activity->completed && previous && scopeCandidate)
                         for (size_t axis = 0; axis < 3; ++axis) velocity[axis] = (pose->position[axis] - previous->position[axis]) * 30.f;
+                    std::erase_if(view.actors, [&](const auto& actor) { return actor.actor.value() != encounterRef; });
+                    std::erase_if(view.motions, [&](const auto& motion) { return motion.placement != encounterRef; });
                     for (auto& motion : view.motions)
                     { motion.position = pose->position; motion.yaw = pose->yaw; motion.velocity = velocity; }
                 }
                 else
                 {
-                    view.hiddenActors = {mBinding.mNavigatingActor->snapshot().mActor};
+                    view.hiddenActors = {encounterRef};
                     view.actors.clear(); view.motions.clear();
                 }
                 result->containers.clear();

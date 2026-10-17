@@ -600,11 +600,12 @@ namespace TES3MP::Native
             require(entry.character && entry.story && entry.script);
             require(!mSourceWaits || entry.encounter);
             require(entry.script->sourceRecord() == (mSourceWaits ? entry.encounter->record : ESM::RefId{}));
-            require(!mEncounters || (entry.encounter == mDefinitions.front().encounter && entry.encounter && entry.encounter->reference
+            require(!mEncounters || (entry.encounter && entry.encounter->reference
                 && entry.encounter->record.is<ESM::StringRefId>() && !entry.encounter->record.empty()
-                && entry.encounter->cell.is<ESM::StringRefId>() && !entry.encounter->cell.empty()
-                && entry.encounter->record.getRefIdString().size() <= 128
-                && entry.encounter->cell.getRefIdString().size() <= 128));
+                && !entry.encounter->cell.empty()
+                && (entry.encounter->cell.is<ESM::ESM3ExteriorCellRefId>()
+                    || (entry.encounter->cell.is<ESM::StringRefId>() && entry.encounter->cell.getRefIdString().size() <= 128))
+                && entry.encounter->record.getRefIdString().size() <= 128));
             if (mEnables)
                 mRestorations.push_back(entry.script->compileResult("Enable", true, entry.encounter->record, true));
             require(entry.members.size() < MaximumScriptsPerBank
@@ -620,7 +621,10 @@ namespace TES3MP::Native
                 require(std::ranges::find(names, id) == names.end()); names.push_back(id);
             }
             for (size_t j = 0; j < i; ++j)
+            {
                 require(entry.character != mDefinitions[j].character || entry.story != mDefinitions[j].story);
+                require(!mEncounters || entry.story != mDefinitions[j].story || entry.encounter == mDefinitions[j].encounter);
+            }
             require(!mDialogues || (!entry.dialogues.empty() && entry.dialogues.size() <= MWScript::DialogueState::MaximumRecords));
             size_t infos = 0;
             for (size_t d = 0; d < entry.dialogues.size(); ++d)
@@ -671,7 +675,16 @@ namespace TES3MP::Native
         auto binding = encode(initial());
         if (mEncounters) for (const auto& entry : mDefinitions)
         {
-            word(binding, entry.encounter->reference); ref(binding, entry.encounter->record); ref(binding, entry.encounter->cell);
+            word(binding, entry.encounter->reference);
+            ref(binding, entry.encounter->record);
+            if (entry.encounter->cell.is<ESM::StringRefId>())
+                ref(binding, entry.encounter->cell);
+            else
+            {
+                const auto text = entry.encounter->cell.serializeText();
+                word(binding, text.size());
+                binding.insert(binding.end(), text.begin(), text.end());
+            }
         }
         if (mEncounters)
         {
@@ -1308,9 +1321,13 @@ namespace TES3MP::Native
         if (enable)
         {
             require(content && sourceLife == found->encounterLife);
-            const auto& binding = *mDefinitions[index].encounter;
+            const auto& def = mDefinitions[index];
+            const auto& binding = *def.encounter;
             const auto* npc = content->get<ESM::NPC>().find(binding.record);
-            require(npc->mScript.empty());
+            require(npc->mScript.empty() || def.script->initial().runtime.script.mId == npc->mScript
+                || std::ranges::any_of(def.members, [&](const auto& member) {
+                       return member.script->initial().runtime.script.mId == npc->mScript;
+                   }));
             MWWorld::ManualRef restored(*content, binding.record);
             restored.getPtr().getRefData().disable();
             struct Restoration final : MWScript::ReferenceState, MWScript::ReferenceResolver
@@ -1491,7 +1508,7 @@ namespace TES3MP::Native
                 privateSource.emplace(content, found->encounter->record);
                 privateSource->getPtr().getCellRef() = origin.getCellRef();
                 privateSource->getPtr().getRefData().setPosition(origin.getRefData().getPosition());
-                const auto owner = mFairOpportunities ? reservationOwner(before, execution.sourceLife) : 0;
+                const auto owner = mFairOpportunities ? reservationOwner(before, execution.sourceLife, execution.sourceReference) : 0;
                 scene.expected = runningExecution; scene.source = privateSource->getPtr(); scene.prepared = encounterPrepared;
                 scene.reservedByOther = owner != 0 && owner != execution.character;
                 scene.relocations = mRelocations; scene.activities = mActivities; scene.npcBanks = mNpcBanks;
@@ -1515,9 +1532,13 @@ namespace TES3MP::Native
             JournalText journalText(script, journalStamp.value_or(MWScript::DialogueState::Stamp{}));
             if (mIntents) dialogue.setJournalText(journalText);
             const auto actor = script.resolveReference({});
+            const auto actorScript = actor.hasLiveReference() ? actor.getClass().getScript(actor) : ESM::RefId{};
             require(actor.hasLiveReference()
-                && (mIntents ? actor.getClass().getScript(actor).empty()
-                             : actor.getClass().getScript(actor) == result.script));
+                && (mIntents ? (actorScript.empty()
+                                   || std::ranges::any_of(bank.instances, [&](const auto& instance) {
+                                          return instance.mLocals.getScriptId() == actorScript;
+                                      }))
+                             : actorScript == result.script));
             std::optional<MWMechanics::NpcStats> npcStats;
             auto ownedNpc = std::ranges::find(state.npcs, execution.sourceReference, &Instance::Npc::reference);
             if (ownedNpc == state.npcs.end())
@@ -1558,7 +1579,7 @@ namespace TES3MP::Native
                 }
             }
             MWDialogue::Filter::Scoped scoped{ script, dialogue, disposition, cellName,
-                mIntents ? result.script : ESM::RefId{} };
+                mIntents ? (actorScript.empty() ? result.script : actorScript) : ESM::RefId{} };
             MWDialogue::Filter filter(actor, choice, talkedToPlayer, scoped);
             const auto response = filter.search(record, false);
             require(response.second != nullptr);
@@ -1568,15 +1589,18 @@ namespace TES3MP::Native
             // Stock dialogue expands the response before executing its result block.
             // Keep the private text local until every staged result succeeds.
             const auto text = mIntents ? Interpreter::fixDefinesDialog(response.second->mResponse, script, 4096) : std::string{};
+            const auto actorBank = std::ranges::find_if(bank.instances, [&](const auto& instance) {
+                return instance.mLocals.getScriptId() == actorScript;
+            });
             auto invocation = found->script->executeResult(state.runtime, runningExecution, content, runningResolver,
-                bank, bank.instances.front(), dialogue, program->program, result.trace, npcStats ? &*npcStats : nullptr,
-                mEncounters ? &scene : nullptr);
+                bank, actorBank != bank.instances.end() ? *actorBank : bank.instances.front(), dialogue,
+                program->program, result.trace, npcStats ? &*npcStats : nullptr, mEncounters ? &scene : nullptr);
             if (scene.removed || scene.relocation)
             {
                 require(dialogue.choices.empty()); // A removed speaker cannot own a pending choice.
                 if (mFairOpportunities)
                 {
-                    const auto owner = reservationOwner(before, execution.sourceLife);
+                    const auto owner = reservationOwner(before, execution.sourceLife, execution.sourceReference);
                     require(!owner || owner == execution.character);
                     if (state.reservedLife && execution.sourceLife >= state.reservedLife)
                     {
@@ -1737,11 +1761,12 @@ namespace TES3MP::Native
         }
     }
 
-    uint64_t PersonalScripts::reservationOwner(const State& state, uint64_t life)
+    uint64_t PersonalScripts::reservationOwner(const State& state, uint64_t life, uint64_t reference)
     {
         const Instance* first = nullptr;
         for (const auto& entry : state)
             if (entry.reservedLife && entry.reservedLife <= life
+                && (!reference || !entry.last.sourceReference || entry.last.sourceReference == reference)
                 && (!first || std::tuple(entry.reservationTick, entry.last.character, entry.last.story)
                     < std::tuple(first->reservationTick, first->last.character, first->last.story))) first = &entry;
         return first ? first->last.character : 0;
@@ -1749,7 +1774,8 @@ namespace TES3MP::Native
 
     PersonalScripts::Prepared PersonalScripts::prepareScheduled(const State& before, uint64_t worldTick,
         std::span<const uint64_t> activeCharacters, const MWWorld::ESMStore& content,
-        const MWScript::ReferenceResolver& resolver, const Source* source) const
+        const MWScript::ReferenceResolver& resolver, const Source* source,
+        std::span<const Source> sources) const
     {
         Prepared prepared;
         auto& result = prepared.result;
@@ -1767,45 +1793,63 @@ namespace TES3MP::Native
             }
             // Validate the complete candidate before executing any instance.
             (void)encode(before);
-            require(!mSourceWaits || (source && source->reference == mDefinitions.front().encounter->reference
-                && source->record == mDefinitions.front().encounter->record && source->life
-                && (source->living ? !source->respawnTick : bool(source->respawnTick))));
-            if (mNpcBanks)
-            {
-                require(std::ranges::all_of(source->position.pos, [](float v) { return std::isfinite(v); })
-                    && std::ranges::all_of(source->position.rot, [](float v) { return std::isfinite(v); })
-                    && source->playerInventories.size() <= MaximumInstances);
-                for (size_t p = 0; p < source->playerInventories.size(); ++p)
-                    require(source->playerInventories[p].character
-                        && std::ranges::none_of(std::span(source->playerInventories).first(p), [&](const auto& prev) {
-                               return prev.character == source->playerInventories[p].character;
-                           }));
-            }
-            else
+            const std::span<const Source> allSources = !sources.empty() ? sources
+                : (source ? std::span<const Source>(source, 1) : std::span<const Source>{});
+            const auto findSource = [&](size_t defIndex) -> const Source* {
+                if (!mSourceWaits) return source;
+                const auto& enc = *mDefinitions[defIndex].encounter;
+                const auto it = std::ranges::find_if(allSources, [&](const Source& candidate) {
+                    return candidate.reference == enc.reference && candidate.record == enc.record;
+                });
+                return it == allSources.end() ? nullptr : &*it;
+            };
+            if (!mSourceWaits)
                 require(!source || source->playerInventories.empty());
-            if (mLifeEvents)
+            else
             {
-                require(source->events.size() <= MaximumLifeEvents && source->life <= MaximumLifeEvents + 1
-                    && source->events.size() == source->life - (source->living ? 1 : 0));
-                uint64_t previousTick = 0;
-                for (size_t e = 0; e < source->events.size(); ++e)
+                for (size_t d = 0; d < mDefinitions.size(); ++d)
                 {
-                    const auto& event = source->events[e];
-                    require(event.life == e + 1 && event.tick > previousTick && event.tick <= worldTick
-                        && (event.killer ? event.killerLife && (event.killerKind == 1 || event.killerKind == 2)
-                            : !event.killerKind && !event.killerLife && !event.owner && !event.ownerLife && !event.helper)
-                        && bool(event.owner) == bool(event.ownerLife)
-                        && (event.killerKind != 1 || (event.owner == event.killer && event.ownerLife == event.killerLife))
-                        && (!event.helper || event.owner));
-                    previousTick = event.tick;
-                    if (mFairOpportunities)
+                    const auto* storySource = findSource(d);
+                    require(storySource && storySource->life
+                        && (storySource->living ? !storySource->respawnTick : bool(storySource->respawnTick)));
+                    if (mNpcBanks)
                     {
-                        const auto owner = reservationOwner(before, event.life);
-                        require(!owner || event.killerKind != 1 || event.owner == owner);
+                        require(std::ranges::all_of(storySource->position.pos, [](float v) { return std::isfinite(v); })
+                            && std::ranges::all_of(storySource->position.rot, [](float v) { return std::isfinite(v); })
+                            && storySource->playerInventories.size() <= MaximumInstances);
+                        for (size_t p = 0; p < storySource->playerInventories.size(); ++p)
+                            require(storySource->playerInventories[p].character
+                                && std::ranges::none_of(std::span(storySource->playerInventories).first(p), [&](const auto& prev) {
+                                       return prev.character == storySource->playerInventories[p].character;
+                                   }));
+                    }
+                    else
+                        require(storySource->playerInventories.empty());
+                    if (mLifeEvents)
+                    {
+                        require(storySource->events.size() <= MaximumLifeEvents && storySource->life <= MaximumLifeEvents + 1
+                            && storySource->events.size() == storySource->life - (storySource->living ? 1 : 0));
+                        uint64_t previousTick = 0;
+                        for (size_t e = 0; e < storySource->events.size(); ++e)
+                        {
+                            const auto& event = storySource->events[e];
+                            require(event.life == e + 1 && event.tick > previousTick && event.tick <= worldTick
+                                && (event.killer ? event.killerLife && (event.killerKind == 1 || event.killerKind == 2)
+                                    : !event.killerKind && !event.killerLife && !event.owner && !event.ownerLife && !event.helper)
+                                && bool(event.owner) == bool(event.ownerLife)
+                                && (event.killerKind != 1 || (event.owner == event.killer && event.ownerLife == event.killerLife))
+                                && (!event.helper || event.owner));
+                            previousTick = event.tick;
+                            if (mFairOpportunities)
+                            {
+                                const auto owner = reservationOwner(before, event.life, storySource->reference);
+                                require(!owner || event.killerKind != 1 || event.owner == owner);
+                            }
+                        }
+                        if (!storySource->living) require(storySource->events.back().killer == storySource->killer
+                            && storySource->events.back().killerKind == storySource->killerKind);
                     }
                 }
-                if (!source->living) require(source->events.back().killer == source->killer
-                    && source->events.back().killerKind == source->killerKind);
             }
             struct SourceResolver final : MWScript::ReferenceResolver, MWScript::ReferenceState
             {
@@ -1962,15 +2006,16 @@ namespace TES3MP::Native
                     items.removeItem(execution, ptr, item, count);
                 }
             };
-            std::unique_ptr<SourceResolver> sourceResolver;
-            if (mSourceWaits)
-                sourceResolver = std::make_unique<SourceResolver>(
-                    *source, content, mLifeEvents, mEncounters && (!mLifeEvents || mNpcBanks) && (!mActivities || mNpcBanks));
             for (const auto& entry : before) require(entry.scheduledTick <= worldTick);
             prepared.state = before;
             bool processed = false;
             for (size_t i = 0; i < before.size(); ++i)
             {
+                const auto* source = findSource(i);
+                std::unique_ptr<SourceResolver> sourceResolver;
+                if (mSourceWaits)
+                    sourceResolver = std::make_unique<SourceResolver>(
+                        *source, content, mLifeEvents, mEncounters && (!mLifeEvents || mNpcBanks) && (!mActivities || mNpcBanks));
                 const auto& current = before[i];
                 const auto scope = physicalScope(before, current.last.character);
                 if (current.encounterReturned || (current.encounterLife ? (!mNpcBanks || !current.relocation || scope != i + 2) : scope != 1)
@@ -1986,7 +2031,7 @@ namespace TES3MP::Native
                     sourceResolver->privateScope = mNpcBanks && current.encounterLife != 0;
                     sourceResolver->expectedScope = sourceResolver->privateScope ? i + 2 : 1;
                     sourceResolver->expectedLife = sourceResolver->privateScope ? current.encounterLife : source->life;
-                    const auto owner = mFairOpportunities ? reservationOwner(before, sourceResolver->expectedLife) : 0;
+                    const auto owner = mFairOpportunities ? reservationOwner(before, sourceResolver->expectedLife, source->reference) : 0;
                     sourceResolver->reservedByOther = owner != 0 && owner != execution.character;
                     sourceResolver->removed = false;
                     sourceResolver->activated = false;
@@ -2092,7 +2137,7 @@ namespace TES3MP::Native
                         state.choices.clear();
                         if (mFairOpportunities)
                         {
-                            const auto owner = reservationOwner(before, execution.sourceLife);
+                            const auto owner = reservationOwner(before, execution.sourceLife, execution.sourceReference);
                             require(!owner || owner == execution.character);
                             if (state.reservedLife && execution.sourceLife >= state.reservedLife)
                             {

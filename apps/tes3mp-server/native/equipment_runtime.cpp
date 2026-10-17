@@ -177,6 +177,7 @@ namespace TES3MP::Native
                 throw std::invalid_argument("Generated shared owner requires an actor inventory");
             if (!connected || (!actorInventory(ptr) && ptr.getType() != ESM::Container::sRecordId)
                 || (!ptr.getClass().getScript(ptr).empty()
+                    && !(ptr.getType() == ESM::NPC::sRecordId && content.get<ESM::Script>().search(ptr.getClass().getScript(ptr)))
                     && !(binding.mDynamicActor && !stockActorSpawnDisease(ptr.getClass().getScript(ptr), content).empty()))
                 || (actorInventory(ptr) && !placement))
                 throw std::invalid_argument("Shared inventory requires an unscripted container or placed actor");
