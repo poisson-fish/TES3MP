@@ -2778,8 +2778,7 @@ namespace TES3MP::Native
                 npcTarget = size_t(found - mCombat->npcPlacements.begin()) + 2;
             else if (use.targetId == mBinding.mNavigatingActor->actorId()) npcTarget = 2;
         }
-        if (npcTarget == 2 && player && sourceOpportunityOwner()
-            && sourceOpportunityOwner() != player->playerId().value()) return {};
+        if (npcTarget == 2 && player && !sourceOpportunityAllows(player->playerId().value())) return {};
         const ActorCampaignLife* targetLife = npcTarget == 2 ? (mLife ? &*mLife : nullptr)
             : npcTarget >= 3 && npcTarget - 3 < mNeighborLives.size()
                 ? &mNeighborLives[npcTarget - 3] : nullptr;
@@ -3056,8 +3055,7 @@ namespace TES3MP::Native
             if (found != neighbors.end()) targetIndex = size_t(found - neighbors.begin()) + 3;
         }
         if (attack.targetActorId && !targetIndex) return {};
-        if (targetIndex == 2 && sourceOpportunityOwner()
-            && sourceOpportunityOwner() != player->playerId().value()) return {};
+        if (targetIndex == 2 && !sourceOpportunityAllows(player->playerId().value())) return {};
         if (targetIndex && ([&] {
                 const auto& life = targetIndex == 2 ? *mLife : mNeighborLives.at(targetIndex - 3);
                 return attack.sourceServerTick.value() < life.bornTick
@@ -3181,7 +3179,14 @@ namespace TES3MP::Native
                     if (story.deathCursor)
                     {
                         const auto& death = life->deaths[size_t(story.deathCursor - 1)];
-                        if (death.killerKind != 1 || death.killer != story.last.character || death.tick > story.scheduledTick)
+                        const bool allowedKiller = death.killer == story.last.character
+                            || (mBinding.mPersonalScripts->parties() && !story.party.helper
+                                && std::ranges::find(story.party.helperLives, story.deathCursor)
+                                    == story.party.helperLives.end()
+                                && std::ranges::any_of(mBinding.mPlayers, [&](PlayerId p) {
+                                       return p.value() == death.killer;
+                                   }));
+                        if (death.killerKind != 1 || !allowedKiller || death.tick > story.scheduledTick)
                             throw std::invalid_argument("Story cursor lacks an eligible causal death");
                     }
                     if (story.reservedLife && (story.reservedLife > life->generation + bool(life->respawnTick)
@@ -3207,6 +3212,9 @@ namespace TES3MP::Native
                     for (const auto& receipt : story.itemReceipts)
                         if (!MWWorld::inventoryItemRecord(mRuntime.mStore, receipt.item).mScript.empty())
                             throw std::invalid_argument("Story provenance receipt item record invalid");
+                    for (const auto& receipt : story.rewardReceipts)
+                        if (!MWWorld::inventoryItemRecord(mRuntime.mStore, receipt.item).mScript.empty())
+                            throw std::invalid_argument("Story reward receipt item record invalid");
                 }
             if (personalState) for (size_t s = 0; s < personalState->size(); ++s) if ((*personalState)[s].sourceWait)
             {
@@ -5688,6 +5696,30 @@ namespace TES3MP::Native
                 ptr.getCellRef().getRefId(), mTimedEffects, npc).charm));
         std::vector<PersonalScripts::ItemBalance> playerInventory;
         std::optional<std::span<const PersonalScripts::ItemBalance>> stagedPlayerInventory;
+        std::array<std::vector<PersonalScripts::ItemBalance>, 2> partyPlayerInventories;
+        std::array<std::optional<MWMechanics::NpcStats>, 2> partyPlayerStats;
+        std::array<std::optional<std::string_view>, 2> partyCustomClasses;
+        std::vector<PersonalScripts::ParticipantContext> partyParticipants;
+        if (mBinding.mPersonalScripts->parties())
+        {
+            for (size_t i = 0; i < prior->state.size(); ++i)
+            {
+                const auto& s = prior->state[i];
+                if (s.last.story != request.story || !s.party.partyId || s.party.suspended) continue;
+                const bool online = std::ranges::any_of(players.activeSessions(), [&](const auto& sess) {
+                    return sess.playerId().value() == s.last.character;
+                });
+                if (!online)
+                {
+                    auto disconnected = mBinding.mPersonalScripts->preparePartyDisconnect(
+                        prior->state, request.story, s.last.character);
+                    if (disconnected.result.outcome != SharedWorldScript::Outcome::Committed
+                        || !disconnected.result.executed)
+                        return reject(disconnected.result.diagnostic.c_str());
+                    prior->state = std::move(disconnected.state);
+                }
+            }
+        }
         if (mBinding.mPersonalScripts->npcBanks())
         {
             try
@@ -5695,6 +5727,36 @@ namespace TES3MP::Native
                 playerInventory = extractPersonalPlayerItems(mRuntime.installedValues(self), mRuntime.mStore,
                     prior->itemTransfers, session->playerId().value());
                 stagedPlayerInventory = std::span<const PersonalScripts::ItemBalance>(playerInventory);
+                if (mBinding.mPersonalScripts->parties())
+                {
+                    for (size_t pIdx = 0; pIdx < 2; ++pIdx)
+                    {
+                        if (!mBinding.mCharacters[pIdx]) continue;
+                        partyPlayerInventories[pIdx] = extractPersonalPlayerItems(mRuntime.installedValues(pIdx),
+                            mRuntime.mStore, prior->itemTransfers, mBinding.mPlayers[pIdx].value());
+                        auto pStats = loadCombatStats(mRuntime.mStore, mCombat->actors[pIdx], mTimedEffects, pIdx,
+                            mBinding.mCharacterCreation);
+                        pStats.setBounty(mCombat->players[pIdx].bounty);
+                        pStats.setDrawState(static_cast<MWMechanics::DrawState>(mCombat->players[pIdx].drawState));
+                        for (const auto& condition : mCombat->conditions)
+                            if (condition.actor == pIdx)
+                                if (const auto* spell = spellBySource(mRuntime.mStore, condition.source))
+                                    pStats.getSpells().add(spell, false);
+                        for (const auto& faction : mCombat->players[pIdx].factions)
+                        {
+                            pStats.joinFaction(faction.id);
+                            pStats.setFactionRank(faction.id, faction.rank, mRuntime.mStore);
+                            if (faction.expelled) pStats.expell(faction.id, false);
+                        }
+                        partyPlayerStats[pIdx].emplace(std::move(pStats));
+                        if (const auto* custom = std::get_if<CustomClassDefinition>(&*mBinding.mCharacters[pIdx]->characterClass()))
+                            partyCustomClasses[pIdx] = custom->name;
+                        partyParticipants.push_back({mBinding.mPlayers[pIdx].value(), &*partyPlayerStats[pIdx],
+                            partyCustomClasses[pIdx],
+                            std::span<const PersonalScripts::ItemBalance>(partyPlayerInventories[pIdx]),
+                            mRuntime.mActors[pIdx]->getPtr()});
+                    }
+                }
             }
             catch (const std::exception& error)
             {
@@ -5704,7 +5766,7 @@ namespace TES3MP::Native
         auto prepared = mBinding.mPersonalScripts->prepareIntent(prior->state, session->playerId().value(),
             proposal.commandId().value(), request, cell.getCellName(mRuntime.mStore), mRuntime.mStore, resolver,
             PersonalScripts::MaximumInvocationsPerTransaction - prior->invocations, &stats, customClassName, &speakerStats,
-            journalStamp, stagedPlayerInventory);
+            journalStamp, stagedPlayerInventory, partyParticipants);
         if (prepared.result.outcome != SharedWorldScript::Outcome::Committed)
             return reject(prepared.result.diagnostic.c_str());
         if (prepared.result.executed && !prepared.itemTransfers.empty())
@@ -5754,6 +5816,13 @@ namespace TES3MP::Native
                     encumbrance, setting("fMinWalkSpeed"), setting("fMaxWalkSpeed"), setting("fEncumberedMoveEffect"));
                 story.activity->actorImage = mBinding.mNavigatingActor->forActor(request.speaker).selectedImage();
                 story.activity->validate();
+                for (auto& other : prepared.state)
+                    if (other.last.story == request.story && other.activity && other.activity->actorImage.empty())
+                    {
+                        other.activity->walkSpeed = story.activity->walkSpeed;
+                        other.activity->actorImage = story.activity->actorImage;
+                        other.activity->validate();
+                    }
             }
         }
         if (prepared.result.executed)
@@ -5761,8 +5830,12 @@ namespace TES3MP::Native
             {
                 bool clear = false;
                 std::vector<uint64_t> hidden;
+                const uint64_t selfScope = PersonalScripts::physicalScope(prepared.state, session->playerId().value());
                 for (size_t i = 0; i < 2; ++i)
-                    if (i != self && mBinding.mNavigatingActor->hasPlayer(PlayerHullBase + i)) hidden.push_back(PlayerHullBase + i);
+                    if (i != self && mBinding.mNavigatingActor->hasPlayer(PlayerHullBase + i)
+                        && (!mBinding.mPersonalScripts->parties()
+                            || PersonalScripts::physicalScope(prepared.state, mBinding.mPlayers[i].value()) != selfScope))
+                        hidden.push_back(PlayerHullBase + i);
                 mBinding.mNavigatingActor->withHiddenActors(hidden, [&] {
                     clear = mBinding.mNavigatingActor->actorPoseClear(request.speaker, pose->position, pose->yaw);
                 });
@@ -5770,6 +5843,7 @@ namespace TES3MP::Native
             }
         if (prepared.result.executed)
         {
+            const auto priorState = prior->state;
             prior->state = std::move(prepared.state);
             prior->invocations += prepared.invocations;
             prior->itemTransfers.insert(prior->itemTransfers.end(),
@@ -5781,6 +5855,29 @@ namespace TES3MP::Native
             output.response = std::move(prepared.response);
             output.messages = std::move(prepared.result.presentation);
             prior->outputs.push_back(std::move(output));
+            if (mBinding.mPersonalScripts->parties())
+            {
+                for (size_t i = 0; i < prior->state.size(); ++i)
+                {
+                    if (prior->state[i].last.character == session->playerId().value()
+                        || prior->state[i].last.story != request.story
+                        || prior->state[i].dialogueRevision == priorState[i].dialogueRevision)
+                        continue;
+                    const auto peerSession = std::ranges::find_if(players.activeSessions(), [&](const auto& s) {
+                        return s.playerId().value() == prior->state[i].last.character;
+                    });
+                    if (peerSession != players.activeSessions().end())
+                    {
+                        ReliablePersonalDialogue peerOutput{peerSession->sessionId(), peerSession->sessionGeneration(),
+                            ServerTick::initial(), CanonicalRevision::initial()};
+                        peerOutput.story = request.story;
+                        peerOutput.revision = prior->state[i].dialogueRevision;
+                        peerOutput.response = prior->outputs.back().response;
+                        peerOutput.messages = prior->outputs.back().messages;
+                        prior->outputs.push_back(std::move(peerOutput));
+                    }
+                }
+            }
         }
         if (fresh)
             candidate = std::move(fresh);
@@ -6101,6 +6198,112 @@ namespace TES3MP::Native
         return state ? PersonalScripts::reservationOwner(*state, mLife->generation + bool(mLife->respawnTick)) : 0;
     }
 
+    bool InventoryService::sourceOpportunityAllows(uint64_t player) const
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->fairOpportunities() || !mLife) return true;
+        const auto* state = personalState(nullptr);
+        if (!state) return true;
+        const uint64_t life = mLife->generation + bool(mLife->respawnTick);
+        if (mBinding.mPersonalScripts->parties())
+            return PersonalScripts::reservationAllows(*state, life, player);
+        const uint64_t owner = PersonalScripts::reservationOwner(*state, life);
+        return !owner || owner == player;
+    }
+
+    namespace
+    {
+        bool commitPersonalPartyChange(const PersonalScripts::Prepared& prepared, InventoryServiceBinding& binding,
+            std::optional<PersonalScripts::State>& currentState, EquipmentBytes& currentPersonalImage,
+            EquipmentBytes& currentActorImage, bool& failedClosed, const NativeInventoryCommit& persist)
+        {
+            if (prepared.result.outcome != SharedWorldScript::Outcome::Committed || !prepared.result.executed
+                || !binding.mPersonalScripts || !currentState || failedClosed)
+                return false;
+            try
+            {
+                const auto [priorPersonal, inner] = readPersonalScriptCampaign(currentActorImage);
+                (void)priorPersonal;
+                auto sealed = sealPersonalScriptCampaign(inner, prepared.image);
+                const auto outcome = persist(std::as_bytes(std::span(sealed)));
+                if (outcome == CanonicalDurabilityResult::Failed)
+                {
+                    failedClosed = true;
+                    return false;
+                }
+                if (outcome != CanonicalDurabilityResult::Committed)
+                    return false;
+                *currentState = prepared.state;
+                currentPersonalImage = prepared.image;
+                currentActorImage = std::move(sealed);
+                return true;
+            }
+            catch (...)
+            {
+                failedClosed = true;
+                return false;
+            }
+        }
+    }
+
+    bool InventoryService::applyPartyEnrollment(uint64_t story, uint64_t partyId, PlayerId controller,
+        PlayerId character, bool helper, const NativeInventoryCommit& persist)
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->parties() || !mPersonalScriptState
+            || mRuntime.mFailedClosed || inventoryImage().empty())
+            return false;
+        const auto prepared = mBinding.mPersonalScripts->preparePartyEnroll(
+            *mPersonalScriptState, story, partyId, controller.value(), character.value(), helper);
+        return commitPersonalPartyChange(prepared, mBinding, mPersonalScriptState, mPersonalScriptImage, mActorImage,
+            mRuntime.mFailedClosed, persist);
+    }
+
+    bool InventoryService::applyPartyLeave(uint64_t story, PlayerId actorPlayer, PlayerId targetPlayer, bool dissolve,
+        const NativeInventoryCommit& persist)
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->parties() || !mPersonalScriptState
+            || mRuntime.mFailedClosed || inventoryImage().empty())
+            return false;
+        const auto prepared = mBinding.mPersonalScripts->preparePartyLeave(
+            *mPersonalScriptState, story, actorPlayer.value(), targetPlayer.value(), dissolve);
+        return commitPersonalPartyChange(prepared, mBinding, mPersonalScriptState, mPersonalScriptImage, mActorImage,
+            mRuntime.mFailedClosed, persist);
+    }
+
+    bool InventoryService::applyPartyDisconnect(uint64_t story, PlayerId player, const NativeInventoryCommit& persist)
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->parties() || !mPersonalScriptState
+            || mRuntime.mFailedClosed || inventoryImage().empty())
+            return false;
+        const auto prepared
+            = mBinding.mPersonalScripts->preparePartyDisconnect(*mPersonalScriptState, story, player.value());
+        return commitPersonalPartyChange(prepared, mBinding, mPersonalScriptState, mPersonalScriptImage, mActorImage,
+            mRuntime.mFailedClosed, persist);
+    }
+
+    bool InventoryService::applyPartyResume(uint64_t story, PlayerId player, bool asHelper,
+        const NativeInventoryCommit& persist)
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->parties() || !mPersonalScriptState
+            || mRuntime.mFailedClosed || inventoryImage().empty())
+            return false;
+        const auto prepared
+            = mBinding.mPersonalScripts->preparePartyResume(*mPersonalScriptState, story, player.value(), asHelper);
+        return commitPersonalPartyChange(prepared, mBinding, mPersonalScriptState, mPersonalScriptImage, mActorImage,
+            mRuntime.mFailedClosed, persist);
+    }
+
+    bool InventoryService::applyPartyController(uint64_t story, PlayerId newController,
+        const NativeInventoryCommit& persist)
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->parties() || !mPersonalScriptState
+            || mRuntime.mFailedClosed || inventoryImage().empty())
+            return false;
+        const auto prepared
+            = mBinding.mPersonalScripts->preparePartyController(*mPersonalScriptState, story, newController.value());
+        return commitPersonalPartyChange(prepared, mBinding, mPersonalScriptState, mPersonalScriptImage, mActorImage,
+            mRuntime.mFailedClosed, persist);
+    }
+
     SharedWorldScript::Result InventoryService::stagePersonalScript(PreparedNativeInventory& candidate,
         const MWScript::ExecutionContext& execution)
     {
@@ -6214,7 +6417,11 @@ namespace TES3MP::Native
                 auto view = PersonalScripts::view(instance, target, session->sessionGeneration(), tick, revision);
                 if (view.encounter)
                 {
-                    const auto* source = mRuntime.mStore.get<ESM::NPC>().search(mBinding.mContainers.front().mBase);
+                    const auto containerIt = std::ranges::find(mBinding.mContainers, view.encounter->reference,
+                        [](const auto& c) { return c.mId.value(); });
+                    const auto& base = containerIt != mBinding.mContainers.end() ? containerIt->mBase
+                                                                                 : mBinding.mContainers.front().mBase;
+                    const auto* source = mRuntime.mStore.get<ESM::NPC>().search(base);
                     if (!source || source->mName.size() > 128) throw std::invalid_argument("Story source display name invalid");
                     view.encounter->sourceName = source->mName;
                 }
@@ -6594,6 +6801,11 @@ namespace TES3MP::Native
             {
                 auto& story = stories[s];
                 if (!story.activity || story.activity->completed || story.activity->tick >= tick.value()) continue;
+                if (mBinding.mPersonalScripts->parties() && story.party.partyId)
+                {
+                    if (story.party.suspended || story.party.helper || !story.party.controller) continue;
+                    if (story.party.sharedScope > 1 && story.party.controller != story.last.character) continue;
+                }
                 const auto owner = PlayerId::fromValue(story.last.character).value();
                 const size_t index = actor(owner);
                 const auto* player = inputPlayers.findPlayer(owner);
@@ -6618,8 +6830,12 @@ namespace TES3MP::Native
                 const float maxExtent = std::max({extents[0], extents[1], extents[2]});
                 const bool moving = !activity.escort || MWMechanics::AiEscort::followerInRange(leader, follower, activity.followDistance);
                 std::vector<uint64_t> hidden;
+                const uint64_t ownerScope = PersonalScripts::physicalScope(stories, owner.value());
                 for (size_t peer = 0; peer < 2; ++peer)
-                    if (peer != index && room.hasPlayer(PlayerHullBase + peer)) hidden.push_back(PlayerHullBase + peer);
+                    if (peer != index && room.hasPlayer(PlayerHullBase + peer)
+                        && (!mBinding.mPersonalScripts->parties()
+                            || PersonalScripts::physicalScope(stories, mBinding.mPlayers[peer].value()) != ownerScope))
+                        hidden.push_back(PlayerHullBase + peer);
                 std::unique_ptr<InteriorActorScene::Prepared> step;
                 room.withPlayerHulls(activityHulls, [&] { room.withHiddenActors(hidden, [&] {
                     step = actorRoom.prepareScopedNavigation(activity.actorImage,
@@ -6640,6 +6856,18 @@ namespace TES3MP::Native
                 story.relocation->validate();
                 activity.actorImage.assign(step->image().begin(), step->image().end());
                 activity.tick = tick.value(); ++activity.steps; changed = true;
+                if (mBinding.mPersonalScripts->parties() && story.party.partyId && story.party.sharedScope > 1)
+                {
+                    for (size_t m = 0; m < stories.size(); ++m)
+                        if (m != s && stories[m].last.story == story.last.story
+                            && stories[m].party.partyId == story.party.partyId && !stories[m].party.suspended
+                            && !stories[m].party.helper && stories[m].party.sharedScope == story.party.sharedScope
+                            && stories[m].activity)
+                        {
+                            stories[m].relocation = story.relocation;
+                            stories[m].activity = story.activity;
+                        }
+                }
             }
             if (changed)
             {
@@ -7811,8 +8039,8 @@ namespace TES3MP::Native
         const auto reservedOwner = sourceOpportunityOwner();
         const auto opportunityAllows = [&](size_t index, ActorCasterIdentity cause) {
             if (reservedOwner && cause.kind == 2 && cause.id == before.mActor && index < 2)
-                return mBinding.mPlayers[index].value() == reservedOwner;
-            return index != 2 || !reservedOwner || (cause.kind == 1 && cause.id == reservedOwner)
+                return sourceOpportunityAllows(mBinding.mPlayers[index].value());
+            return index != 2 || !reservedOwner || (cause.kind == 1 && sourceOpportunityAllows(cause.id))
                 || (cause.kind == 2 && cause.id == before.mActor);
         };
         const auto recordActorDeath = [&](size_t index, ActorCasterIdentity killer, bool retainMovement = false) {

@@ -1536,6 +1536,19 @@ int main(int argc, char** argv)
         view.choices.resize(1);
         view.response = std::string(4097, 'x');
         require(encodeReliablePersonalDialogue(view).empty());
+        view.response = "Committed response";
+        view.encounter = DialogueEncounterStatus{ 41, 1, 2, 3, 4, "fargoth", 901, 4, 11, 2, 2, true, true };
+        const auto encodedV4 = encodeReliablePersonalDialogue(view);
+        require(!encodedV4.empty() && encodedV4[0] == std::byte{ 4 }
+            && decodeReliablePersonalDialogue(encodedV4) == view);
+        for (size_t n = 0; n < encodedV4.size(); ++n)
+            require(!decodeReliablePersonalDialogue(std::span(encodedV4).first(n)));
+        auto badParty = view;
+        badParty.encounter->partyRevision = 0;
+        require(encodeReliablePersonalDialogue(badParty).empty());
+        badParty = view;
+        badParty.encounter->physicalScope = 0;
+        require(encodeReliablePersonalDialogue(badParty).empty());
         for (int scenario = 1; scenario <= 5; ++scenario)
             teleportPresentation(false, false, false, false, false, false, 0, scenario);
         std::cout << "PASS personal dialogue: bounded decode; capability/session/generation; scoped committed "

@@ -43,6 +43,7 @@ namespace TES3MP::Native
         constexpr uint64_t ActivityMagic = 0x4754535054335354;
         constexpr uint64_t OpportunityMagic = 0x4654535054335354;
         constexpr uint64_t NpcBankMagic = 0x4854535054335354;
+        constexpr uint64_t PartyMagic = 0x5054535054335354;
         void require(bool value, std::source_location location = std::source_location::current())
         {
             if (!value)
@@ -429,6 +430,111 @@ namespace TES3MP::Native
                 if (state) state->itemReceipts.push_back(std::move(receipt));
             }
         }
+        void party(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        {
+            const auto& p = state.party;
+            for (const uint64_t v : {p.partyId, p.partyRevision, p.controller, p.controllerRevision,
+                     uint64_t(p.helper), uint64_t(p.suspended), uint64_t(p.separated),
+                     p.sharedScope, p.encounterReference, p.encounterLife,
+                     p.stepPartyId, p.stepPartyRevision, p.stepController, p.stepControllerRevision})
+                word(bytes, v);
+            word(bytes, p.stepParticipants.size());
+            for (const uint64_t c : p.stepParticipants) word(bytes, c);
+            word(bytes, p.helperLives.size());
+            for (const uint64_t l : p.helperLives) word(bytes, l);
+            word(bytes, state.rewardReceipts.size());
+            for (const auto& r : state.rewardReceipts)
+            {
+                for (const uint64_t v : {r.occurrence, r.effect, r.recipient, r.partyId, r.sourceKind, r.sourceId})
+                    word(bytes, v);
+                ref(bytes, r.topic);
+                ref(bytes, r.info);
+                ref(bytes, r.item);
+                word(bytes, std::bit_cast<uint32_t>(r.count));
+            }
+        }
+        void party(Cursor& input, PersonalScripts::Instance* state)
+        {
+            PersonalScripts::PartyState p;
+            p.partyId = input.word();
+            p.partyRevision = input.word();
+            p.controller = input.word();
+            p.controllerRevision = input.word();
+            const auto helper = input.word(), suspended = input.word(), separated = input.word();
+            require(helper <= 1 && suspended <= 1 && separated <= 1);
+            p.helper = helper;
+            p.suspended = suspended;
+            p.separated = separated;
+            p.sharedScope = input.word();
+            p.encounterReference = input.word();
+            p.encounterLife = input.word();
+            p.stepPartyId = input.word();
+            p.stepPartyRevision = input.word();
+            p.stepController = input.word();
+            p.stepControllerRevision = input.word();
+            const auto participantCount = input.word();
+            require(participantCount <= PersonalScripts::MaximumPartyMembers);
+            for (size_t i = 0; i < participantCount; ++i)
+            {
+                const auto c = input.word();
+                require(c != 0);
+                if (state) p.stepParticipants.push_back(c);
+            }
+            const auto helperLivesCount = input.word();
+            require(helperLivesCount <= PersonalScripts::MaximumLifeEvents);
+            uint64_t prevLife = 0;
+            for (size_t i = 0; i < helperLivesCount; ++i)
+            {
+                const auto l = input.word();
+                require(l > prevLife && l <= PersonalScripts::MaximumLifeEvents);
+                prevLife = l;
+                if (state) p.helperLives.push_back(l);
+            }
+            if (state) state->party = std::move(p);
+            const auto receiptCount = input.word();
+            require(receiptCount <= PersonalScripts::MaximumRewardReceiptsPerStory);
+            for (size_t i = 0; i < receiptCount; ++i)
+            {
+                PersonalScripts::RewardReceipt r;
+                r.occurrence = input.word();
+                r.effect = input.word();
+                r.recipient = input.word();
+                r.partyId = input.word();
+                r.sourceKind = input.word();
+                r.sourceId = input.word();
+                r.topic = ref(input);
+                r.info = ref(input);
+                r.item = ref(input);
+                const auto rawCount = input.word();
+                require(r.occurrence >= 1 && r.effect >= 1 && r.recipient != 0
+                    && (r.sourceKind == 1 || r.sourceKind == 2) && r.sourceId != 0
+                    && !r.item.empty() && rawCount >= 1
+                    && rawCount <= uint64_t(PersonalScripts::MaximumItemTransferCount));
+                r.count = int(rawCount);
+                if (state) state->rewardReceipts.push_back(std::move(r));
+            }
+        }
+        void recordRewardReceipts(PersonalScripts::Instance& state,
+            std::span<const PersonalScripts::Prepared::StagedItemTransfer> transfers, uint64_t occurrence,
+            uint64_t partyId, uint64_t sourceKind, uint64_t sourceId, const ESM::RefId& topic, const ESM::RefId& info)
+        {
+            uint64_t effect = 0;
+            for (const auto& transfer : transfers)
+            {
+                if (transfer.character != state.last.character || transfer.story != state.last.story
+                    || !transfer.receipt.playerTarget || !transfer.receipt.addition)
+                    continue;
+                ++effect;
+                require(state.rewardReceipts.size() < PersonalScripts::MaximumRewardReceiptsPerStory);
+                require(std::ranges::none_of(state.rewardReceipts, [&](const auto& prior) {
+                    return prior.sourceKind == sourceKind && prior.sourceId == sourceId
+                        && prior.recipient == transfer.character && prior.effect == effect && prior.topic == topic
+                        && (sourceKind == 1 ? prior.info == info : prior.item == transfer.receipt.item);
+                }));
+                state.rewardReceipts.push_back({occurrence, effect, transfer.character, partyId, sourceKind, sourceId,
+                    topic, info, transfer.receipt.item, transfer.receipt.count});
+            }
+        }
         void validateInventoryItem(const MWWorld::ESMStore& content, const ESM::RefId& item)
         {
             require(item.is<ESM::StringRefId>() && !item.empty()
@@ -562,7 +668,7 @@ namespace TES3MP::Native
 
     PersonalScripts::PersonalScripts(uint64_t campaign, std::vector<Definition> definitions, CredentialCrypto& crypto,
         bool scheduled, bool banks, bool intents, bool returns, bool enables, bool relocations, bool sourceWaits,
-        bool lifeEvents, bool fairOpportunities, bool activities, bool npcBanks)
+        bool lifeEvents, bool fairOpportunities, bool activities, bool npcBanks, bool parties)
         : mCampaign(campaign)
         , mDefinitions(std::move(definitions))
         , mScheduled(scheduled)
@@ -576,6 +682,7 @@ namespace TES3MP::Native
         , mFairOpportunities(fairOpportunities)
         , mActivities(activities)
         , mNpcBanks(npcBanks)
+        , mParties(parties)
     {
         require(campaign && !mDefinitions.empty() && mDefinitions.size() <= MaximumInstances);
         size_t scripts = 0;
@@ -589,6 +696,7 @@ namespace TES3MP::Native
         require(!mEnables || mReturns);
         require(!mRelocations || (mEncounters && (!mEnables || mNpcBanks)));
         require(!mNpcBanks || (mRelocations && mSourceWaits && mLifeEvents && mFairOpportunities && mActivities && mReturns && mEnables));
+        require(!mParties || mNpcBanks);
         require(!mSourceWaits || (mEncounters && mBanks && (!mReturns || mNpcBanks) && (!mRelocations || mNpcBanks)));
         require(!mLifeEvents || mSourceWaits);
         require(!mFairOpportunities || mLifeEvents);
@@ -726,6 +834,11 @@ namespace TES3MP::Native
             constexpr std::string_view limits = "npc-bank-continuation-1;private-pose-and-activity;timer-health-life-cursor;public-scope-untouched";
             binding.insert(binding.end(), limits.begin(), limits.end());
         }
+        if (mParties)
+        {
+            constexpr std::string_view limits = "party-addition-1;compatible-enrollment;helper-role;controller-delegation;dissent-split;per-character-costs-rewards;durable-reward-receipts;offline-suspend;leave-kick-rejoin";
+            binding.insert(binding.end(), limits.begin(), limits.end());
+        }
         if (mDialogues)
         {
             constexpr std::string_view limits = "scoped-dialogue-results-1;16;64;16;8192;4096;64;128;1048576";
@@ -789,12 +902,26 @@ namespace TES3MP::Native
             value.entries.push_back({e.topic.toString(), e.info.toString(), e.text,
                 e.stamp.day, e.stamp.month, e.stamp.dayOfMonth});
         for (const auto& t : state.dialogue.topics) value.topics.push_back(t.toString());
-        if (state.sourceWait || state.reservedLife)
+        const bool hasPartyStatus = state.party.partyId || state.party.partyRevision || state.party.separated;
+        if (state.sourceWait || state.reservedLife || hasPartyStatus)
         {
             const auto& context = state.sourceWait ? state.sourceWait->invocation : state.last;
-            value.encounter = DialogueEncounterStatus{context.sourceReference, context.sourceLife,
-                state.sourceWait ? state.sourceWait->sinceTick : 0,
-                state.sourceWait ? state.sourceWait->respawnTick : 0, state.reservedLife};
+            const uint64_t ref = context.sourceReference ? context.sourceReference : state.party.encounterReference;
+            const uint64_t life = context.sourceLife ? context.sourceLife : state.party.encounterLife;
+            if (ref && life)
+            {
+                const uint64_t activeScope = (state.encounterLife && !state.encounterReturned)
+                    ? state.last.physicalScope
+                    : (state.party.partyId && !state.party.suspended && state.party.sharedScope > 1
+                              ? state.party.sharedScope
+                              : 1);
+                value.encounter = DialogueEncounterStatus{ref, life,
+                    state.sourceWait ? state.sourceWait->sinceTick : 0,
+                    state.sourceWait ? state.sourceWait->respawnTick : 0, state.reservedLife, {},
+                    state.party.partyId, state.party.partyRevision, state.party.controller,
+                    state.party.controllerRevision, hasPartyStatus ? activeScope : 1, state.party.helper,
+                    hasPartyStatus && (state.party.separated || state.party.suspended || activeScope > 1)};
+            }
         }
         return value;
     }
@@ -851,8 +978,11 @@ namespace TES3MP::Native
                 return npc.reference == expected.encounter->reference && npc.life == state.encounterLife
                     && npc.record == expected.encounter->record;
             }));
+        const uint64_t expectedPhysicalScope = state.encounterLife
+            ? (mParties && state.party.sharedScope && !state.encounterReturned ? state.party.sharedScope : index + 2)
+            : 1;
         require(last.ownership == MWScript::ExecutionContext::Ownership::Character && last.campaign == mCampaign
-            && last.character == expected.character && last.story == expected.story && last.physicalScope == (state.encounterLife ? index + 2 : 1)
+            && last.character == expected.character && last.story == expected.story && last.physicalScope == expectedPhysicalScope
             && (mDialogues || (!last.sourceReference && !last.sourceLife))
             && (mBanks ? last.invocation >= state.runtime.tick : last.invocation == state.runtime.tick)
             && last.causalEvent <= state.eventCursor
@@ -956,7 +1086,9 @@ namespace TES3MP::Native
             for (size_t i = 0; i < state.itemReceipts.size(); ++i)
             {
                 const auto& r = state.itemReceipts[i];
-                require((r.scope == 1 || r.scope == index + 2) && (r.sourceKind == 1 || r.sourceKind == 2)
+                require((r.scope == 1 || r.scope == index + 2
+                            || (mParties && r.scope >= 2 && r.scope <= mDefinitions.size() + 1))
+                    && (r.sourceKind == 1 || r.sourceKind == 2)
                     && expected.encounter && r.sourceId == expected.encounter->reference && r.step >= 1
                     && r.step <= last.invocation && r.step >= previousStep && r.item.is<ESM::StringRefId>()
                     && !r.item.empty() && r.item.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
@@ -983,6 +1115,65 @@ namespace TES3MP::Native
         }
         else
             require(state.playerItems.empty() && state.npcItems.empty() && state.itemReceipts.empty());
+        if (mParties)
+        {
+            const auto& p = state.party;
+            if (!p.partyId)
+                require(!p.controller && !p.helper && !p.suspended && !p.sharedScope);
+            else
+            {
+                require(p.partyRevision > 0 && p.controllerRevision > 0 && !p.separated);
+                if (p.controller)
+                    require(std::ranges::any_of(mDefinitions, [&](const auto& d) {
+                        return d.story == expected.story && d.character == p.controller;
+                    }));
+                if (p.sharedScope)
+                    require(p.sharedScope >= 2 && p.sharedScope <= mDefinitions.size() + 1 && !state.encounterReturned);
+            }
+            require(bool(p.encounterReference) == bool(p.encounterLife));
+            if (p.encounterReference)
+                require(expected.encounter && p.encounterReference == expected.encounter->reference
+                    && p.encounterLife <= MaximumLifeEvents);
+            if (p.stepPartyId)
+            {
+                require(p.stepPartyRevision > 0 && p.stepController && p.stepControllerRevision > 0
+                    && !p.stepParticipants.empty() && p.stepParticipants.size() <= MaximumPartyMembers);
+                for (size_t i = 0; i < p.stepParticipants.size(); ++i)
+                    require(std::ranges::any_of(mDefinitions, [&](const auto& d) {
+                            return d.story == expected.story && d.character == p.stepParticipants[i];
+                        })
+                        && std::find(p.stepParticipants.begin(), p.stepParticipants.begin() + i, p.stepParticipants[i])
+                            == p.stepParticipants.begin() + i);
+            }
+            else
+                require(!p.stepPartyRevision && !p.stepController && !p.stepControllerRevision
+                    && p.stepParticipants.empty());
+            require(p.helperLives.size() <= MaximumLifeEvents);
+            for (size_t i = 0; i < p.helperLives.size(); ++i)
+                require(p.helperLives[i] >= 1 && p.helperLives[i] <= MaximumLifeEvents
+                    && (!i || p.helperLives[i] > p.helperLives[i - 1]));
+            require(state.rewardReceipts.size() <= MaximumRewardReceiptsPerStory);
+            for (size_t i = 0; i < state.rewardReceipts.size(); ++i)
+            {
+                const auto& r = state.rewardReceipts[i];
+                require(r.occurrence >= 1 && r.occurrence <= last.invocation && r.effect >= 1
+                    && r.recipient == expected.character && (r.sourceKind == 1 || r.sourceKind == 2)
+                    && expected.encounter && r.sourceId == expected.encounter->reference
+                    && !r.topic.empty() && r.topic.is<ESM::StringRefId>()
+                    && (r.sourceKind == 1 ? (!r.info.empty() && r.info.is<ESM::StringRefId>()) : r.info.empty())
+                    && !r.item.empty() && r.item.is<ESM::StringRefId>()
+                    && r.item.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                    && r.item.getRefIdString().find('\0') == std::string_view::npos
+                    && r.count >= 1 && r.count <= MaximumItemTransferCount
+                    && std::ranges::none_of(std::span(state.rewardReceipts).first(i), [&](const auto& prev) {
+                           return prev.sourceKind == r.sourceKind && prev.sourceId == r.sourceId
+                               && prev.recipient == r.recipient && prev.effect == r.effect && prev.topic == r.topic
+                               && (r.sourceKind == 1 ? prev.info == r.info : prev.item == r.item);
+                       }));
+            }
+        }
+        else
+            require(state.party == PartyState{} && state.rewardReceipts.empty());
     }
 
     void PersonalScripts::Instance::Activity::validate() const
@@ -998,13 +1189,23 @@ namespace TES3MP::Native
     std::vector<char> PersonalScripts::encode(const State& state) const
     {
         require(state.size() == mDefinitions.size());
-        for (size_t i = 0; i < state.size(); ++i) if (state[i].encounterLife)
-            require(std::ranges::none_of(std::span(state).first(i), [&](const auto& previous) {
-                return previous.encounterLife && previous.last.character == state[i].last.character;
-            }));
+        for (size_t i = 0; i < state.size(); ++i)
+        {
+            if (state[i].encounterLife)
+                require(std::ranges::none_of(std::span(state).first(i), [&](const auto& previous) {
+                    return previous.encounterLife && previous.last.character == state[i].last.character;
+                }));
+            if (mParties && state[i].party.partyId)
+                for (size_t j = 0; j < i; ++j)
+                    if (state[j].last.story == state[i].last.story && state[j].party.partyId == state[i].party.partyId)
+                        require(state[j].party.partyRevision == state[i].party.partyRevision
+                            && state[j].party.controller == state[i].party.controller
+                            && state[j].party.controllerRevision == state[i].party.controllerRevision
+                            && state[j].party.sharedScope == state[i].party.sharedScope);
+        }
         std::vector<char> bytes;
         word(bytes,
-            mNpcBanks ? NpcBankMagic : mActivities ? ActivityMagic : mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
+            mParties ? PartyMagic : mNpcBanks ? NpcBankMagic : mActivities ? ActivityMagic : mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
                 : mRelocations ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables   ? EncounterEnableMagic
                 : mReturns   ? EncounterReturnMagic
@@ -1056,6 +1257,7 @@ namespace TES3MP::Native
                 }
                 if (mActivities) activity(bytes, state[i]);
                 if (mNpcBanks) items(bytes, state[i]);
+                if (mParties) party(bytes, state[i]);
             }
         }
         require(bytes.size() <= MaximumImageBytes);
@@ -1067,7 +1269,7 @@ namespace TES3MP::Native
         require(bytes.size() <= MaximumImageBytes);
         Cursor input{bytes};
         require(input.word()
-            == (mNpcBanks ? NpcBankMagic : mActivities ? ActivityMagic : mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
+            == (mParties ? PartyMagic : mNpcBanks ? NpcBankMagic : mActivities ? ActivityMagic : mFairOpportunities ? OpportunityMagic : mLifeEvents ? LifeEventMagic : mSourceWaits ? SourceWaitMagic
                 : mRelocations ? (mReturns ? EncounterRelocationReturnMagic : EncounterRelocationMagic)
                 : mEnables      ? EncounterEnableMagic
                 : mReturns      ? EncounterReturnMagic
@@ -1125,6 +1327,7 @@ namespace TES3MP::Native
                 }
                 if (mActivities) activity(preflight, nullptr);
                 if (mNpcBanks) items(preflight, nullptr);
+                if (mParties) party(preflight, nullptr);
             }
         }
         require(preflight.bytes.empty());
@@ -1165,6 +1368,7 @@ namespace TES3MP::Native
                 }
                 if (mActivities) activity(input, &entry);
                 if (mNpcBanks) items(input, &entry);
+                if (mParties) party(input, &entry);
             }
             validate(entry, i); state.push_back(std::move(entry));
         }
@@ -1189,8 +1393,11 @@ namespace TES3MP::Native
             require(found != mDefinitions.end());
             const auto index = size_t(found - mDefinitions.begin());
             const auto& current = before[index]; validate(current, index);
+            const uint64_t expectedScope = mNpcBanks && current.encounterLife && current.relocation && !current.encounterReturned
+                ? (mParties && current.party.sharedScope ? current.party.sharedScope : index + 2)
+                : 1;
             require(execution.ownership == current.last.ownership && execution.campaign == mCampaign
-                && execution.physicalScope == (mNpcBanks && current.encounterLife && current.relocation && !current.encounterReturned ? index + 2 : 1)
+                && execution.physicalScope == expectedScope
                 && (mSourceWaits ? execution.sourceReference == found->encounter->reference && execution.sourceLife
                     && (!current.encounterLife || execution.sourceLife == current.encounterLife)
                     && !execution.causalEvent : !execution.sourceReference && !execution.sourceLife));
@@ -1291,6 +1498,13 @@ namespace TES3MP::Native
         for (const auto& instance : state)
             if (instance.last.character == character && instance.relocation && !instance.encounterReturned)
                 return &*instance.relocation;
+        for (const auto& instance : state)
+            if (instance.last.character == character && instance.party.partyId && !instance.party.suspended
+                && instance.party.sharedScope > 1)
+                for (const auto& peer : state)
+                    if (peer.last.story == instance.last.story && peer.party.partyId == instance.party.partyId
+                        && !peer.party.suspended && peer.relocation && !peer.encounterReturned)
+                        return &*peer.relocation;
         return nullptr;
     }
 
@@ -1299,7 +1513,389 @@ namespace TES3MP::Native
         for (const auto& instance : state)
             if (instance.last.character == character && instance.encounterLife && !instance.encounterReturned)
                 return instance.last.physicalScope;
+        for (const auto& instance : state)
+            if (instance.last.character == character && instance.party.partyId && !instance.party.suspended
+                && instance.party.sharedScope > 1)
+                return instance.party.sharedScope;
         return 1;
+    }
+
+    namespace
+    {
+        bool compatibleForParty(const PersonalScripts::Instance& a, const PersonalScripts::Instance& b)
+        {
+            const auto sameQuests = std::ranges::equal(a.dialogue.quests, b.dialogue.quests,
+                [](const ESM::QuestState& x, const ESM::QuestState& y) {
+                    return x.mTopic == y.mTopic && x.mState == y.mState && x.mFinished == y.mFinished;
+                });
+            if (a.encounterLife != b.encounterLife || a.encounterReturned != b.encounterReturned
+                || a.encounterEnabled != b.encounterEnabled || a.relocation != b.relocation
+                || bool(a.activity) != bool(b.activity) || bool(a.sourceWait) != bool(b.sourceWait)
+                || a.choices != b.choices || !sameQuests
+                || a.dialogue.topics != b.dialogue.topics
+                || a.runtime.runtime.globals != b.runtime.runtime.globals
+                || a.runtime.runtime.script.mRunning != b.runtime.runtime.script.mRunning
+                || a.members.size() != b.members.size())
+                return false;
+            if (a.activity && (a.activity->escort != b.activity->escort
+                    || a.activity->completed != b.activity->completed
+                    || a.activity->destination != b.activity->destination))
+                return false;
+            if (!a.choices.empty() && (a.dialogueRequest.speaker != b.dialogueRequest.speaker
+                    || a.dialogueRequest.life != b.dialogueRequest.life
+                    || a.dialogueRequest.topic != b.dialogueRequest.topic))
+                return false;
+            for (size_t m = 0; m < a.members.size(); ++m)
+                if (a.members[m].runtime.script.mRunning != b.members[m].runtime.script.mRunning)
+                    return false;
+            return true;
+        }
+    }
+
+    PersonalScripts::Prepared PersonalScripts::preparePartyEnroll(const State& before, uint64_t story, uint64_t partyId,
+        uint64_t controller, uint64_t character, bool helper) const
+    {
+        Prepared prepared;
+        try
+        {
+            require(mParties && story && partyId && controller && character);
+            (void)encode(before);
+            const auto cIt = std::ranges::find_if(before, [&](const auto& s) {
+                return s.last.character == controller && s.last.story == story;
+            });
+            const auto tIt = std::ranges::find_if(before, [&](const auto& s) {
+                return s.last.character == character && s.last.story == story;
+            });
+            require(cIt != before.end() && tIt != before.end());
+            const size_t cIdx = size_t(cIt - before.begin());
+            const size_t tIdx = size_t(tIt - before.begin());
+            prepared.state = before;
+            auto& cInst = prepared.state[cIdx];
+            auto& tInst = prepared.state[tIdx];
+            require(!cInst.party.suspended && !tInst.party.suspended && !tInst.party.partyId);
+            for (const auto& s : prepared.state)
+                if (s.last.story == story && s.party.partyId == partyId)
+                    require(s.party.controller == controller);
+            if (cIdx == tIdx)
+            {
+                require(!helper);
+                const uint64_t nextPartyRev = cInst.party.partyRevision + 1;
+                const uint64_t nextCtrlRev = cInst.party.controllerRevision + 1;
+                cInst.party.partyId = partyId;
+                cInst.party.partyRevision = nextPartyRev;
+                cInst.party.controller = controller;
+                cInst.party.controllerRevision = nextCtrlRev;
+                cInst.party.helper = false;
+                cInst.party.suspended = false;
+                cInst.party.separated = false;
+                cInst.party.sharedScope = (cInst.encounterLife && !cInst.encounterReturned) ? cIdx + 2 : 0;
+                if (mDefinitions[cIdx].encounter)
+                {
+                    cInst.party.encounterReference = mDefinitions[cIdx].encounter->reference;
+                    cInst.party.encounterLife = cInst.last.sourceLife ? cInst.last.sourceLife : 1;
+                }
+                if (cInst.party.sharedScope) cInst.last.physicalScope = cInst.party.sharedScope;
+            }
+            else
+            {
+                if (!cInst.party.partyId)
+                {
+                    cInst.party.partyId = partyId;
+                    cInst.party.partyRevision = cInst.party.partyRevision + 1;
+                    cInst.party.controller = controller;
+                    cInst.party.controllerRevision = cInst.party.controllerRevision + 1;
+                    cInst.party.helper = false;
+                    cInst.party.suspended = false;
+                    cInst.party.separated = false;
+                }
+                require(cInst.party.partyId == partyId && cInst.party.controller == controller && !cInst.party.helper);
+                size_t memberCount = 0;
+                for (const auto& s : prepared.state)
+                    if (s.last.story == story && s.party.partyId == partyId) ++memberCount;
+                require(memberCount < MaximumPartyMembers);
+                if (!helper)
+                    require(compatibleForParty(cInst, tInst));
+                else
+                    require((!tInst.encounterLife || tInst.encounterReturned) && tInst.choices.empty() && !tInst.sourceWait);
+                const uint64_t nextPartyRev = std::max(cInst.party.partyRevision, tInst.party.partyRevision) + 1;
+                const uint64_t nextCtrlRev = std::max(cInst.party.controllerRevision, tInst.party.controllerRevision);
+                const uint64_t sharedScope = (cInst.encounterLife && !cInst.encounterReturned) ? cIdx + 2 : 0;
+                tInst.party.partyId = partyId;
+                tInst.party.helper = helper;
+                tInst.party.suspended = false;
+                tInst.party.separated = false;
+                for (size_t i = 0; i < prepared.state.size(); ++i)
+                {
+                    auto& s = prepared.state[i];
+                    if (s.last.story != story || s.party.partyId != partyId) continue;
+                    s.party.partyRevision = nextPartyRev;
+                    s.party.controller = controller;
+                    s.party.controllerRevision = nextCtrlRev;
+                    s.party.sharedScope = sharedScope;
+                    if (mDefinitions[i].encounter)
+                    {
+                        s.party.encounterReference = mDefinitions[i].encounter->reference;
+                        s.party.encounterLife = s.last.sourceLife ? s.last.sourceLife
+                            : (cInst.last.sourceLife ? cInst.last.sourceLife : 1);
+                    }
+                    if (!s.party.helper && s.encounterLife && !s.encounterReturned && sharedScope)
+                        s.last.physicalScope = sharedScope;
+                }
+            }
+            prepared.image = encode(prepared.state);
+            prepared.result.outcome = SharedWorldScript::Outcome::Committed;
+            prepared.result.executed = true;
+        }
+        catch (const std::exception& error)
+        {
+            prepared.state.clear();
+            prepared.image.clear();
+            prepared.result.outcome = SharedWorldScript::Outcome::Rejected;
+            prepared.result.executed = false;
+            prepared.result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+        }
+        return prepared;
+    }
+
+    PersonalScripts::Prepared PersonalScripts::preparePartyLeave(const State& before, uint64_t story,
+        uint64_t actorCharacter, uint64_t targetCharacter, bool dissolve) const
+    {
+        Prepared prepared;
+        try
+        {
+            require(mParties && story && actorCharacter && targetCharacter);
+            (void)encode(before);
+            const auto aIt = std::ranges::find_if(before, [&](const auto& s) {
+                return s.last.character == actorCharacter && s.last.story == story;
+            });
+            const auto tIt = std::ranges::find_if(before, [&](const auto& s) {
+                return s.last.character == targetCharacter && s.last.story == story;
+            });
+            require(aIt != before.end() && tIt != before.end());
+            const size_t aIdx = size_t(aIt - before.begin());
+            const size_t tIdx = size_t(tIt - before.begin());
+            prepared.state = before;
+            const uint64_t partyId = prepared.state[aIdx].party.partyId;
+            require(partyId && prepared.state[tIdx].party.partyId == partyId);
+            if (dissolve || aIdx != tIdx)
+                require(prepared.state[aIdx].party.controller == actorCharacter && !prepared.state[aIdx].party.suspended);
+            const uint64_t nextPartyRev = prepared.state[aIdx].party.partyRevision + 1;
+            const uint64_t nextCtrlRev = prepared.state[aIdx].party.controllerRevision + 1;
+            const auto removeMember = [&](size_t idx) {
+                auto& m = prepared.state[idx];
+                const bool wasHelper = m.party.helper;
+                m.party.partyId = 0;
+                m.party.partyRevision = nextPartyRev;
+                m.party.controller = 0;
+                m.party.controllerRevision = nextCtrlRev;
+                m.party.helper = false;
+                m.party.suspended = false;
+                m.party.separated = !wasHelper;
+                m.party.sharedScope = 0;
+                m.last.physicalScope = (m.encounterLife && !m.encounterReturned) ? idx + 2 : 1;
+            };
+            if (dissolve)
+            {
+                for (size_t i = 0; i < prepared.state.size(); ++i)
+                    if (prepared.state[i].last.story == story && prepared.state[i].party.partyId == partyId)
+                        removeMember(i);
+            }
+            else
+            {
+                const bool targetWasController = prepared.state[tIdx].party.controller == targetCharacter;
+                removeMember(tIdx);
+                uint64_t sharedScope = 0;
+                if (!targetWasController)
+                    for (size_t i = 0; i < prepared.state.size(); ++i)
+                        if (prepared.state[i].last.story == story && prepared.state[i].party.partyId == partyId
+                            && prepared.state[i].last.character == prepared.state[i].party.controller
+                            && prepared.state[i].encounterLife && !prepared.state[i].encounterReturned)
+                            sharedScope = i + 2;
+                for (size_t i = 0; i < prepared.state.size(); ++i)
+                {
+                    auto& s = prepared.state[i];
+                    if (s.last.story != story || s.party.partyId != partyId) continue;
+                    s.party.partyRevision = nextPartyRev;
+                    if (targetWasController)
+                    {
+                        s.party.controller = 0;
+                        s.party.controllerRevision = nextCtrlRev;
+                        s.party.sharedScope = 0;
+                        if (s.encounterLife && !s.encounterReturned) s.last.physicalScope = i + 2;
+                    }
+                    else
+                    {
+                        s.party.sharedScope = sharedScope;
+                        if (!s.party.helper && s.encounterLife && !s.encounterReturned)
+                            s.last.physicalScope = sharedScope ? sharedScope : i + 2;
+                    }
+                }
+            }
+            prepared.image = encode(prepared.state);
+            prepared.result.outcome = SharedWorldScript::Outcome::Committed;
+            prepared.result.executed = true;
+        }
+        catch (const std::exception& error)
+        {
+            prepared.state.clear();
+            prepared.image.clear();
+            prepared.result.outcome = SharedWorldScript::Outcome::Rejected;
+            prepared.result.executed = false;
+            prepared.result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+        }
+        return prepared;
+    }
+
+    PersonalScripts::Prepared PersonalScripts::preparePartyDisconnect(const State& before, uint64_t story,
+        uint64_t character) const
+    {
+        Prepared prepared;
+        try
+        {
+            require(mParties && story && character);
+            (void)encode(before);
+            const auto tIt = std::ranges::find_if(before, [&](const auto& s) {
+                return s.last.character == character && s.last.story == story;
+            });
+            require(tIt != before.end());
+            const size_t tIdx = size_t(tIt - before.begin());
+            prepared.state = before;
+            auto& target = prepared.state[tIdx];
+            require(target.party.partyId && !target.party.suspended);
+            const uint64_t partyId = target.party.partyId;
+            const bool wasController = target.party.controller == character;
+            const uint64_t nextPartyRev = target.party.partyRevision + 1;
+            const uint64_t nextCtrlRev = target.party.controllerRevision + (wasController ? 1 : 0);
+            target.party.suspended = true;
+            for (size_t i = 0; i < prepared.state.size(); ++i)
+            {
+                auto& s = prepared.state[i];
+                if (s.last.story != story || s.party.partyId != partyId) continue;
+                s.party.partyRevision = nextPartyRev;
+                if (wasController)
+                {
+                    s.party.controller = 0;
+                    s.party.controllerRevision = nextCtrlRev;
+                }
+            }
+            prepared.image = encode(prepared.state);
+            prepared.result.outcome = SharedWorldScript::Outcome::Committed;
+            prepared.result.executed = true;
+        }
+        catch (const std::exception& error)
+        {
+            prepared.state.clear();
+            prepared.image.clear();
+            prepared.result.outcome = SharedWorldScript::Outcome::Rejected;
+            prepared.result.executed = false;
+            prepared.result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+        }
+        return prepared;
+    }
+
+    PersonalScripts::Prepared PersonalScripts::preparePartyResume(const State& before, uint64_t story,
+        uint64_t character, bool asHelper) const
+    {
+        Prepared prepared;
+        try
+        {
+            require(mParties && story && character);
+            (void)encode(before);
+            const auto tIt = std::ranges::find_if(before, [&](const auto& s) {
+                return s.last.character == character && s.last.story == story;
+            });
+            require(tIt != before.end());
+            const size_t tIdx = size_t(tIt - before.begin());
+            prepared.state = before;
+            auto& target = prepared.state[tIdx];
+            require(target.party.partyId && target.party.suspended && target.party.controller
+                && target.party.controller != character);
+            const auto cIt = std::ranges::find_if(prepared.state, [&](const auto& s) {
+                return s.last.character == target.party.controller && s.last.story == story;
+            });
+            require(cIt != prepared.state.end());
+            const size_t cIdx = size_t(cIt - prepared.state.begin());
+            const auto& cInst = prepared.state[cIdx];
+            require(cInst.party.partyId == target.party.partyId && !cInst.party.suspended && !cInst.party.helper);
+            if (!asHelper)
+                require(compatibleForParty(cInst, target));
+            else
+                require((!target.encounterLife || target.encounterReturned) && target.choices.empty() && !target.sourceWait);
+            const uint64_t partyId = target.party.partyId;
+            const uint64_t nextPartyRev = target.party.partyRevision + 1;
+            const uint64_t sharedScope = (cInst.encounterLife && !cInst.encounterReturned) ? cIdx + 2 : 0;
+            target.party.suspended = false;
+            target.party.helper = asHelper;
+            target.party.separated = false;
+            for (size_t i = 0; i < prepared.state.size(); ++i)
+            {
+                auto& s = prepared.state[i];
+                if (s.last.story != story || s.party.partyId != partyId) continue;
+                s.party.partyRevision = nextPartyRev;
+                s.party.sharedScope = sharedScope;
+                if (!s.party.helper && s.encounterLife && !s.encounterReturned && sharedScope)
+                    s.last.physicalScope = sharedScope;
+            }
+            prepared.image = encode(prepared.state);
+            prepared.result.outcome = SharedWorldScript::Outcome::Committed;
+            prepared.result.executed = true;
+        }
+        catch (const std::exception& error)
+        {
+            prepared.state.clear();
+            prepared.image.clear();
+            prepared.result.outcome = SharedWorldScript::Outcome::Rejected;
+            prepared.result.executed = false;
+            prepared.result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+        }
+        return prepared;
+    }
+
+    PersonalScripts::Prepared PersonalScripts::preparePartyController(const State& before, uint64_t story,
+        uint64_t newController) const
+    {
+        Prepared prepared;
+        try
+        {
+            require(mParties && story && newController);
+            (void)encode(before);
+            const auto tIt = std::ranges::find_if(before, [&](const auto& s) {
+                return s.last.character == newController && s.last.story == story;
+            });
+            require(tIt != before.end());
+            const size_t tIdx = size_t(tIt - before.begin());
+            prepared.state = before;
+            auto& target = prepared.state[tIdx];
+            require(target.party.partyId && !target.party.suspended && !target.party.helper
+                && target.party.controller != newController && !target.sourceWait && target.choices.empty());
+            const uint64_t partyId = target.party.partyId;
+            const uint64_t nextPartyRev = target.party.partyRevision + 1;
+            const uint64_t nextCtrlRev = target.party.controllerRevision + 1;
+            const uint64_t sharedScope = (target.encounterLife && !target.encounterReturned) ? tIdx + 2 : 0;
+            for (size_t i = 0; i < prepared.state.size(); ++i)
+            {
+                auto& s = prepared.state[i];
+                if (s.last.story != story || s.party.partyId != partyId) continue;
+                s.party.partyRevision = nextPartyRev;
+                s.party.controller = newController;
+                s.party.controllerRevision = nextCtrlRev;
+                s.party.sharedScope = sharedScope;
+                if (!s.party.helper && s.encounterLife && !s.encounterReturned && sharedScope)
+                    s.last.physicalScope = sharedScope;
+            }
+            prepared.image = encode(prepared.state);
+            prepared.result.outcome = SharedWorldScript::Outcome::Committed;
+            prepared.result.executed = true;
+        }
+        catch (const std::exception& error)
+        {
+            prepared.state.clear();
+            prepared.image.clear();
+            prepared.result.outcome = SharedWorldScript::Outcome::Rejected;
+            prepared.result.executed = false;
+            prepared.result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+        }
+        return prepared;
     }
 
     PersonalScripts::Prepared PersonalScripts::prepareReturn(const State& before, uint64_t character,
@@ -1362,6 +1958,29 @@ namespace TES3MP::Native
         prepared.state = before;
         prepared.state[index].encounterReturned = true;
         prepared.state[index].encounterEnabled = enable;
+        prepared.state[index].last.physicalScope = index + 2;
+        if (mParties && prepared.state[index].party.partyId)
+        {
+            const uint64_t partyId = prepared.state[index].party.partyId;
+            const uint64_t story = prepared.state[index].last.story;
+            uint64_t nextSharedScope = 0;
+            for (size_t i = 0; i < prepared.state.size(); ++i)
+                if (prepared.state[i].last.story == story && prepared.state[i].party.partyId == partyId
+                    && !prepared.state[i].party.helper && prepared.state[i].encounterLife
+                    && !prepared.state[i].encounterReturned)
+                {
+                    nextSharedScope = i + 2;
+                    break;
+                }
+            for (size_t i = 0; i < prepared.state.size(); ++i)
+            {
+                auto& s = prepared.state[i];
+                if (s.last.story != story || s.party.partyId != partyId) continue;
+                s.party.sharedScope = nextSharedScope;
+                if (!s.party.helper && s.encounterLife && !s.encounterReturned)
+                    s.last.physicalScope = nextSharedScope ? nextSharedScope : i + 2;
+            }
+        }
         prepared.image = encode(prepared.state);
         prepared.result.executed = true;
         return prepared;
@@ -1510,7 +2129,10 @@ namespace TES3MP::Native
                 privateSource->getPtr().getRefData().setPosition(origin.getRefData().getPosition());
                 const auto owner = mFairOpportunities ? reservationOwner(before, execution.sourceLife, execution.sourceReference) : 0;
                 scene.expected = runningExecution; scene.source = privateSource->getPtr(); scene.prepared = encounterPrepared;
-                scene.reservedByOther = owner != 0 && owner != execution.character;
+                scene.reservedByOther = mFairOpportunities
+                    && (mParties
+                            ? !reservationAllows(before, execution.sourceLife, execution.character, execution.sourceReference)
+                            : (owner != 0 && owner != execution.character));
                 scene.relocations = mRelocations; scene.activities = mActivities; scene.npcBanks = mNpcBanks;
                 scene.cell = found->encounter->cell;
                 std::copy(std::begin(origin.getRefData().getPosition().pos), std::end(origin.getRefData().getPosition().pos), scene.origin.begin());
@@ -1600,8 +2222,13 @@ namespace TES3MP::Native
                 require(dialogue.choices.empty()); // A removed speaker cannot own a pending choice.
                 if (mFairOpportunities)
                 {
-                    const auto owner = reservationOwner(before, execution.sourceLife, execution.sourceReference);
-                    require(!owner || owner == execution.character);
+                    if (mParties)
+                        require(reservationAllows(before, execution.sourceLife, execution.character, execution.sourceReference));
+                    else
+                    {
+                        const auto owner = reservationOwner(before, execution.sourceLife, execution.sourceReference);
+                        require(!owner || owner == execution.character);
+                    }
                     if (state.reservedLife && execution.sourceLife >= state.reservedLife)
                     {
                         state.reservedLife = 0;
@@ -1692,7 +2319,8 @@ namespace TES3MP::Native
         const MWScript::ReferenceResolver& resolver, size_t budget, const MWMechanics::NpcStats* playerStats,
         std::optional<std::string_view> customClassName, const MWMechanics::NpcStats* speakerStats,
         std::optional<MWScript::DialogueState::Stamp> journalStamp,
-        std::optional<std::span<const ItemBalance>> playerInventory) const
+        std::optional<std::span<const ItemBalance>> playerInventory,
+        std::span<const ParticipantContext> partyParticipants) const
     {
         Prepared rejected;
         try
@@ -1703,6 +2331,7 @@ namespace TES3MP::Native
                 return state.last.character == character && state.last.story == request.story;
             });
             require(found != before.end());
+            const size_t callerIdx = size_t(found - before.begin());
             // Command IDs restart with a client process. The observed durable
             // revision distinguishes a new occurrence from an old receipt retry.
             if (command == found->dialogueCommand && request.revision != found->dialogueRevision)
@@ -1725,19 +2354,50 @@ namespace TES3MP::Native
                 require(std::ranges::find(found->dialogue.topics, ESM::RefId::stringRefId(request.topic))
                     != found->dialogue.topics.end());
             }
-            auto execution = found->last;
+            State effectiveBefore = before;
+            bool dissented = false;
+            if (mParties && found->party.partyId)
+            {
+                require(!found->party.suspended && !found->party.helper);
+                if (found->party.controller != character)
+                {
+                    // Dissenting choice on an active party conversation splits the
+                    // dissenter safely before commitment.
+                    require(found->party.controller != 0 && request.choice >= 0 && !found->choices.empty());
+                    const uint64_t oldPartyId = found->party.partyId;
+                    const uint64_t nextPartyRev = found->party.partyRevision + 1;
+                    const uint64_t nextCtrlRev = found->party.controllerRevision + 1;
+                    auto& selfParty = effectiveBefore[callerIdx].party;
+                    selfParty.partyId = 0;
+                    selfParty.partyRevision = nextPartyRev;
+                    selfParty.controller = 0;
+                    selfParty.controllerRevision = nextCtrlRev;
+                    selfParty.helper = false;
+                    selfParty.suspended = false;
+                    selfParty.separated = true;
+                    selfParty.sharedScope = 0;
+                    for (size_t i = 0; i < effectiveBefore.size(); ++i)
+                        if (i != callerIdx && effectiveBefore[i].last.story == request.story
+                            && effectiveBefore[i].party.partyId == oldPartyId)
+                            effectiveBefore[i].party.partyRevision = nextPartyRev;
+                    dissented = true;
+                }
+            }
+            const auto& callerBefore = effectiveBefore[callerIdx];
+            auto execution = callerBefore.last;
             ++execution.invocation;
-            execution.causalEvent = found->eventCursor + 1;
+            execution.causalEvent = callerBefore.eventCursor + 1;
             execution.sourceReference = request.speaker;
             execution.sourceLife = request.life;
             const bool talked
-                = std::ranges::find(found->talkedSpeakers, request.speaker) != found->talkedSpeakers.end();
-            auto prepared = prepareDialogue(before, execution, ESM::RefId::stringRefId(request.topic), request.choice,
+                = std::ranges::find(callerBefore.talkedSpeakers, request.speaker) != callerBefore.talkedSpeakers.end();
+            const ESM::RefId topicId = ESM::RefId::stringRefId(request.topic);
+            auto prepared = prepareDialogue(effectiveBefore, execution, topicId, request.choice,
                 0, talked, cellName, content, resolver, budget, playerStats, customClassName, speakerStats, journalStamp,
                 false, playerInventory);
             if (prepared.result.outcome != SharedWorldScript::Outcome::Committed || !prepared.result.executed)
                 return prepared;
-            auto& state = prepared.state[size_t(found - before.begin())];
+            auto& state = prepared.state[callerIdx];
             state.dialogueRevision = request.revision + 1;
             state.dialogueCommand = command;
             state.dialogueRequest = request;
@@ -1746,7 +2406,171 @@ namespace TES3MP::Native
                 require(state.talkedSpeakers.size() < 64);
                 state.talkedSpeakers.push_back(request.speaker);
             }
-            auto output = view(state, *SessionId::fromValue(1), SessionGeneration::initial(),
+            if (mParties)
+            {
+                if (mDefinitions[callerIdx].encounter)
+                {
+                    state.party.encounterReference = mDefinitions[callerIdx].encounter->reference;
+                    state.party.encounterLife = request.life;
+                }
+                recordRewardReceipts(state, prepared.itemTransfers, state.last.invocation, state.party.partyId, 1,
+                    request.speaker, topicId, state.lastInfo);
+            }
+            if (mParties && !dissented && callerBefore.party.partyId)
+            {
+                const uint64_t partyId = callerBefore.party.partyId;
+                uint64_t partyRev = callerBefore.party.partyRevision;
+                const uint64_t ctrlId = callerBefore.party.controller;
+                const uint64_t ctrlRev = callerBefore.party.controllerRevision;
+                std::vector<size_t> eligibleIndices;
+                std::vector<size_t> helperIndices;
+                std::vector<uint64_t> frozenParticipants;
+                for (size_t i = 0; i < effectiveBefore.size(); ++i)
+                {
+                    const auto& member = effectiveBefore[i];
+                    if (member.last.story != request.story || member.party.partyId != partyId || member.party.suspended)
+                        continue;
+                    frozenParticipants.push_back(member.last.character);
+                    if (member.party.helper)
+                        helperIndices.push_back(i);
+                    else if (i != callerIdx)
+                        eligibleIndices.push_back(i);
+                }
+                bool anySplit = false;
+                for (const size_t pIdx : eligibleIndices)
+                {
+                    require(prepared.invocations < budget);
+                    const uint64_t pChar = mDefinitions[pIdx].character;
+                    const auto ctxIt = std::ranges::find(partyParticipants, pChar, &ParticipantContext::character);
+                    const MWMechanics::NpcStats* pStats
+                        = ctxIt != partyParticipants.end() && ctxIt->playerStats ? ctxIt->playerStats : playerStats;
+                    const std::optional<std::string_view> pCustomClass
+                        = ctxIt != partyParticipants.end() && ctxIt->customClassName ? ctxIt->customClassName
+                                                                                     : customClassName;
+                    std::optional<std::span<const ItemBalance>> pInv;
+                    if (ctxIt != partyParticipants.end() && ctxIt->playerInventory)
+                        pInv = ctxIt->playerInventory;
+                    else if (!prepared.state[pIdx].playerItems.empty())
+                        pInv = std::span<const ItemBalance>(prepared.state[pIdx].playerItems);
+                    prepared.state[pIdx].npcItems = effectiveBefore[callerIdx].npcItems;
+                    auto pExec = prepared.state[pIdx].last;
+                    ++pExec.invocation;
+                    pExec.causalEvent = prepared.state[pIdx].eventCursor + 1;
+                    pExec.sourceReference = request.speaker;
+                    pExec.sourceLife = request.life;
+                    struct MemberResolver final : MWScript::ReferenceResolver
+                    {
+                        const MWScript::ReferenceResolver& upstream;
+                        MWScript::ExecutionContext controllerExec;
+                        MWScript::ExecutionContext memberExec;
+                        MWWorld::Ptr memberPlayer;
+                        MemberResolver(const MWScript::ReferenceResolver& u, const MWScript::ExecutionContext& c,
+                            const MWScript::ExecutionContext& m, MWWorld::Ptr p)
+                            : upstream(u)
+                            , controllerExec(c)
+                            , memberExec(m)
+                            , memberPlayer(p)
+                        {
+                        }
+                        MWWorld::Ptr resolve(const MWScript::ExecutionContext& exec, const ESM::RefId& id,
+                            bool activeOnly) const override
+                        {
+                            require(exec == memberExec);
+                            if (id == "player" && !memberPlayer.isEmpty())
+                                return memberPlayer;
+                            return upstream.resolve(controllerExec, id, activeOnly);
+                        }
+                    } memberResolver(resolver, execution, pExec,
+                        ctxIt != partyParticipants.end() ? ctxIt->playerPtr : MWWorld::Ptr{});
+                    const bool pTalked = std::ranges::find(prepared.state[pIdx].talkedSpeakers, request.speaker)
+                        != prepared.state[pIdx].talkedSpeakers.end();
+                    auto pPrepared = prepareDialogue(prepared.state, pExec, topicId, request.choice, 0, pTalked,
+                        cellName, content, memberResolver, budget - prepared.invocations, pStats, pCustomClass,
+                        speakerStats, journalStamp, false, pInv);
+                    if (pPrepared.result.outcome != SharedWorldScript::Outcome::Committed || !pPrepared.result.executed)
+                        return pPrepared;
+                    auto& pState = pPrepared.state[pIdx];
+                    const auto& cState = prepared.state[callerIdx];
+                    pState.dialogueRevision = prepared.state[pIdx].dialogueRevision + 1;
+                    pState.dialogueCommand = command;
+                    pState.dialogueRequest = {request.story, request.speaker, request.life,
+                        prepared.state[pIdx].dialogueRevision, request.topic, request.choice};
+                    if (!pTalked)
+                    {
+                        require(pState.talkedSpeakers.size() < 64);
+                        pState.talkedSpeakers.push_back(request.speaker);
+                    }
+                    if (mDefinitions[pIdx].encounter)
+                    {
+                        pState.party.encounterReference = mDefinitions[pIdx].encounter->reference;
+                        pState.party.encounterLife = request.life;
+                    }
+                    recordRewardReceipts(pState, pPrepared.itemTransfers, pState.last.invocation, partyId, 1,
+                        request.speaker, topicId, pState.lastInfo);
+                    for (const auto& t : pPrepared.itemTransfers)
+                        if (t.receipt.playerTarget)
+                            prepared.itemTransfers.push_back(t);
+                    const bool samePhysical = (pState.encounterLife == cState.encounterLife)
+                        && (pState.relocation == cState.relocation)
+                        && (bool(pState.activity) == bool(cState.activity))
+                        && (!pState.activity
+                            || (pState.activity->escort == cState.activity->escort
+                                && pState.activity->destination == cState.activity->destination));
+                    if (!samePhysical)
+                    {
+                        // Incompatible physical writes split safely before commitment.
+                        pState.party.partyId = 0;
+                        pState.party.partyRevision = partyRev + 1;
+                        pState.party.controller = 0;
+                        pState.party.controllerRevision = ctrlRev + 1;
+                        pState.party.helper = false;
+                        pState.party.suspended = false;
+                        pState.party.separated = true;
+                        pState.party.sharedScope = 0;
+                        pState.party.stepPartyId = partyId;
+                        pState.party.stepPartyRevision = partyRev;
+                        pState.party.stepController = ctrlId;
+                        pState.party.stepControllerRevision = ctrlRev;
+                        pState.party.stepParticipants = frozenParticipants;
+                        pState.last.physicalScope = (pState.encounterLife && !pState.encounterReturned) ? pIdx + 2 : 1;
+                        anySplit = true;
+                    }
+                    else
+                    {
+                        pState.npcItems = cState.npcItems;
+                    }
+                    prepared.state[pIdx] = std::move(pState);
+                    prepared.invocations += pPrepared.invocations;
+                }
+                if (anySplit) ++partyRev;
+                const uint64_t sharedScope = (prepared.state[callerIdx].encounterLife
+                                                 && !prepared.state[callerIdx].encounterReturned)
+                    ? callerIdx + 2
+                    : 0;
+                for (size_t i = 0; i < prepared.state.size(); ++i)
+                {
+                    auto& s = prepared.state[i];
+                    if (s.last.story != request.story || s.party.partyId != partyId) continue;
+                    s.party.partyRevision = partyRev;
+                    s.party.sharedScope = sharedScope;
+                    if (mDefinitions[i].encounter)
+                    {
+                        s.party.encounterReference = mDefinitions[i].encounter->reference;
+                        s.party.encounterLife = request.life;
+                    }
+                    if (!s.party.suspended)
+                    {
+                        s.party.stepPartyId = partyId;
+                        s.party.stepPartyRevision = partyRev;
+                        s.party.stepController = ctrlId;
+                        s.party.stepControllerRevision = ctrlRev;
+                        s.party.stepParticipants = frozenParticipants;
+                        if (!s.party.helper && s.encounterLife && !s.encounterReturned && sharedScope)
+                            s.last.physicalScope = sharedScope;
+                    }
+                }
+            }
+            auto output = view(prepared.state[callerIdx], *SessionId::fromValue(1), SessionGeneration::initial(),
                 ServerTick::initial(), CanonicalRevision::initial());
             output.response = prepared.response; output.messages = prepared.result.presentation;
             require(!encodeReliablePersonalDialogue(output).empty());
@@ -1770,6 +2594,21 @@ namespace TES3MP::Native
                 && (!first || std::tuple(entry.reservationTick, entry.last.character, entry.last.story)
                     < std::tuple(first->reservationTick, first->last.character, first->last.story))) first = &entry;
         return first ? first->last.character : 0;
+    }
+
+    bool PersonalScripts::reservationAllows(const State& state, uint64_t life, uint64_t character, uint64_t reference)
+    {
+        const uint64_t owner = reservationOwner(state, life, reference);
+        if (!owner || owner == character) return true;
+        for (const auto& ownerEntry : state)
+            if (ownerEntry.last.character == owner && ownerEntry.reservedLife && ownerEntry.reservedLife <= life
+                && (!reference || !ownerEntry.last.sourceReference || ownerEntry.last.sourceReference == reference)
+                && ownerEntry.party.partyId && !ownerEntry.party.suspended)
+                for (const auto& member : state)
+                    if (member.last.story == ownerEntry.last.story && member.last.character == character
+                        && member.party.partyId == ownerEntry.party.partyId && !member.party.suspended)
+                        return true;
+        return false;
     }
 
     PersonalScripts::Prepared PersonalScripts::prepareScheduled(const State& before, uint64_t worldTick,
@@ -1842,8 +2681,14 @@ namespace TES3MP::Native
                             previousTick = event.tick;
                             if (mFairOpportunities)
                             {
-                                const auto owner = reservationOwner(before, event.life, storySource->reference);
-                                require(!owner || event.killerKind != 1 || event.owner == owner);
+                                if (mParties)
+                                    require(event.killerKind != 1
+                                        || reservationAllows(before, event.life, event.owner, storySource->reference));
+                                else
+                                {
+                                    const auto owner = reservationOwner(before, event.life, storySource->reference);
+                                    require(!owner || event.killerKind != 1 || event.owner == owner);
+                                }
                             }
                         }
                         if (!storySource->living) require(storySource->events.back().killer == storySource->killer
@@ -1859,6 +2704,8 @@ namespace TES3MP::Native
                 bool events, encounters;
                 uint64_t cursor = 0, expectedScope = 1, expectedLife = 0;
                 bool privateScope = false, reservedByOther = false, removed = false, activated = false;
+                std::vector<uint64_t> partyMembers;
+                std::vector<uint64_t> helperExcludedLives;
                 StoryItemTransaction items;
                 std::vector<Prepared::StagedItemTransfer> transfers;
                 SourceResolver(const Source& value, const MWWorld::ESMStore& store, bool lifeEvents, bool allowEncounters)
@@ -1867,16 +2714,24 @@ namespace TES3MP::Native
                 {
                     reference.getPtr().getRefData().setPosition(value.position);
                 }
+                bool eventCredits(const LifeEvent& event, uint64_t character) const
+                {
+                    if (event.helper || !event.owner) return false;
+                    if (std::ranges::find(helperExcludedLives, event.life) != helperExcludedLives.end())
+                        return false;
+                    if (event.owner == character) return true;
+                    return std::ranges::find(partyMembers, event.owner) != partyMembers.end();
+                }
                 bool ownDeath(uint64_t character) const
                 {
                     if (source.living) return false;
-                    return events ? source.events.back().owner == character && !source.events.back().helper
+                    return events ? eventCredits(source.events.back(), character)
                         : source.killerKind == 1 && source.killer == character;
                 }
                 bool eligible(uint64_t character) const
                 {
                     return std::ranges::any_of(source.events, [&](const auto& event) {
-                        return event.life > cursor && event.owner == character && !event.helper;
+                        return event.life > cursor && eventCredits(event, character);
                     });
                 }
                 MWWorld::Ptr resolve(const MWScript::ExecutionContext& execution, const ESM::RefId& id, bool) const override
@@ -1943,7 +2798,7 @@ namespace TES3MP::Native
                     require(events && ptr == resolve(execution, source.record, false));
                     for (const auto& event : source.events)
                         if (event.life > cursor && (!privateScope || event.life < expectedLife)
-                            && event.owner == execution.character && !event.helper)
+                            && eventCredits(event, execution.character))
                         { cursor = event.life; return true; }
                     if (!privateScope && !source.living && !ownDeath(execution.character))
                         throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
@@ -2009,6 +2864,25 @@ namespace TES3MP::Native
             for (const auto& entry : before) require(entry.scheduledTick <= worldTick);
             prepared.state = before;
             bool processed = false;
+            if (mParties && mLifeEvents)
+            {
+                for (size_t i = 0; i < prepared.state.size(); ++i)
+                {
+                    auto& inst = prepared.state[i];
+                    if (!inst.party.partyId || !inst.party.helper || inst.party.suspended) continue;
+                    const auto* src = findSource(i);
+                    if (!src) continue;
+                    for (const auto& ev : src->events)
+                        if (ev.owner == inst.last.character
+                            && std::ranges::find(inst.party.helperLives, ev.life) == inst.party.helperLives.end())
+                        {
+                            require(inst.party.helperLives.size() < MaximumLifeEvents);
+                            inst.party.helperLives.push_back(ev.life);
+                            std::ranges::sort(inst.party.helperLives);
+                            processed = true;
+                        }
+                }
+            }
             for (size_t i = 0; i < before.size(); ++i)
             {
                 const auto* source = findSource(i);
@@ -2016,9 +2890,17 @@ namespace TES3MP::Native
                 if (mSourceWaits)
                     sourceResolver = std::make_unique<SourceResolver>(
                         *source, content, mLifeEvents, mEncounters && (!mLifeEvents || mNpcBanks) && (!mActivities || mNpcBanks));
-                const auto& current = before[i];
-                const auto scope = physicalScope(before, current.last.character);
-                if (current.encounterReturned || (current.encounterLife ? (!mNpcBanks || !current.relocation || scope != i + 2) : scope != 1)
+                const auto& current = prepared.state[i];
+                if (mParties && (current.party.suspended || current.party.helper
+                        || (current.party.partyId && !current.party.controller)))
+                    continue;
+                const auto scope = physicalScope(prepared.state, current.last.character);
+                const uint64_t expectedPrivateScope = (mParties && current.party.sharedScope)
+                    ? current.party.sharedScope
+                    : i + 2;
+                if (current.encounterReturned
+                    || (current.encounterLife ? (!mNpcBanks || !current.relocation || scope != expectedPrivateScope)
+                                              : scope != 1)
                     || current.scheduledTick == worldTick
                     || std::ranges::find(activeCharacters, current.last.character) == activeCharacters.end()) continue;
                 require(prepared.invocations < MaximumInvocationsPerTransaction
@@ -2029,10 +2911,22 @@ namespace TES3MP::Native
                 {
                     sourceResolver->cursor = current.deathCursor;
                     sourceResolver->privateScope = mNpcBanks && current.encounterLife != 0;
-                    sourceResolver->expectedScope = sourceResolver->privateScope ? i + 2 : 1;
+                    sourceResolver->expectedScope = sourceResolver->privateScope ? expectedPrivateScope : 1;
                     sourceResolver->expectedLife = sourceResolver->privateScope ? current.encounterLife : source->life;
+                    if (mParties)
+                    {
+                        sourceResolver->helperExcludedLives = current.party.helperLives;
+                        if (current.party.partyId && !current.party.suspended)
+                            for (const auto& peer : prepared.state)
+                                if (peer.last.story == current.last.story && peer.party.partyId == current.party.partyId
+                                    && !peer.party.suspended)
+                                    sourceResolver->partyMembers.push_back(peer.last.character);
+                    }
                     const auto owner = mFairOpportunities ? reservationOwner(before, sourceResolver->expectedLife, source->reference) : 0;
-                    sourceResolver->reservedByOther = owner != 0 && owner != execution.character;
+                    sourceResolver->reservedByOther = mFairOpportunities
+                        && (mParties
+                                ? !reservationAllows(before, sourceResolver->expectedLife, execution.character, source->reference)
+                                : (owner != 0 && owner != execution.character));
                     sourceResolver->removed = false;
                     sourceResolver->activated = false;
                     sourceResolver->reference.getPtr().getRefData() = MWWorld::RefData();
@@ -2124,9 +3018,21 @@ namespace TES3MP::Native
                 prepared.state[i].scheduledTick = worldTick;
                 if (mSourceWaits)
                 {
+                    if (mNpcBanks)
+                    {
+                        prepared.state[i].playerItems = std::move(invocation.state[i].playerItems);
+                        prepared.state[i].npcItems = std::move(invocation.state[i].npcItems);
+                        prepared.state[i].itemReceipts = std::move(invocation.state[i].itemReceipts);
+                    }
                     if (mNpcBanks && !sourceResolver->transfers.empty())
+                    {
+                        if (mParties)
+                            recordRewardReceipts(prepared.state[i], sourceResolver->transfers,
+                                prepared.state[i].last.invocation, prepared.state[i].party.partyId, 2,
+                                source->reference, mDefinitions[i].script->initial().runtime.script.mId, {});
                         prepared.itemTransfers.insert(prepared.itemTransfers.end(),
                             sourceResolver->transfers.begin(), sourceResolver->transfers.end());
+                    }
                     if (mLifeEvents) prepared.state[i].deathCursor = sourceResolver->cursor;
                     if (mFairOpportunities && prepared.state[i].reservedLife
                         && prepared.state[i].deathCursor >= prepared.state[i].reservedLife)
@@ -2137,8 +3043,13 @@ namespace TES3MP::Native
                         state.choices.clear();
                         if (mFairOpportunities)
                         {
-                            const auto owner = reservationOwner(before, execution.sourceLife, execution.sourceReference);
-                            require(!owner || owner == execution.character);
+                            if (mParties)
+                                require(reservationAllows(before, execution.sourceLife, execution.character, execution.sourceReference));
+                            else
+                            {
+                                const auto owner = reservationOwner(before, execution.sourceLife, execution.sourceReference);
+                                require(!owner || owner == execution.character);
+                            }
                             if (state.reservedLife && execution.sourceLife >= state.reservedLife)
                             {
                                 state.reservedLife = 0;
@@ -2148,7 +3059,7 @@ namespace TES3MP::Native
                         state.encounterLife = execution.sourceLife;
                         state.relocation.reset();
                         state.activity.reset();
-                        state.last.physicalScope = i + 2;
+                        state.last.physicalScope = (mParties && state.party.sharedScope) ? state.party.sharedScope : i + 2;
                         auto ownedNpc = std::ranges::find(state.npcs, execution.sourceReference, &Instance::Npc::reference);
                         if (ownedNpc == state.npcs.end())
                             ownedNpc = std::ranges::find_if(state.npcs, [&](const auto& npc) {
@@ -2174,6 +3085,65 @@ namespace TES3MP::Native
                 processed = true;
                 prepared.invocations += invocation.invocations;
                 require(prepared.invocations <= MaximumInvocationsPerTransaction);
+            }
+            if (mParties && processed)
+            {
+                for (size_t i = 0; i < prepared.state.size(); ++i)
+                {
+                    auto& cState = prepared.state[i];
+                    if (!cState.party.partyId || cState.party.controller != cState.last.character) continue;
+                    const uint64_t story = cState.last.story;
+                    const uint64_t partyId = cState.party.partyId;
+                    uint64_t partyRev = cState.party.partyRevision;
+                    const uint64_t ctrlRev = cState.party.controllerRevision;
+                    bool revisionChanged = false;
+                    for (size_t j = 0; j < prepared.state.size(); ++j)
+                    {
+                        if (j == i) continue;
+                        auto& mState = prepared.state[j];
+                        if (mState.last.story != story || mState.party.partyId != partyId || mState.party.suspended
+                            || mState.party.helper)
+                            continue;
+                        const bool samePhysical = (mState.encounterLife == cState.encounterLife)
+                            && (mState.relocation == cState.relocation)
+                            && (bool(mState.activity) == bool(cState.activity));
+                        if (!samePhysical)
+                        {
+                            const bool online
+                                = std::ranges::find(activeCharacters, mState.last.character) != activeCharacters.end();
+                            if (!online)
+                            {
+                                mState.party.suspended = true;
+                                revisionChanged = true;
+                            }
+                            else
+                            {
+                                mState.party.partyId = 0;
+                                mState.party.partyRevision = partyRev + 1;
+                                mState.party.controller = 0;
+                                mState.party.controllerRevision = ctrlRev + 1;
+                                mState.party.helper = false;
+                                mState.party.suspended = false;
+                                mState.party.separated = true;
+                                mState.party.sharedScope = 0;
+                                mState.last.physicalScope
+                                    = (mState.encounterLife && !mState.encounterReturned) ? j + 2 : 1;
+                                revisionChanged = true;
+                            }
+                        }
+                    }
+                    if (revisionChanged) ++partyRev;
+                    const uint64_t sharedScope = (cState.encounterLife && !cState.encounterReturned) ? i + 2 : 0;
+                    for (size_t j = 0; j < prepared.state.size(); ++j)
+                    {
+                        auto& mState = prepared.state[j];
+                        if (mState.last.story != story || mState.party.partyId != partyId) continue;
+                        mState.party.partyRevision = partyRev;
+                        mState.party.sharedScope = sharedScope;
+                        if (!mState.party.helper && mState.encounterLife && !mState.encounterReturned && sharedScope)
+                            mState.last.physicalScope = sharedScope;
+                    }
+                }
             }
             result.outcome = SharedWorldScript::Outcome::Committed;
             result.executed = processed;

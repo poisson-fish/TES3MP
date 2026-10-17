@@ -8,6 +8,11 @@
 
 namespace TES3MP::Native
 {
+    // V96 (`native-inventory-96`) adds opt-in party enrollment, live encounter
+    // scope sharing, delegated controller choices, dissenting choice splits,
+    // helper roles, per-character costs/rewards, durable reward receipts,
+    // offline suspension/leader loss, controller reselection and leave/kick/rejoin
+    // on top of V95.
     // V94 adds source-only AiTravel/AiEscort player in the single dry interior.
     // Stock AI policy/navigation/physics advance two private frames at most;
     // progress, pose, story banks and gameplay share durability. Offline owners

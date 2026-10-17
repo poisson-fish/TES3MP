@@ -101,8 +101,12 @@ namespace TES3MP
         if (v.encounter)
         {
             const auto& e = *v.encounter;
-            if (!e.reference || !e.life || (!e.waitSince && !e.reservedLife)
-                || bool(e.waitSince) != bool(e.respawnTick) || !textValid(e.sourceName, 128)) return false;
+            const bool hasPartyOrScope = e.partyId || e.partyRevision || e.controller || e.controllerRevision
+                || e.physicalScope > 1 || e.helper || e.separated;
+            if (!e.reference || !e.life || (!e.waitSince && !e.reservedLife && !hasPartyOrScope)
+                || bool(e.waitSince) != bool(e.respawnTick) || !e.physicalScope
+                || (e.partyId ? (!e.partyRevision || !e.controllerRevision) : (e.controller || e.helper))
+                || !textValid(e.sourceName, 128)) return false;
         }
         if (!v.story || bool(v.speaker) != bool(v.life) || bool(v.revision) != bool(v.command)
             || !textValid(v.topic, 128) || !textValid(v.response, 4096) || v.choices.size() > 8 || v.quests.size() > 16
@@ -175,7 +179,11 @@ namespace TES3MP
     {
         if (!validPersonalDialogue(v))
             return {};
-        Writer w(v.encounter ? 3 : 2);
+        const bool partyStatus = v.encounter
+            && (v.encounter->partyId || v.encounter->partyRevision || v.encounter->controller
+                || v.encounter->controllerRevision || v.encounter->physicalScope > 1 || v.encounter->helper
+                || v.encounter->separated);
+        Writer w(partyStatus ? 4 : v.encounter ? 3 : 2);
         for (auto n : { v.targetSessionId.value(), v.targetSessionGeneration.value(), v.serverTick.value(),
                  v.canonicalRevision.value(), v.story, v.revision, v.speaker, v.life, v.command })
             w.word(n);
@@ -215,6 +223,13 @@ namespace TES3MP
             const auto& e = *v.encounter;
             for (auto n : {e.reference, e.life, e.waitSince, e.respawnTick, e.reservedLife}) w.word(n);
             w.string(e.sourceName);
+            if (partyStatus)
+            {
+                for (auto n : {e.partyId, e.partyRevision, e.controller, e.controllerRevision, e.physicalScope})
+                    w.word(n);
+                w.word(e.helper);
+                w.word(e.separated);
+            }
         }
         if (w.bytes.size() > MaximumPersonalDialogueBytes)
             return {};
@@ -223,8 +238,10 @@ namespace TES3MP
     std::optional<ReliablePersonalDialogue> decodeReliablePersonalDialogue(std::span<const std::byte> bytes)
     try
     {
-        const bool status = !bytes.empty() && bytes[0] == std::byte{3};
-        Reader r(bytes, MaximumPersonalDialogueBytes, status ? 3 : 2);
+        const unsigned version = bytes.empty() ? 0u : std::to_integer<unsigned>(bytes[0]);
+        if (version < 2 || version > 4)
+            return {};
+        Reader r(bytes, MaximumPersonalDialogueBytes, version);
         ReliablePersonalDialogue v{ r.strong<SessionId>(), r.strong<SessionGeneration>(), r.strong<ServerTick>(),
             r.strong<CanonicalRevision>() };
         v.story = r.word();
@@ -249,8 +266,24 @@ namespace TES3MP
             v.topics.push_back(r.string(128));
         for (size_t n = r.count(8); n--;)
             v.messages.push_back(r.string(256));
-        if (status)
-            v.encounter = DialogueEncounterStatus{r.word(), r.word(), r.word(), r.word(), r.word(), r.string(128)};
+        if (version >= 3)
+        {
+            DialogueEncounterStatus e{r.word(), r.word(), r.word(), r.word(), r.word(), r.string(128)};
+            if (version == 4)
+            {
+                e.partyId = r.word();
+                e.partyRevision = r.word();
+                e.controller = r.word();
+                e.controllerRevision = r.word();
+                e.physicalScope = r.word();
+                e.helper = bool(r.count(1));
+                e.separated = bool(r.count(1));
+                if (!(e.partyId || e.partyRevision || e.controller || e.controllerRevision || e.physicalScope > 1
+                        || e.helper || e.separated))
+                    return {};
+            }
+            v.encounter = std::move(e);
+        }
         if (!r.bytes.empty() || !validPersonalDialogue(v))
             return {};
         return v;

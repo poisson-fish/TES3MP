@@ -52,6 +52,8 @@ namespace TES3MP
     {
         uint64_t reference = 0, life = 0, waitSince = 0, respawnTick = 0, reservedLife = 0;
         std::string sourceName;
+        uint64_t partyId = 0, partyRevision = 0, controller = 0, controllerRevision = 0, physicalScope = 1;
+        bool helper = false, separated = false;
         bool operator==(const DialogueEncounterStatus&) const = default;
     };
     // Full personal progression is recoverable. Response/messages are transient:

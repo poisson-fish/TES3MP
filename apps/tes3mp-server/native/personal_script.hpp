@@ -26,6 +26,8 @@ namespace TES3MP::Native
         static constexpr size_t MaximumLifeEvents = 256;
         static constexpr size_t MaximumTrackedItemsPerStory = 64;
         static constexpr size_t MaximumItemReceiptsPerStory = 64;
+        static constexpr size_t MaximumPartyMembers = 4;
+        static constexpr size_t MaximumRewardReceiptsPerStory = 64;
         static constexpr int MaximumItemTransferCount = 100000;
         struct ItemBalance
         {
@@ -40,6 +42,32 @@ namespace TES3MP::Native
             ESM::RefId item;
             int count = 0;
             bool operator==(const ItemReceipt&) const = default;
+        };
+        struct RewardReceipt
+        {
+            uint64_t occurrence = 0, effect = 0, recipient = 0, partyId = 0, sourceKind = 0, sourceId = 0;
+            ESM::RefId topic, info, item;
+            int count = 0;
+            bool operator==(const RewardReceipt&) const = default;
+        };
+        struct PartyState
+        {
+            uint64_t partyId = 0, partyRevision = 0;
+            uint64_t controller = 0, controllerRevision = 0;
+            bool helper = false, suspended = false, separated = false;
+            uint64_t sharedScope = 0, encounterReference = 0, encounterLife = 0;
+            uint64_t stepPartyId = 0, stepPartyRevision = 0, stepController = 0, stepControllerRevision = 0;
+            std::vector<uint64_t> stepParticipants;
+            std::vector<uint64_t> helperLives;
+            bool operator==(const PartyState&) const = default;
+        };
+        struct ParticipantContext
+        {
+            uint64_t character = 0;
+            const MWMechanics::NpcStats* playerStats = nullptr;
+            std::optional<std::string_view> customClassName = {};
+            std::optional<std::span<const ItemBalance>> playerInventory = {};
+            MWWorld::Ptr playerPtr = {};
         };
         struct EncounterBinding
         {
@@ -123,6 +151,8 @@ namespace TES3MP::Native
             uint64_t reservedLife = 0, reservationTick = 0; // Durable next-opportunity right, retained after waking.
             std::vector<ItemBalance> playerItems, npcItems;
             std::vector<ItemReceipt> itemReceipts;
+            PartyState party;
+            std::vector<RewardReceipt> rewardReceipts;
         };
         struct LifeEvent
         {
@@ -179,7 +209,7 @@ namespace TES3MP::Native
         PersonalScripts(uint64_t campaign, std::vector<Definition>, CredentialCrypto&, bool scheduled = false,
             bool banks = false, bool intents = false, bool returns = false, bool enables = false, bool relocations = false,
             bool sourceWaits = false, bool lifeEvents = false, bool fairOpportunities = false, bool activities = false,
-            bool npcBanks = false);
+            bool npcBanks = false, bool parties = false);
         uint64_t campaign() const { return mCampaign; }
         bool scheduled() const { return mScheduled; }
         bool banks() const { return mBanks; }
@@ -194,10 +224,19 @@ namespace TES3MP::Native
         bool fairOpportunities() const { return mFairOpportunities; }
         bool activities() const { return mActivities; }
         bool npcBanks() const { return mNpcBanks; }
+        bool parties() const { return mParties; }
         const std::vector<Definition>& definitions() const { return mDefinitions; }
         static uint64_t reservationOwner(const State&, uint64_t life, uint64_t reference = 0);
+        static bool reservationAllows(const State&, uint64_t life, uint64_t character, uint64_t reference = 0);
         static const Instance::Relocation* relocation(const State&, uint64_t character);
         static uint64_t physicalScope(const State&, uint64_t character);
+        Prepared preparePartyEnroll(const State&, uint64_t story, uint64_t partyId, uint64_t controller,
+            uint64_t character, bool helper = false) const;
+        Prepared preparePartyLeave(const State&, uint64_t story, uint64_t actorCharacter,
+            uint64_t targetCharacter, bool dissolve = false) const;
+        Prepared preparePartyDisconnect(const State&, uint64_t story, uint64_t character) const;
+        Prepared preparePartyResume(const State&, uint64_t story, uint64_t character, bool asHelper = false) const;
+        Prepared preparePartyController(const State&, uint64_t story, uint64_t newController) const;
         Prepared prepareReturn(const State&, uint64_t character, const MWWorld::ESMStore* = nullptr,
             uint64_t sourceLife = 0) const;
         State initial() const;
@@ -224,7 +263,8 @@ namespace TES3MP::Native
             std::optional<std::string_view> customClassName = {},
             const MWMechanics::NpcStats* speakerStats = nullptr,
             std::optional<MWScript::DialogueState::Stamp> journalStamp = {},
-            std::optional<std::span<const ItemBalance>> playerInventory = {}) const;
+            std::optional<std::span<const ItemBalance>> playerInventory = {},
+            std::span<const ParticipantContext> partyParticipants = {}) const;
 
     private:
         uint64_t mCampaign;
@@ -239,7 +279,7 @@ namespace TES3MP::Native
         bool mEnables = false;
         bool mRelocations = false;
         bool mSourceWaits = false;
-        bool mLifeEvents = false, mFairOpportunities = false, mActivities = false, mNpcBanks = false;
+        bool mLifeEvents = false, mFairOpportunities = false, mActivities = false, mNpcBanks = false, mParties = false;
         std::vector<Interpreter::Program> mRestorations;
         struct ResultProgram { ESM::RefId topic, info; Interpreter::Program program; };
         std::vector<std::vector<ResultProgram>> mResults;

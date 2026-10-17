@@ -181,14 +181,12 @@ and deadlock prevention. Long activities belong to durable scopes, not global
 locks. Package completion is not quest completion. Solo owner disconnect suspends
 coherently; helpers may leave. Resume never resets progress, costs or rewards.
 
-**Party draft:** persistent opt-in membership coordinates compatible personal
-stories in one encounter. It does not merge histories. Validate relevant physical
+**Party addition (V96):** persistent opt-in membership coordinates compatible personal
+stories in one encounter without merging histories. Validate physical
 state, choices and prerequisites before enrollment; incompatible players catch up
-independently or join as helpers. Automatic merging of arbitrary progress is deferred.
-Enrollment delegates shared choices to a selected controller; dissenters withdraw
+independently or join as helpers. Enrollment delegates shared choices to a selected controller; dissenters withdraw
 or split safely before commitment. Helpers use real health/gear/resources and
-receive no story advancement/reward. Party size initially respects supported
-runtime limits; broader player scale remains M7.
+receive no story advancement/reward. Party size respects runtime limits; broader scale remains M7.
 
 Freeze participating characters/stories and membership revision for each causal
 step. Execute its shared physical outcome once; evaluate personal conditions,

@@ -508,6 +508,14 @@ namespace TES3MP::Native
         bool ownsPlayerPhysics() const noexcept override { return mBinding.mPlayerPhysics; }
         uint64_t physicalScope(PlayerId, const PreparedNativeInventory* = nullptr) const override;
         uint64_t sourceOpportunityOwner() const;
+        bool sourceOpportunityAllows(uint64_t player) const;
+        bool applyPartyEnrollment(uint64_t story, uint64_t partyId, PlayerId controller, PlayerId character,
+            bool helper, const NativeInventoryCommit& persist);
+        bool applyPartyLeave(uint64_t story, PlayerId actorPlayer, PlayerId targetPlayer, bool dissolve,
+            const NativeInventoryCommit& persist);
+        bool applyPartyDisconnect(uint64_t story, PlayerId player, const NativeInventoryCommit& persist);
+        bool applyPartyResume(uint64_t story, PlayerId player, bool asHelper, const NativeInventoryCommit& persist);
+        bool applyPartyController(uint64_t story, PlayerId newController, const NativeInventoryCommit& persist);
         bool hasStoryEncounters() const override { return mBinding.mPersonalScripts && mBinding.mPersonalScripts->encounters(); }
         bool hasStoryRelocations() const override { return mBinding.mPersonalScripts && mBinding.mPersonalScripts->relocations(); }
         std::optional<PlayerPhysicsBaseline> projectPlayerPhysics(const CanonicalServerState&, PlayerId,

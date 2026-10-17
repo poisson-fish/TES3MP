@@ -6956,6 +6956,7 @@ int main(int argc, char** argv)
                             || std::string_view(argv[1]) == "story-opportunities"
                             || std::string_view(argv[1]) == "story-health"
                             || std::string_view(argv[1]) == "story-npc-banks"
+                            || std::string_view(argv[1]) == "story-parties"
                             || std::string_view(argv[1]) == "dialogue-journal")))
                 || (std::string_view(argv[1]) == "mixed-passives" || std::string_view(argv[1]) == "harmful-passives"
                     || std::string_view(argv[1]) == "passive-stats" || std::string_view(argv[1]) == "passive-self")))

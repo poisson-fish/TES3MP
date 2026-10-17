@@ -52,7 +52,7 @@ newer lives resume once. Rejection/restart/stale-life/continuation:
 history only with bank/gameplay durability. Own/pre-quest credit, foreign/helper
 exclusion, stale-life rejection and retry/restart pass. V93 retains the oldest
 wait's next canonical opportunity until eligible credit; repeated foreign attacks
-cannot consume B's life. No new loot/lives. Live enrollment/summons remain closed.
+cannot consume B's life. No new loot/lives. Summons remain closed.
 Native: `build/logs/m5-life-event-{state,host-03,stock}.log`,
 `build/logs/m5-opportunity-{state,host-03}.log`.
 
@@ -62,22 +62,24 @@ client receipts: `build/logs/m5-wait-adapter.log`.
 Synthetic two-desktop V92–93 waiting/reserved/earned recovery:
 `build/m5-wait-v{92,93}-restart-credit-01/result.json`.
 
-**V94–95:** stock escort/travel; A/B independently arrive. V95 (`native-inventory-95`)
-unifies V85–95 (Disable/Enable/safe returns, relocation, activities, source-wait clocks,
-OnDeath and fair-opportunity reservations), binds placed `npc->mScript` into personal/shared
-banks (`fargoth`, `vodunius nuccius`, `TR_m1_T_Eldale`), supports per-story `EncounterBinding`
-targets in multi-cell/multi-actor scenes, and admits source-bank
+**V94–96:** stock escort/travel; A/B independently arrive. V95 (`native-inventory-95`)
+unifies V85–95, binds placed `npc->mScript` into personal/shared banks
+(`fargoth`, `vodunius nuccius`, `TR_m1_T_Eldale`), supports per-story `EncounterBinding`
+in multi-cell/multi-actor scenes, and admits source-bank
 GetJournalIndex/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
-foreign-NPC result ModDisposition and provenance GetItemCount/AddItem/RemoveItem
-(plus Function_Item) so a private story's NPC bank, timer,
-journal/cell/UI/activation/health/pose/item reads, staged item transfers,
-provenance receipts, scheduled departure removal, safe returns and pre-departure
-life-cursor coexist while public deaths/respawns leave the private scope untouched.
-Durable scopes, offline suspension and failed writes/restart preserve original lives/loot.
+foreign-NPC ModDisposition and provenance GetItemCount/AddItem/RemoveItem
+(plus Function_Item) so private NPC banks, timers, reads, item transfers/receipts,
+scheduled departure, safe returns and pre-departure life-cursors coexist across public
+deaths/respawns. V96 (`native-inventory-96`) adds persistent opt-in parties and live
+encounter enrollment: compatible/helper enrollment, late-join checks, delegated controller
+choices with dissent/physical-divergence split, per-character costs and
+stock-context rewards with durable `RewardReceipt`s, helper/party OnDeath credit and
+reservation sharing, offline suspension/leader-loss handoff, leave/kick/rejoin,
+and wire v4 `DialogueEncounterStatus`.
 Native: `build/logs/m5-{activity-host,departure-host}-final.log`,
 `build/logs/m5-activity-state-final.log`, `build/logs/m5-npc-bank-{state,script}.log`,
 `build/logs/m5-npc-state.log`, `build/logs/m5-dialogue-stock.log`, `build/logs/m5-quest-audit.log`,
-`build/logs/m5-multi-cell-build.log`.
+`build/logs/m5-multi-cell-build.log`, `build/logs/m5-parties-{adapter,dialogue,all-dialogue}.log`.
 
 **Next:** run unchanged Seyda Neen and TR (Duel of Riddles) real-content quest verification.
 Source/result preflights: `build/logs/m5-{seyda,tr}-quest-preflight.log`;

@@ -2495,6 +2495,7 @@ namespace
             disabledFargoth[0].last.sourceReference = 41;
             disabledFargoth[0].last.sourceLife = 1;
             disabledFargoth[0].last.physicalScope = 2;
+            disabledFargoth[0].npcs.push_back({41, 1, id("fargoth"), 50});
             auto enabledFargoth = multiPolicy.prepareReturn(disabledFargoth, 11, &fixture.content, 1);
             require(enabledFargoth.result.executed && enabledFargoth.state[0].encounterReturned
                 && enabledFargoth.state[0].encounterEnabled,
@@ -2595,12 +2596,404 @@ namespace
         require(journal.entries == 1 && journal.index == 5, "Unsupported scoped stock service mutated journal");
         std::cout << "dialogue stock: unchanged opcodes route unscoped callers to the stock journal and source actor\n";
     }
+
+    void parties(CredentialCrypto& crypto)
+    {
+        Fixture fixture(crypto, {}, true);
+        for (const char* itemName : {"ring_keley", "ring_nuccius", "tax record"})
+        {
+            ESM::Clothing item; item.blank(); item.mId = id(itemName);
+            item.mData.mType = ESM::Clothing::Ring; item.mData.mWeight = .1f; item.mData.mValue = 50;
+            fixture.content.insertStatic(item);
+        }
+        {
+            ESM::Miscellaneous gold; gold.blank(); gold.mId = id("gold_001");
+            gold.mData.mWeight = 0.f; gold.mData.mValue = 1;
+            fixture.content.insertStatic(gold);
+            ESM::NPC speaker; speaker.blank(); speaker.mId = id("speaker_party_r29");
+            speaker.mNpdt.mDisposition = 50;
+            speaker.mInventory.mList.push_back({100, id("gold_001")});
+            fixture.content.insertStatic(speaker);
+        }
+        MWWorld::ManualRef speakerRef(fixture.content, id("speaker_party_r29"));
+        Resolver resolver;
+        resolver.actor = speakerRef.getPtr();
+        resolver.player = fixture.actor.getPtr();
+
+        ESM::Global global; global.blank(); global.mId = id("personal_counter");
+        global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
+        std::vector<ESM::Script> bankScripts;
+        {
+            ESM::Script primary; primary.blank(); primary.mId = id("ledger_v63");
+            primary.mScriptText = "begin ledger_v63\nlong calls\nlong credit\nfloat timer\n"
+                "set calls to calls + 1\nset timer to timer + GetSecondsPassed\n"
+                "if ( OnDeath == 1 )\nset credit to credit + 1\nplayer->AddItem \"ring_keley\" 1\nendif\nend";
+            ESM::Script relay; relay.blank(); relay.mId = id("relay_n48");
+            relay.mScriptText = "begin relay_n48\nlong calls\nlong npcGold\n"
+                "set calls to calls + 1\nset npcGold to speaker_party_r29->GetItemCount \"gold_001\"\nend";
+            bankScripts = {primary, relay};
+        }
+        auto primaryScript = std::make_shared<SharedWorldScript>(
+            bankScripts[0], std::vector{global}, "parties-v96", crypto, bankScripts, id("speaker_party_r29"), true);
+        auto relayScript = std::make_shared<SharedWorldScript>(
+            bankScripts[1], std::vector{global}, "parties-v96", crypto, bankScripts, id("speaker_party_r29"), true);
+
+        std::vector<PersonalScripts::Definition> defs;
+        for (const uint64_t character : {11ull, 22ull})
+        {
+            auto dialogues = records();
+            auto& topic = dialogues[1];
+            topic.mInfo.clear();
+
+            // Stage 0 -> offers choices 7 ("Proceed") and 9 ("Diverge")
+            ESM::DialInfo stage0; stage0.blank(); stage0.mId = id("party_stage_0");
+            stage0.mActor = id("speaker_party_r29");
+            stage0.mSelects = {condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 0)};
+            stage0.mResponse = "Will your party proceed together?";
+            stage0.mResultScript = "Journal journey_t37 10\nChoice \"Proceed\" 7 \"Diverge\" 9";
+            topic.mInfo.push_back(stage0);
+
+            // Choice 7 -> costs 100 gold per character, depletes 20 NPC gold once, grants individual stock-context reward:
+            // High-tier if player carries tax record (250 gold + ring_nuccius), else standard-tier (150 gold + ring_nuccius)
+            ESM::DialInfo choice7High; choice7High.blank(); choice7High.mId = id("party_choice_7_high");
+            choice7High.mActor = id("speaker_party_r29");
+            choice7High.mSelects = {
+                condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 10),
+                condition(ESM::DialogueCondition::Function_Choice, "", 7),
+                condition(ESM::DialogueCondition::Function_Item, "tax record", 1)};
+            choice7High.mResponse = "Honored choice.";
+            choice7High.mResultScript = "Journal journey_t37 20\nplayer->RemoveItem \"gold_001\" 100\n"
+                "RemoveItem \"gold_001\" 20\nplayer->AddItem \"gold_001\" 250\nplayer->AddItem \"ring_nuccius\" 1";
+            topic.mInfo.push_back(choice7High);
+
+            ESM::DialInfo choice7Std; choice7Std.blank(); choice7Std.mId = id("party_choice_7_std");
+            choice7Std.mActor = id("speaker_party_r29");
+            choice7Std.mSelects = {
+                condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 10),
+                condition(ESM::DialogueCondition::Function_Choice, "", 7)};
+            choice7Std.mResponse = "Standard choice.";
+            choice7Std.mResultScript = "Journal journey_t37 20\nplayer->RemoveItem \"gold_001\" 100\n"
+                "RemoveItem \"gold_001\" 20\nplayer->AddItem \"gold_001\" 150\nplayer->AddItem \"ring_nuccius\" 1";
+            topic.mInfo.push_back(choice7Std);
+
+            // Choice 9 -> dissenting branch (advances to 30 without cost)
+            ESM::DialInfo choice9; choice9.blank(); choice9.mId = id("party_choice_9");
+            choice9.mActor = id("speaker_party_r29");
+            choice9.mSelects = {
+                condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 10),
+                condition(ESM::DialogueCondition::Function_Choice, "", 9)};
+            choice9.mResponse = "You go your own way.";
+            choice9.mResultScript = "Journal journey_t37 30";
+            topic.mInfo.push_back(choice9);
+
+            // Stage 20 -> physical divergence if lacking tax record, or shared escort if both have tax record
+            ESM::DialInfo stage20Escort; stage20Escort.blank(); stage20Escort.mId = id("party_stage_20_escort");
+            stage20Escort.mActor = id("speaker_party_r29");
+            stage20Escort.mSelects = {
+                condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 20),
+                condition(ESM::DialogueCondition::Function_Item, "tax record", 1)};
+            stage20Escort.mResponse = "Lead on.";
+            stage20Escort.mResultScript = "Journal journey_t37 40\nAiEscort player 0 320 -32 1";
+            topic.mInfo.push_back(stage20Escort);
+
+            ESM::DialInfo stage20Stay; stage20Stay.blank(); stage20Stay.mId = id("party_stage_20_stay");
+            stage20Stay.mActor = id("speaker_party_r29");
+            stage20Stay.mSelects = {condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 20)};
+            stage20Stay.mResponse = "Wait here.";
+            stage20Stay.mResultScript = "Journal journey_t37 30";
+            topic.mInfo.push_back(stage20Stay);
+
+            defs.push_back({character, 31, primaryScript, {{relayScript, true}}, true,
+                dialogues, PersonalScripts::EncounterBinding{41, id("speaker_party_r29"), id("room_e87")}});
+        }
+
+        PersonalScripts policy(7, defs, crypto, true, true, true, true, true, true, true, true, true, true, true, true);
+        auto initial = policy.initial();
+        MWMechanics::NpcStats speakerStats(fixture.content);
+        speakerStats.setBaseDisposition(50);
+
+        const auto runPartyIntent = [&](const PersonalScripts::State& before, uint64_t caller, uint64_t command,
+            int choice = -1, std::optional<std::span<const PersonalScripts::ItemBalance>> callerInv = {},
+            std::span<const PersonalScripts::ParticipantContext> participants = {}) {
+            const auto& inst = before[caller == 11 ? 0 : 1];
+            resolver.expected = inst.last;
+            ++resolver.expected.invocation;
+            resolver.expected.causalEvent = inst.eventCursor + 1;
+            resolver.expected.sourceReference = 41;
+            resolver.expected.sourceLife = 1;
+            resolver.sourceLife = 1;
+            return policy.prepareIntent(before, caller, command,
+                {31, 41, 1, inst.dialogueRevision, "passage_k61", choice},
+                "Room", fixture.content, resolver, 16, nullptr, {}, &speakerStats, JournalDate, callerInv, participants);
+        };
+
+        // 1. Late join & compatibility validation: advance 11 solo to stage 10 first.
+        auto soloAlice10 = runPartyIntent(initial, 11, 301);
+        require(soloAlice10.result.executed && soloAlice10.state[0].dialogue.quests.front().mState == 10
+            && soloAlice10.state[1].dialogue.quests.empty(), "Solo Alice stage 10 failed");
+        const auto incompatibleJoin = policy.preparePartyEnroll(soloAlice10.state, 31, 901, 11, 22, false);
+        require(incompatibleJoin.result.outcome == SharedWorldScript::Outcome::Rejected && incompatibleJoin.state.empty(),
+            "Incompatible late joiner admitted as full story participant");
+        auto helperJoin = policy.preparePartyEnroll(soloAlice10.state, 31, 901, 11, 22, true);
+        require(helperJoin.result.executed && helperJoin.state[0].party.partyId == 901
+            && helperJoin.state[0].party.controller == 11 && !helperJoin.state[0].party.helper
+            && helperJoin.state[1].party.partyId == 901 && helperJoin.state[1].party.controller == 11
+            && helperJoin.state[1].party.helper && helperJoin.state[1].dialogue.quests.empty()
+            && helperJoin.state[1].rewardReceipts.empty()
+            && policy.encode(policy.restore(helperJoin.image)) == helperJoin.image,
+            "Helper enrollment failed or merged incompatible quest history");
+        // Helper cannot drive shared dialogue.
+        require(runPartyIntent(helperJoin.state, 22, 302, 7).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Helper was allowed to drive party dialogue");
+
+        // 2. Compatible enrollment, controller delegation, and dissenting choice split.
+        auto enrolled0 = policy.preparePartyEnroll(initial, 31, 901, 11, 22, false);
+        require(enrolled0.result.executed && enrolled0.state[0].party.partyId == 901
+            && enrolled0.state[1].party.partyId == 901 && !enrolled0.state[1].party.helper
+            && enrolled0.state[0].party.partyRevision == 2 && enrolled0.state[1].party.partyRevision == 2,
+            "Compatible party enrollment at stage 0 failed");
+        // Non-controller 22 cannot initiate a new topic.
+        require(runPartyIntent(enrolled0.state, 22, 303, -1).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Non-controller initiated a shared party topic");
+        // Controller 11 advances both 11 and 22 to stage 10 with pending choices {7, 9}.
+        auto partyStage10 = runPartyIntent(enrolled0.state, 11, 304);
+        require(partyStage10.result.executed
+            && partyStage10.state[0].dialogue.quests.front().mState == 10
+            && partyStage10.state[1].dialogue.quests.front().mState == 10
+            && partyStage10.state[0].choices.size() == 2 && partyStage10.state[1].choices.size() == 2
+            && partyStage10.state[0].party.stepParticipants == std::vector<uint64_t>{11, 22}
+            && partyStage10.state[1].party.stepParticipants == std::vector<uint64_t>{11, 22}
+            && policy.encode(policy.restore(partyStage10.image)) == partyStage10.image,
+            "Party controller step did not advance both compatible participants to pending choice");
+        // Participant 22 disagrees and submits choice 9 -> splits safely before commitment!
+        auto bobDissented = runPartyIntent(partyStage10.state, 22, 305, 9);
+        require(bobDissented.result.executed
+            && bobDissented.state[1].party.partyId == 0 && bobDissented.state[1].party.separated
+            && bobDissented.state[1].party.partyRevision == 3
+            && bobDissented.state[1].dialogue.quests.front().mState == 30
+            && bobDissented.state[0].party.partyId == 901 && bobDissented.state[0].party.partyRevision == 3
+            && bobDissented.state[0].dialogue.quests.front().mState == 10
+            && policy.encode(policy.restore(bobDissented.image)) == bobDissented.image,
+            "Dissenting choice did not split dissenter safely before commitment");
+
+        // 3. Per-character costs, individual stock-context rewards, shared NPC depletion once, and durable RewardReceipts.
+        const std::array<PersonalScripts::ItemBalance, 2> aliceRich{{{id("gold_001"), 150}, {id("tax record"), 1}}};
+        const std::array<PersonalScripts::ItemBalance, 1> bobPoor{{{id("gold_001"), 40}}};
+        const std::array<PersonalScripts::ParticipantContext, 2> poorContexts{{
+            {11, nullptr, {}, std::span<const PersonalScripts::ItemBalance>(aliceRich)},
+            {22, nullptr, {}, std::span<const PersonalScripts::ItemBalance>(bobPoor)}}};
+        // Atomic rejection when participant 22 cannot pay the 100-gold personal cost.
+        const auto costFailure = runPartyIntent(partyStage10.state, 11, 306, 7,
+            std::span<const PersonalScripts::ItemBalance>(aliceRich), poorContexts);
+        require(costFailure.result.outcome == SharedWorldScript::Outcome::Rejected && costFailure.state.empty()
+            && costFailure.itemTransfers.empty(),
+            "Party step committed when a participant lacked personal cost items");
+
+        const std::array<PersonalScripts::ItemBalance, 1> bobEnough{{{id("gold_001"), 120}}};
+        const std::array<PersonalScripts::ParticipantContext, 2> validContexts{{
+            {11, nullptr, {}, std::span<const PersonalScripts::ItemBalance>(aliceRich)},
+            {22, nullptr, {}, std::span<const PersonalScripts::ItemBalance>(bobEnough)}}};
+        auto rewarded = runPartyIntent(partyStage10.state, 11, 307, 7,
+            std::span<const PersonalScripts::ItemBalance>(aliceRich), validContexts);
+        require(rewarded.result.executed
+            && rewarded.state[0].dialogue.quests.front().mState == 20
+            && rewarded.state[1].dialogue.quests.front().mState == 20
+            && rewarded.state[0].lastInfo == id("party_choice_7_high")
+            && rewarded.state[1].lastInfo == id("party_choice_7_std")
+            && rewarded.state[0].playerItems == std::vector<PersonalScripts::ItemBalance>{
+                {id("gold_001"), 300}, {id("tax record"), 1}, {id("ring_nuccius"), 1}}
+            && rewarded.state[1].playerItems == std::vector<PersonalScripts::ItemBalance>{
+                {id("gold_001"), 170}, {id("ring_nuccius"), 1}}
+            && rewarded.state[0].npcItems == std::vector<PersonalScripts::ItemBalance>{{id("gold_001"), 80}}
+            && rewarded.state[1].npcItems == std::vector<PersonalScripts::ItemBalance>{{id("gold_001"), 80}}
+            && rewarded.state[0].rewardReceipts.size() == 2
+            && rewarded.state[1].rewardReceipts.size() == 2
+            && rewarded.state[0].rewardReceipts[0].count == 250
+            && rewarded.state[1].rewardReceipts[0].count == 150
+            && policy.encode(policy.restore(rewarded.image)) == rewarded.image,
+            "Party step did not evaluate per-character costs/rewards or duplicated shared NPC depletion");
+
+        // Changing party or spending items cannot repay an already-earned RewardReceipt.
+        auto repayAttempt = rewarded.state;
+        repayAttempt[0].dialogue.quests.front().mState = 10;
+        repayAttempt[0].choices = partyStage10.state[0].choices;
+        repayAttempt[0].dialogueRequest = partyStage10.state[0].dialogueRequest;
+        repayAttempt[0].dialogueRevision = partyStage10.state[0].dialogueRevision;
+        repayAttempt[0].itemReceipts.clear();
+        repayAttempt = policy.preparePartyLeave(repayAttempt, 31, 11, 11, true).state;
+        require(runPartyIntent(repayAttempt, 11, 308, 7,
+                    std::span<const PersonalScripts::ItemBalance>(aliceRich)).result.outcome
+                == SharedWorldScript::Outcome::Rejected,
+            "Durable RewardReceipt allowed repayment after party dissolution and item-receipt clear");
+
+        // 4. Incompatible physical writes split safely before commitment (Alice starts escort, Bob stays in shared world).
+        auto splitPhysical = runPartyIntent(rewarded.state, 11, 309, -1,
+            std::span<const PersonalScripts::ItemBalance>(rewarded.state[0].playerItems), validContexts);
+        require(splitPhysical.result.executed
+            && splitPhysical.state[0].encounterLife == 1 && splitPhysical.state[0].activity
+            && PersonalScripts::physicalScope(splitPhysical.state, 11) == 2
+            && splitPhysical.state[1].encounterLife == 0 && !splitPhysical.state[1].activity
+            && splitPhysical.state[1].party.partyId == 0 && splitPhysical.state[1].party.separated
+            && PersonalScripts::physicalScope(splitPhysical.state, 22) == 1
+            && policy.encode(policy.restore(splitPhysical.image)) == splitPhysical.image,
+            "Incompatible physical writes did not split Bob safely before commitment");
+
+        // 5. Live helper enrollment inside Alice's private encounter scope + wire v4 status projection.
+        auto liveHelper = policy.preparePartyEnroll(splitPhysical.state, 31, 901, 11, 22, true);
+        require(liveHelper.result.executed
+            && liveHelper.state[1].party.partyId == 901 && liveHelper.state[1].party.helper
+            && liveHelper.state[1].party.sharedScope == 2
+            && PersonalScripts::physicalScope(liveHelper.state, 11) == 2
+            && PersonalScripts::physicalScope(liveHelper.state, 22) == 2
+            && PersonalScripts::relocation(liveHelper.state, 22) != nullptr
+            && *PersonalScripts::relocation(liveHelper.state, 22) == *PersonalScripts::relocation(liveHelper.state, 11)
+            && policy.encode(policy.restore(liveHelper.image)) == liveHelper.image,
+            "Live helper enrollment did not share private encounter physicalScope and relocation");
+        const auto helperView = PersonalScripts::view(liveHelper.state[1], *SessionId::fromValue(2),
+            SessionGeneration::initial(), ServerTick::initial(), CanonicalRevision::initial());
+        const auto encodedHelperView = encodeReliablePersonalDialogue(helperView);
+        require(helperView.encounter && helperView.encounter->partyId == 901
+            && helperView.encounter->controller == 11 && helperView.encounter->physicalScope == 2
+            && helperView.encounter->helper && helperView.encounter->separated
+            && !encodedHelperView.empty() && encodedHelperView[0] == std::byte{4}
+            && decodeReliablePersonalDialogue(encodedHelperView) == helperView,
+            "Wire v4 DialogueEncounterStatus failed to round-trip party ownership, separation, and helper status");
+
+        // 6. Helper OnDeath credit & fair-opportunity reservation: helper kill credits participant 11, never helper 22.
+        MWMechanics::NpcStats deadStats(fixture.content);
+        deadStats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 0), MWWorld::TimeStamp{});
+        MWMechanics::NpcStats privateStats(fixture.content);
+        privateStats.setHealth(MWMechanics::DynamicStat<float>(20, 10, 20), MWWorld::TimeStamp{});
+        ESM::Position pose{};
+        const std::array<PersonalScripts::PlayerInventory, 2> emptyInvs{{{11, {}}, {22, {}}}};
+        struct NoFallback final : MWScript::ReferenceResolver
+        {
+            MWWorld::Ptr resolve(const MWScript::ExecutionContext&, const ESM::RefId&, bool) const override
+            { throw std::runtime_error("Scheduled party test fell through"); }
+        } scheduledResolver;
+        const std::array<uint64_t, 2> both{11, 22};
+
+        // Life 1 dies to foreign player 33 while 11 is solo -> 11 defers into sourceWait and reserves life 2.
+        const std::array<PersonalScripts::LifeEvent, 1> foreignKillEvents{{{1, 1, 33, 1, 1, 33, 1, false}}};
+        PersonalScripts::Source foreignDeadSource{41, 1, 20, id("speaker_party_r29"), false, 33, 1, foreignKillEvents,
+            &deadStats, pose, &privateStats, false, false, 0, 0, false, 0, emptyInvs};
+        const std::array<uint64_t, 1> onlyAlice{11};
+        auto aliceWaiting = policy.prepareScheduled(initial, 1, onlyAlice, fixture.content, scheduledResolver, &foreignDeadSource);
+        require(aliceWaiting.result.executed && aliceWaiting.state[0].sourceWait
+            && aliceWaiting.state[0].reservedLife == 2,
+            "Foreign kill on life 1 did not defer 11 or reserve life 2");
+
+        // Enroll 22 as helper on 11's party -> reservation for life 2 allows both 11 and helper 22, blocks foreign 33.
+        auto waitState = policy.preparePartyEnroll(aliceWaiting.state, 31, 902, 11, 22, true).state;
+        require(PersonalScripts::reservationAllows(waitState, 2, 11, 41)
+            && PersonalScripts::reservationAllows(waitState, 2, 22, 41)
+            && !PersonalScripts::reservationAllows(waitState, 2, 33, 41),
+            "Reservation did not allow enrolled party helper or failed to block unenrolled player");
+
+        // Helper 22 kills reserved life 2 -> credits participant 11, clears 11's reservation, does not advance helper 22.
+        const std::array<PersonalScripts::LifeEvent, 2> helperKillEvents{{
+            {1, 1, 33, 1, 1, 33, 1, false},
+            {2, 2, 22, 1, 1, 22, 1, false}}};
+        PersonalScripts::Source deadSource{41, 2, 30, id("speaker_party_r29"), false, 22, 1, helperKillEvents,
+            &deadStats, pose, &privateStats, false, false, 0, 0, false, 0, emptyInvs};
+        auto afterHelperKill = policy.prepareScheduled(waitState, 2, both, fixture.content, scheduledResolver, &deadSource);
+        require(afterHelperKill.result.executed
+            && afterHelperKill.state[0].deathCursor == 2 && afterHelperKill.state[0].reservedLife == 0
+            && !afterHelperKill.state[0].sourceWait
+            && afterHelperKill.state[0].rewardReceipts.size() == 1
+            && afterHelperKill.state[0].playerItems == std::vector<PersonalScripts::ItemBalance>{{id("ring_keley"), 1}}
+            && afterHelperKill.state[1].deathCursor == 0 && afterHelperKill.state[1].rewardReceipts.empty()
+            && afterHelperKill.state[1].party.helperLives == std::vector<uint64_t>{2}
+            && policy.encode(policy.restore(afterHelperKill.image)) == afterHelperKill.image,
+            "Helper kill did not credit party participant 11 or wrongly advanced helper 22");
+        // Even after helper 22 leaves the party, life 2 cannot credit 22's personal story.
+        auto bobLeftAfterHelperKill = policy.preparePartyLeave(afterHelperKill.state, 31, 22, 22, false);
+        require(bobLeftAfterHelperKill.result.executed && bobLeftAfterHelperKill.state[1].party.partyId == 0
+            && PersonalScripts::physicalScope(bobLeftAfterHelperKill.state, 22) == 1,
+            "Helper leave failed");
+        const std::array<uint64_t, 1> onlyBob{22};
+        auto bobSoloAfterHelperKill = policy.prepareScheduled(
+            bobLeftAfterHelperKill.state, 3, onlyBob, fixture.content, scheduledResolver, &deadSource);
+        require(bobSoloAfterHelperKill.result.executed && bobSoloAfterHelperKill.state[1].sourceWait
+            && bobSoloAfterHelperKill.state[1].deathCursor == 0
+            && bobSoloAfterHelperKill.state[1].rewardReceipts.empty(),
+            "Former helper claimed personal OnDeath credit for a kill performed as a helper");
+
+        // 7. Disconnect, offline suspension, leader loss, controller selection, and leave/kick/rejoin.
+        auto partyForDisconnect = enrolled0.state;
+        // Member 22 disconnects -> 22 is suspended; 11 advances to stage 10 without 22.
+        auto bobDisconnected = policy.preparePartyDisconnect(partyForDisconnect, 31, 22);
+        require(bobDisconnected.result.executed && bobDisconnected.state[1].party.suspended
+            && bobDisconnected.state[0].party.controller == 11, "Member disconnect failed");
+        auto aliceAdvancesWhileBobOffline = runPartyIntent(bobDisconnected.state, 11, 310);
+        require(aliceAdvancesWhileBobOffline.result.executed
+            && aliceAdvancesWhileBobOffline.state[0].dialogue.quests.front().mState == 10
+            && aliceAdvancesWhileBobOffline.state[1].dialogue.quests.empty(),
+            "Offline suspended member was advanced during controller step");
+        // Bob cannot resume as compatible participant until catching up, but can resume as helper.
+        require(policy.preparePartyResume(aliceAdvancesWhileBobOffline.state, 31, 22, false).result.outcome
+                == SharedWorldScript::Outcome::Rejected,
+            "Incompatible reconnecting member resumed as full participant without catching up");
+        auto bobResumedHelper = policy.preparePartyResume(aliceAdvancesWhileBobOffline.state, 31, 22, true);
+        require(bobResumedHelper.result.executed && !bobResumedHelper.state[1].party.suspended
+            && bobResumedHelper.state[1].party.helper, "Reconnecting member could not resume as helper");
+
+        // Leader loss: in partyStage10 (both at stage 10), leader 11 disconnects -> controller becomes 0.
+        auto leaderLost = policy.preparePartyDisconnect(partyStage10.state, 31, 11);
+        require(leaderLost.result.executed && leaderLost.state[0].party.suspended
+            && leaderLost.state[0].party.controller == 0 && leaderLost.state[1].party.controller == 0,
+            "Leader disconnect did not clear party controller");
+        // Clear pending choice on 22 to represent safe boundary, verify step rejects before selecting controller, then select 22.
+        auto safeBoundaryState = leaderLost.state;
+        safeBoundaryState[1].choices.clear();
+        require(runPartyIntent(safeBoundaryState, 22, 311, -1).result.outcome == SharedWorldScript::Outcome::Rejected,
+            "Party progressed while leader was lost and no controller was selected");
+        auto newLeader = policy.preparePartyController(safeBoundaryState, 31, 22);
+        require(newLeader.result.executed && newLeader.state[1].party.controller == 22
+            && newLeader.state[0].party.controller == 22
+            && policy.encode(policy.restore(newLeader.image)) == newLeader.image,
+            "Remaining participant could not select a new controller at a safe boundary");
+
+        // Shared encounter + kick + rejoin + independent continuation.
+        const std::array<PersonalScripts::ParticipantContext, 2> bothRichContexts{{
+            {11, nullptr, {}, std::span<const PersonalScripts::ItemBalance>(aliceRich)},
+            {22, nullptr, {}, std::span<const PersonalScripts::ItemBalance>(aliceRich)}}};
+        auto bothEscort = runPartyIntent(rewarded.state, 11, 312, -1,
+            std::span<const PersonalScripts::ItemBalance>(aliceRich), bothRichContexts);
+        require(bothEscort.result.executed
+            && bothEscort.state[0].encounterLife == 1 && bothEscort.state[1].encounterLife == 1
+            && PersonalScripts::physicalScope(bothEscort.state, 11) == 2
+            && PersonalScripts::physicalScope(bothEscort.state, 22) == 2,
+            "Compatible party escort did not place both participants into shared encounter scope 2");
+        // Controller 11 kicks 22 -> 11 stays in scope 2, 22 separates into scope 3, both retain progress/rewards.
+        auto bobKicked = policy.preparePartyLeave(bothEscort.state, 31, 11, 22, false);
+        require(bobKicked.result.executed
+            && bobKicked.state[1].party.partyId == 0 && bobKicked.state[1].party.separated
+            && PersonalScripts::physicalScope(bobKicked.state, 11) == 2
+            && PersonalScripts::physicalScope(bobKicked.state, 22) == 3
+            && bobKicked.state[1].rewardReceipts.size() == 2
+            && policy.encode(policy.restore(bobKicked.image)) == bobKicked.image,
+            "Controller kick inside encounter did not isolate scopes or preserve rewards");
+        // Compatible rejoin inside the encounter restores shared scope 2.
+        auto bobRejoined = policy.preparePartyEnroll(bobKicked.state, 31, 901, 11, 22, false);
+        require(bobRejoined.result.executed
+            && bobRejoined.state[1].party.partyId == 901 && !bobRejoined.state[1].party.separated
+            && PersonalScripts::physicalScope(bobRejoined.state, 11) == 2
+            && PersonalScripts::physicalScope(bobRejoined.state, 22) == 2
+            && bobRejoined.state[1].rewardReceipts.size() == 2
+            && policy.encode(policy.restore(bobRejoined.image)) == bobRejoined.image,
+            "Compatible rejoin inside encounter failed");
+
+        std::cout << "parties: compatible/helper enrollment, late join, controller delegation, dissenting choice split, "
+            "per-character costs/rewards, durable reward receipts, incompatible physical split, helper/party OnDeath, "
+            "offline suspension/leader loss, controller selection, leave/kick/rejoin and exact recovery\n";
+    }
 }
 int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|npc-state|encounter|enable|substitutions|journal");
+        require(argc == 2, "Usage: tes3mp_native_dialogue_tests isolation|rollback|recovery|stock|intents|client|player-stats|disposition|npc-state|encounter|enable|substitutions|journal|parties");
         MWClass::registerClasses(); auto crypto = TES3MP::makeProductionCredentialCrypto(); require(bool(crypto), "Crypto unavailable");
         const std::string_view filter = argv[1];
         if (filter == "isolation") isolation(*crypto);
@@ -2619,6 +3012,7 @@ int main(int argc, char** argv)
         else if (filter == "enable") encounter(*crypto, true);
         else if (filter == "activities") activities(*crypto);
         else if (filter == "npc-banks") npcBanks(*crypto);
+        else if (filter == "parties") parties(*crypto);
         else if (filter == "relocation") relocation(*crypto);
         else if (filter == "relocation-return") relocation(*crypto, true);
         else if (filter == "source-waits") sourceWaits(*crypto);

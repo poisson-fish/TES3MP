@@ -5596,7 +5596,8 @@ namespace TES3MP::Native::Testing
         const bool dialogueDisposition = effectFamily == "dialogue-disposition";
         const bool dialogueJournal = effectFamily == "dialogue-journal";
         const bool storyEnable = effectFamily == "story-enable";
-        const bool npcBanks = effectFamily == "story-npc-banks";
+        const bool storyParties = effectFamily == "story-parties";
+        const bool npcBanks = storyParties || effectFamily == "story-npc-banks";
         const bool healthReads = npcBanks || effectFamily == "story-health";
         const bool fairOpportunities = healthReads || effectFamily == "story-opportunities";
         const bool lifeEvents = fairOpportunities || effectFamily == "story-life-events";
@@ -9427,7 +9428,7 @@ namespace TES3MP::Native::Testing
         const auto descriptor = scratch / "native.txt";
         {
             std::ofstream out(descriptor);
-            out << (npcBanks ? "native-inventory-95\nmanifest " : storyActivity ? "native-inventory-94\nmanifest " : fairOpportunities                            ? "native-inventory-93\nmanifest "
+            out << (storyParties ? "native-inventory-96\nmanifest " : npcBanks ? "native-inventory-95\nmanifest " : storyActivity ? "native-inventory-94\nmanifest " : fairOpportunities                            ? "native-inventory-93\nmanifest "
                 : lifeEvents                                    ? "native-inventory-92\nmanifest "
                 : sourceWaits                                  ? "native-inventory-91\nmanifest "
                 : storyRelocationReturn                        ? "native-inventory-90\nmanifest "
@@ -10118,6 +10119,133 @@ namespace TES3MP::Native::Testing
                         }
                         if (!lifeEvents) std::cout << "source waits host: A's stock melee death; coherent wait/clock/bank rollback; "
                             "failed death and respawn writes; silent reconnect/restart; new-life single resume, no quest credit\n";
+                        return;
+                    }
+                    if (storyParties)
+                    {
+                        require(policy->parties() && policy->npcBanks() && policy->activities() && policy->relocations()
+                            && policy->returns() && policy->enables() && policy->sourceWaits() && policy->lifeEvents()
+                            && policy->fairOpportunities(),
+                            "V96 party policy absent");
+                        auto established = records;
+                        for (size_t i = 0; i < 2; ++i)
+                        {
+                            established[i].characterProfile = completed[i];
+                            established[i].savedPlayer = authority.players()[i];
+                        }
+                        auto establishedRegistry = std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+                            PlayerIdentityRegistry::create(*crypto, storage, established));
+                        const auto original = image(service);
+                        std::vector<std::byte> proposed;
+
+                        // 1. Atomic enrollment rejection and commit with InventoryHost recovery.
+                        require(!native.applyPartyEnrollment(91, 501, id<PlayerId>(1), id<PlayerId>(2), false,
+                                    [&](auto bytes) {
+                                        proposed.assign(bytes.begin(), bytes.end());
+                                        return CanonicalDurabilityResult::Rejected;
+                                    })
+                            && image(service) == original,
+                            "Rejected party enrollment mutated service state");
+                        require(native.applyPartyEnrollment(91, 501, id<PlayerId>(1), id<PlayerId>(2), false,
+                                    [&](auto bytes) {
+                                        proposed.assign(bytes.begin(), bytes.end());
+                                        return CanonicalDurabilityResult::Committed;
+                                    })
+                            && image(service) == proposed
+                            && state(service)[0].party.partyId == 501 && state(service)[1].party.partyId == 501
+                            && state(service)[0].party.controller == 1 && state(service)[1].party.controller == 1
+                            && !state(service)[1].party.helper,
+                            "Compatible party enrollment failed");
+                        {
+                            InventoryHost enrolledRestart(descriptor, manifest, *establishedRegistry, *crypto, proposed);
+                            require(image(enrolledRestart.service()) == proposed,
+                                "Party enrollment failed exact InventoryHost recovery");
+                        }
+
+                        // 2. Non-controller cannot initiate shared dialogue step; controller advances both into shared scope 2.
+                        require(!prepare(native, 5, 2, 101, request),
+                            "Non-controller was permitted to initiate shared party dialogue");
+                        auto pending = prepare(native, 5, 1, 101, request);
+                        require(pending
+                            && native.physicalScope(id<PlayerId>(1), pending.get()) == 2
+                            && native.physicalScope(id<PlayerId>(2), pending.get()) == 2,
+                            "Party dialogue step did not place both compatible participants into shared encounter scope 2");
+                        const auto viewA = native.projectPersonalDialogue(
+                            authority, id<SessionId>(1), id<ServerTick>(5), id<CanonicalRevision>(5), pending.get());
+                        const auto viewB = native.projectPersonalDialogue(
+                            authority, id<SessionId>(2), id<ServerTick>(5), id<CanonicalRevision>(5), pending.get());
+                        require(viewA.size() == 2 && viewB.size() == 2
+                            && viewA[0].encounter && viewB[0].encounter
+                            && viewA[0].encounter->partyId == 501 && viewB[0].encounter->partyId == 501
+                            && viewA[0].encounter->controller == 1 && viewB[0].encounter->controller == 1
+                            && viewA[0].encounter->physicalScope == 2 && viewB[0].encounter->physicalScope == 2
+                            && !viewA[0].encounter->helper && !viewB[0].encounter->helper
+                            && !viewA[0].encounter->separated && !viewB[0].encounter->separated
+                            && !viewA[0].response.empty() && viewB[0].response == viewA[0].response,
+                            "Party dialogue projection did not publish wire v4 encounter ownership and responses to both members");
+                        const auto spatial = ServerApp::projectInterestViews(
+                            authority, id<ServerTick>(5), id<CanonicalRevision>(5), true, &native, pending.get());
+                        require(spatial && spatial->size() == 2
+                            && (*spatial)[0].second.view().entries().size() == 2
+                            && (*spatial)[1].second.view().entries().size() == 2,
+                            "Shared party encounter scope hid co-enrolled party members from each other");
+                        require(pending->commit([&](auto bytes) {
+                                    proposed.assign(bytes.begin(), bytes.end());
+                                    return CanonicalDurabilityResult::Committed;
+                                }) == CanonicalDurabilityResult::Committed
+                            && state(service)[0].activity && state(service)[1].activity
+                            && state(service)[0].rewardReceipts.size() == 2
+                            && state(service)[1].rewardReceipts.size() == 2,
+                            "Party dialogue step did not commit activities and durable reward receipts for both members");
+
+                        // 3. Shared escort activity steps once per tick for the party and updates both members.
+                        auto step1 = native.prepareNativePlayerTick(authority, id<ServerTick>(6), 1.f / 30, {}, &world, {}, {});
+                        require(step1
+                            && step1->commit([&](auto bytes) {
+                                   proposed.assign(bytes.begin(), bytes.end());
+                                   return CanonicalDurabilityResult::Committed;
+                               }) == CanonicalDurabilityResult::Committed
+                            && state(service)[0].activity->steps == 1
+                            && state(service)[1].activity->steps == 1
+                            && state(service)[0].relocation == state(service)[1].relocation,
+                            "Shared party escort step did not advance once for both members");
+
+                        // 4. Leave/kick inside encounter separates scopes (2 and 3) while preserving rewards and recovery.
+                        require(native.applyPartyLeave(91, id<PlayerId>(1), id<PlayerId>(2), false,
+                                    [&](auto bytes) {
+                                        proposed.assign(bytes.begin(), bytes.end());
+                                        return CanonicalDurabilityResult::Committed;
+                                    })
+                            && native.physicalScope(id<PlayerId>(1)) == 2
+                            && native.physicalScope(id<PlayerId>(2)) == 3
+                            && state(service)[1].party.separated
+                            && state(service)[1].rewardReceipts.size() == 2,
+                            "Controller kick in encounter did not separate scopes or preserve rewards");
+                        {
+                            InventoryHost splitRestart(descriptor, manifest, *establishedRegistry, *crypto, proposed);
+                            require(image(splitRestart.service()) == proposed,
+                                "Separated encounter party state failed exact InventoryHost recovery");
+                        }
+
+                        // 5. Rejoin as helper shares scope 2 and allows reservation combat access.
+                        require(native.applyPartyEnrollment(91, 501, id<PlayerId>(1), id<PlayerId>(2), true,
+                                    [&](auto bytes) {
+                                        proposed.assign(bytes.begin(), bytes.end());
+                                        return CanonicalDurabilityResult::Committed;
+                                    })
+                            && native.physicalScope(id<PlayerId>(1)) == 2
+                            && native.physicalScope(id<PlayerId>(2)) == 2
+                            && state(service)[1].party.helper
+                            && native.sourceOpportunityAllows(1) && native.sourceOpportunityAllows(2),
+                            "Live helper enrollment did not share scope 2 or allow reservation access");
+                        {
+                            InventoryHost helperRestart(descriptor, manifest, *establishedRegistry, *crypto, proposed);
+                            require(image(helperRestart.service()) == proposed,
+                                "Live helper enrollment failed exact InventoryHost recovery");
+                        }
+                        std::cout << "story parties host: compatible/helper enrollment, controller delegation, shared encounter scope, "
+                            "per-character costs/rewards with durable receipts, shared escort stepping, kick/leave scope separation, "
+                            "and exact InventoryHost recovery\n";
                         return;
                     }
                     if (storyActivity)
