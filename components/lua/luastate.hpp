@@ -38,6 +38,10 @@ namespace LuaUtil
     };
 
     class LuaState;
+    template <class Function>
+    [[nodiscard]] int invokeProtectedCall(
+        lua_State* luaState, Function&& function, std::exception_ptr* capturedException = nullptr);
+
     class LuaView
     {
         sol::state_view mSol;
@@ -51,7 +55,7 @@ namespace LuaUtil
 
     public:
         template <class Function>
-        friend int invokeProtectedCall(lua_State*, Function&&);
+        friend int invokeProtectedCall(lua_State*, Function&&, std::exception_ptr*);
         // Returns underlying sol::state.
         sol::state_view& sol() { return mSol; }
 
@@ -71,24 +75,37 @@ namespace LuaUtil
     // Pushing to the stack from outside a Lua context crashes the engine if no memory can be allocated to grow the
     // stack
     template <class Function>
-    [[nodiscard]] int invokeProtectedCall(lua_State* luaState, Function&& function)
+    [[nodiscard]] int invokeProtectedCall(
+        lua_State* luaState, Function&& function, std::exception_ptr* capturedException)
     {
-        if (!lua_checkstack(luaState, 2))
+        if (!lua_checkstack(luaState, 3))
             return LUA_ERRMEM;
         lua_pushcfunction(luaState, [](lua_State* state) {
             void* f = lua_touserdata(state, 1);
+            auto* captured = static_cast<std::exception_ptr*>(lua_touserdata(state, 2));
             LuaView view(state);
-            (*static_cast<Function*>(f))(view);
+            try
+            {
+                (*static_cast<Function*>(f))(view);
+            }
+            catch (...)
+            {
+                if (captured)
+                    *captured = std::current_exception();
+                throw;
+            }
             return 0;
         });
         lua_pushlightuserdata(luaState, &function);
-        return lua_pcall(luaState, 1, 0, 0);
+        lua_pushlightuserdata(luaState, capturedException);
+        return lua_pcall(luaState, 2, 0, 0);
     }
 
     template <class Lambda>
     void protectedCall(lua_State* luaState, Lambda&& f)
     {
-        int result = invokeProtectedCall(luaState, std::forward<Lambda>(f));
+        std::exception_ptr captured;
+        int result = invokeProtectedCall(luaState, std::forward<Lambda>(f), &captured);
         switch (result)
         {
             case LUA_OK:
@@ -98,11 +115,16 @@ namespace LuaUtil
             case LUA_ERRRUN:
             {
                 sol::optional<std::string> error = sol::stack::check_get<std::string>(luaState);
+                lua_pop(luaState, 1);
+                if (captured)
+                    std::rethrow_exception(captured);
                 if (error)
                     throw std::runtime_error(*error);
             }
                 [[fallthrough]];
             default:
+                if (captured)
+                    std::rethrow_exception(captured);
                 throw std::runtime_error("Lua error: " + std::to_string(result));
         }
     }
@@ -130,8 +152,26 @@ namespace LuaUtil
         template <class Lambda>
         void protectedCall(Lambda&& f) const
         {
-            LuaUtil::protectedCall(mSol.lua_state(), std::forward<Lambda>(f));
+            try
+            {
+                LuaUtil::protectedCall(mSol.lua_state(), std::forward<Lambda>(f));
+            }
+            catch (...)
+            {
+                rethrowIfPendingException();
+                throw;
+            }
         }
+
+        void capturePendingException(std::exception_ptr e) const noexcept { mPendingException = std::move(e); }
+        bool hasPendingException() const noexcept { return static_cast<bool>(mPendingException); }
+        void clearPendingException() const noexcept { mPendingException = nullptr; }
+        void rethrowIfPendingException() const
+        {
+            if (mPendingException)
+                std::rethrow_exception(std::exchange(mPendingException, nullptr));
+        }
+        static LuaState* fromState(lua_State* state) noexcept;
 
         // Note that constructing a sol::state_view is only safe from a Lua context. Use protectedCall to get one
         lua_State* unsafeState() const { return mSol.lua_state(); }
@@ -224,6 +264,7 @@ namespace LuaUtil
         std::map<std::string, sol::object> mCommonPackages;
         const VFS::Manager* mVFS;
         std::vector<std::filesystem::path> mLibSearchPaths;
+        mutable std::exception_ptr mPendingException;
 
         static bool sProfilerEnabled;
     };

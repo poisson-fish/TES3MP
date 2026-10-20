@@ -53,24 +53,30 @@ namespace LuaUtil
 
     void LuaStorage::Section::runCallbacks(sol::optional<std::string_view> changedKey)
     {
+        struct Guard
+        {
+            LuaStorage* storage;
+            const Section* section;
+            ~Guard() { storage->mRunningCallbacks.erase(section); }
+        } guard{ mStorage, this };
         mStorage->mRunningCallbacks.insert(this);
-        mCallbacks.erase(std::remove_if(mCallbacks.begin(), mCallbacks.end(),
-                             [&](const Callback& callback) {
-                                 bool valid = callback.isValid();
-                                 if (valid)
-                                     callback.tryCall(mSectionName, changedKey);
-                                 return !valid;
-                             }),
-            mCallbacks.end());
-        mMenuScriptsCallbacks.erase(std::remove_if(mMenuScriptsCallbacks.begin(), mMenuScriptsCallbacks.end(),
-                                        [&](const Callback& callback) {
-                                            bool valid = callback.isValid();
-                                            if (valid)
-                                                callback.tryCall(mSectionName, changedKey);
-                                            return !valid;
-                                        }),
-            mMenuScriptsCallbacks.end());
-        mStorage->mRunningCallbacks.erase(this);
+        auto run = [&](std::vector<Callback>& callbacks) {
+            callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(),
+                                 [&](const Callback& callback) {
+                                     bool valid = callback.isValid();
+                                     if (valid)
+                                     {
+                                         if (mStorage->mStrict)
+                                             callback.call(mSectionName, changedKey);
+                                         else
+                                             callback.tryCall(mSectionName, changedKey);
+                                     }
+                                     return !valid;
+                                 }),
+                callbacks.end());
+        };
+        run(mCallbacks);
+        run(mMenuScriptsCallbacks);
     }
 
     void LuaStorage::Section::throwIfCallbackRecursionIsTooDeep()
@@ -85,8 +91,13 @@ namespace LuaUtil
 
     void LuaStorage::Section::set(std::string_view key, const sol::object& value)
     {
-        checkIfActive();
+        checkIfActive(false);
+        if (mStorage->mStrict
+            && (mSectionName.empty() || mSectionName.size() > 128 || mSectionName.find('\0') != std::string::npos
+                || key.empty() || key.size() > 128 || key.find('\0') != std::string_view::npos))
+            throw std::invalid_argument("Storage section/key name exceeds bounds");
         throwIfCallbackRecursionIsTooDeep();
+        auto previous = mValues;
         if (value != sol::nil)
             mValues[std::string(key)] = Value(value);
         else
@@ -95,24 +106,51 @@ namespace LuaUtil
             if (it != mValues.end())
                 mValues.erase(it);
         }
-        if (mStorage->mListener)
-            mStorage->mListener->valueChanged(mSectionName, key, value);
-        runCallbacks(key);
+        try
+        {
+            if (mStorage->mListener)
+                mStorage->mListener->valueChanged(mSectionName, key, value);
+            runCallbacks(key);
+        }
+        catch (...)
+        {
+            if (mStorage->mStrict)
+                mValues.swap(previous);
+            throw;
+        }
     }
 
     void LuaStorage::Section::setAll(const sol::optional<sol::table>& values)
     {
-        checkIfActive();
+        checkIfActive(false);
+        if (mStorage->mStrict
+            && (mSectionName.empty() || mSectionName.size() > 128 || mSectionName.find('\0') != std::string::npos))
+            throw std::invalid_argument("Storage section name exceeds bounds");
         throwIfCallbackRecursionIsTooDeep();
-        mValues.clear();
+        std::map<std::string, Value, std::less<>> staged;
         if (values)
         {
             for (const auto& [k, v] : *values)
-                mValues[cast<std::string>(k)] = Value(v);
+            {
+                std::string key = cast<std::string>(k);
+                if (mStorage->mStrict && (key.empty() || key.size() > 128 || key.find('\0') != std::string::npos))
+                    throw std::invalid_argument("Storage key name exceeds bounds");
+                staged[std::move(key)] = Value(v);
+            }
         }
-        if (mStorage->mListener)
-            mStorage->mListener->sectionReplaced(mSectionName, values);
-        runCallbacks(sol::nullopt);
+        mValues.swap(staged);
+        try
+        {
+            if (mStorage->mListener)
+                mStorage->mListener->sectionReplaced(mSectionName, values);
+            runCallbacks(sol::nullopt);
+        }
+        catch (...)
+        {
+            if (mStorage->mStrict)
+                mValues.swap(staged);
+            throw;
+        }
     }
 
     sol::table LuaStorage::Section::asTable(lua_State* state)
@@ -136,15 +174,20 @@ namespace LuaUtil
         sview["asTable"]
             = [](sol::this_state lua, const SectionView& section) { return section.mSection->asTable(lua); };
         sview["subscribe"] = [](const SectionView& section, const sol::table& callback) {
+            section.mSection->checkIfActive(true);
+            Callback cb = Callback::fromLua(callback);
+            if (section.mSection->mStorage->mStrict)
+            {
+                sol::optional<ScriptId> scriptId = cb.mHiddenData[ScriptsContainer::sScriptIdKey];
+                if (scriptId && scriptId->mContainer)
+                    scriptId->mContainer->validateContext();
+            }
             std::vector<Callback>& callbacks
                 = section.mForMenuScripts ? section.mSection->mMenuScriptsCallbacks : section.mSection->mCallbacks;
-            if (!callbacks.empty() && callbacks.size() == callbacks.capacity())
-            {
-                callbacks.erase(
-                    std::remove_if(callbacks.begin(), callbacks.end(), [&](const Callback& c) { return !c.isValid(); }),
-                    callbacks.end());
-            }
-            callbacks.push_back(Callback::fromLua(callback));
+            callbacks.erase(
+                std::remove_if(callbacks.begin(), callbacks.end(), [&](const Callback& c) { return !c.isValid(); }),
+                callbacks.end());
+            callbacks.push_back(std::move(cb));
         };
         sview["reset"] = [](const SectionView& section, const sol::optional<sol::table>& newValues) {
             if (section.mReadOnly)
@@ -154,11 +197,13 @@ namespace LuaUtil
         sview["removeOnExit"] = [](const SectionView& section) {
             if (section.mReadOnly)
                 throw std::runtime_error("Access to storage is read only");
+            section.mSection->checkIfActive(false);
             section.mSection->mLifeTime = Section::Temporary;
         };
         sview["setLifeTime"] = [](const SectionView& section, Section::LifeTime lifeTime) {
             if (section.mReadOnly)
                 throw std::runtime_error("Access to storage is read only");
+            section.mSection->checkIfActive(false);
             section.mSection->mLifeTime = lifeTime;
         };
         sview["set"] = [](const SectionView& section, std::string_view key, const sol::object& value) {
@@ -278,15 +323,122 @@ namespace LuaUtil
         }
     }
 
-    void LuaStorage::save(lua_State* state, const std::filesystem::path& path) const
+    std::string LuaStorage::save(lua_State* state) const
     {
+        validateAccess(true);
         sol::table data(state, sol::create);
         for (const auto& [sectionName, section] : mData)
         {
             if (section->mLifeTime == Section::Persistent && !section->mValues.empty())
                 data[sectionName] = section->asTable(state);
         }
-        std::string serializedData = serialize(data);
+        return serialize(data);
+    }
+
+    void LuaStorage::load(lua_State* state, std::string_view binaryData)
+    {
+        validateAccess(false);
+        if (binaryData.empty())
+            throw std::runtime_error("Storage data has zero length");
+        sol::table data = cast<sol::table>(deserialize(state, binaryData));
+        Snapshot staged = snapshot();
+        for (auto& [_, sec] : staged)
+            sec.mValues.clear();
+        for (const auto& [sectionNameObj, sectionTableObj] : data)
+        {
+            std::string_view sectionName = cast<std::string_view>(sectionNameObj);
+            if (mStrict
+                && (sectionName.empty() || sectionName.size() > 128
+                    || sectionName.find('\0') != std::string_view::npos))
+                throw std::invalid_argument("Storage section name exceeds bounds");
+            sol::table sectionTable = cast<sol::table>(sectionTableObj);
+            auto& secSnap = staged[std::string(sectionName)];
+            for (const auto& [keyObj, valueObj] : sectionTable)
+            {
+                std::string_view key = cast<std::string_view>(keyObj);
+                if (mStrict && (key.empty() || key.size() > 128 || key.find('\0') != std::string_view::npos))
+                    throw std::invalid_argument("Storage key name exceeds bounds");
+                secSnap.mValues[std::string(key)] = serialize(valueObj);
+            }
+        }
+        restore(staged);
+    }
+
+    LuaStorage::Snapshot LuaStorage::snapshot() const
+    {
+        Snapshot result;
+        for (const auto& [sectionName, section] : mData)
+        {
+            SectionSnapshot entry;
+            entry.mLifeTime = static_cast<int>(section->mLifeTime);
+            for (const Callback& c : section->mCallbacks)
+                if (c.isValid())
+                    entry.mCallbacks.push_back(c);
+            for (const Callback& c : section->mMenuScriptsCallbacks)
+                if (c.isValid())
+                    entry.mMenuScriptsCallbacks.push_back(c);
+            for (const auto& [k, v] : section->mValues)
+                entry.mValues.emplace(k, v.serialized());
+            result.emplace(sectionName, std::move(entry));
+        }
+        return result;
+    }
+
+    void LuaStorage::restore(const Snapshot& saved)
+    {
+        mRunningCallbacks.clear();
+        for (auto it = mData.begin(); it != mData.end();)
+        {
+            if (!saved.contains(it->first))
+            {
+                it->second->mValues.clear();
+                it->second->mCallbacks.clear();
+                it->second->mMenuScriptsCallbacks.clear();
+                it->second->mLifeTime = Section::Persistent;
+                it = mData.erase(it);
+            }
+            else
+                ++it;
+        }
+        auto restoreCallbacks = [](std::vector<Callback>& target, const std::vector<Callback>& snap) {
+            const bool snapHasValid
+                = std::any_of(snap.begin(), snap.end(), [](const Callback& c) { return c.isValid(); });
+            if (snapHasValid || snap.empty())
+            {
+                target.clear();
+                for (const Callback& c : snap)
+                    if (c.isValid())
+                        target.push_back(c);
+            }
+            else
+            {
+                target.erase(
+                    std::remove_if(target.begin(), target.end(), [](const Callback& c) { return !c.isValid(); }),
+                    target.end());
+            }
+        };
+        for (const auto& [sectionName, secSnap] : saved)
+        {
+            auto it = mData.find(sectionName);
+            if (it == mData.end())
+            {
+                auto section = std::make_shared<Section>(this, sectionName);
+                std::string_view view = section->mSectionName;
+                it = mData.emplace(view, std::move(section)).first;
+            }
+            Section& section = *it->second;
+            section.mLifeTime = static_cast<Section::LifeTime>(secSnap.mLifeTime);
+            restoreCallbacks(section.mCallbacks, secSnap.mCallbacks);
+            restoreCallbacks(section.mMenuScriptsCallbacks, secSnap.mMenuScriptsCallbacks);
+            section.mValues.clear();
+            for (const auto& [k, serialized] : secSnap.mValues)
+                section.mValues.emplace(k, Value(serialized));
+        }
+    }
+
+    void LuaStorage::save(lua_State* state, const std::filesystem::path& path) const
+    {
+        std::string serializedData = save(state);
         Log(Debug::Info) << "Saving Lua storage \"" << path << "\" (" << serializedData.size() << " bytes)";
         std::ofstream fout(path, std::fstream::binary);
         fout.write(serializedData.data(), serializedData.size());
@@ -296,6 +448,9 @@ namespace LuaUtil
     const std::shared_ptr<LuaStorage::Section>& LuaStorage::getSection(std::string_view sectionName)
     {
         checkIfActive();
+        if (mStrict
+            && (sectionName.empty() || sectionName.size() > 128 || sectionName.find('\0') != std::string_view::npos))
+            throw std::invalid_argument("Storage section name exceeds bounds");
         auto it = mData.find(sectionName);
         if (it != mData.end())
             return it->second;
@@ -308,14 +463,14 @@ namespace LuaUtil
     sol::object LuaStorage::getSection(
         lua_State* state, std::string_view sectionName, bool readOnly, bool forMenuScripts)
     {
-        checkIfActive();
+        validateAccess(readOnly);
         const std::shared_ptr<Section>& section = getSection(sectionName);
         return sol::make_object<SectionView>(state, SectionView{ section, readOnly, forMenuScripts });
     }
 
     sol::table LuaStorage::getAllSections(lua_State* state, bool readOnly)
     {
-        checkIfActive();
+        validateAccess(readOnly);
         sol::table res(state, sol::create);
         for (const auto& [sectionName, _] : mData)
             res[sectionName] = getSection(state, sectionName, readOnly);

@@ -346,6 +346,16 @@ namespace MWLua
             objectT[sol::meta_function::equal_to] = [](const ObjectT& a, const ObjectT& b) { return a.id() == b.id(); };
             objectT[sol::meta_function::to_string] = &ObjectT::toString;
             objectT["sendEvent"] = [context](const ObjectT& dest, std::string eventName, const sol::object& eventData) {
+                if (context.isScoped())
+                {
+                    context.withScoped([&](MWScript::InterpreterContext&) {
+                        if (!dest.ptrOrEmpty().isEmpty())
+                            (void)dest.ptr();
+                        context.mLuaEvents->addLocalEvent(
+                            { dest.id(), std::move(eventName), LuaUtil::serialize(eventData, context.mSerializer) });
+                    });
+                    return;
+                }
                 context.mLuaEvents->addLocalEvent(
                     { dest.id(), std::move(eventName), LuaUtil::serialize(eventData, context.mSerializer) });
             };

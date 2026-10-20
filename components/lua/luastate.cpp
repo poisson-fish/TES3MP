@@ -60,8 +60,20 @@ namespace LuaUtil
     static const std::string safePackages[] = { "coroutine", "math", "string", "table", "utf8" };
 
     static constexpr int64_t countHookStep = 1000;
+    static const char sLuaStateRegistryKey = 0;
 
     bool LuaState::sProfilerEnabled = true;
+
+    LuaState* LuaState::fromState(lua_State* state) noexcept
+    {
+        if (!state)
+            return nullptr;
+        lua_pushlightuserdata(state, const_cast<char*>(&sLuaStateRegistryKey));
+        lua_rawget(state, LUA_REGISTRYINDEX);
+        auto* self = static_cast<LuaState*>(lua_touserdata(state, -1));
+        lua_pop(state, 1);
+        return self;
+    }
 
     void LuaState::countHook(lua_State* state, lua_Debug* /*ar*/)
     {
@@ -187,6 +199,9 @@ namespace LuaUtil
     {
         if (sProfilerEnabled)
             lua_sethook(mLuaState.get(), &countHook, LUA_MASKCOUNT, countHookStep);
+        lua_pushlightuserdata(mLuaState.get(), const_cast<char*>(&sLuaStateRegistryKey));
+        lua_pushlightuserdata(mLuaState.get(), this);
+        lua_rawset(mLuaState.get(), LUA_REGISTRYINDEX);
 
         protectedCall([&](LuaView& view) {
             auto& sol = view.sol();
@@ -203,6 +218,7 @@ namespace LuaUtil
             sol["utf8"] = LuaUtf8::initUtf8Package(sol);
 
             sol["writeToLog"] = [](std::string_view s) { Log(Debug::Level::Info) << s; };
+            sol["hasPendingException"] = [this]() { return hasPendingException(); };
 
             sol["setEnvironment"]
                 = [](const sol::environment& env, const sol::function& fn) { sol::set_environment(env, fn); };
@@ -285,6 +301,23 @@ namespace LuaUtil
                     if type(v) ~= 'table' then error('getmetatable is allowed only for tables', 2) end
                     return getmetatable(v)
                 end
+                local _pcall = pcall
+                local _xpcall = xpcall
+                local function checkPending(ok, ...)
+                    if not ok and hasPendingException() then
+                        error((...), 0)
+                    end
+                    return ok, ...
+                end
+                safePcall = function(f, ...)
+                    return checkPending(_pcall(f, ...))
+                end
+                safeXpcall = function(f, msgh, ...)
+                    return checkPending(_xpcall(f, function(err)
+                        if hasPendingException() then return err end
+                        return msgh(err)
+                    end, ...))
+                end
             )");
 
             mSandboxEnv = sol::table(sol, sol::create);
@@ -295,6 +328,8 @@ namespace LuaUtil
                     throw std::logic_error("Lua function not found: " + s);
                 mSandboxEnv[s] = sol[s];
             }
+            mSandboxEnv["pcall"] = sol["safePcall"];
+            mSandboxEnv["xpcall"] = sol["safeXpcall"];
             for (const std::string& s : safePackages)
             {
                 if (sol[s] == sol::nil)
@@ -396,7 +431,13 @@ namespace LuaUtil
     sol::protected_function_result LuaState::throwIfError(sol::protected_function_result&& res)
     {
         if (!res.valid())
-            throw std::runtime_error(std::string("Lua error: ") += res.get<sol::error>().what());
+        {
+            std::string msg = res.get<sol::error>().what();
+            if (lua_State* state = res.lua_state())
+                if (LuaState* self = fromState(state))
+                    self->rethrowIfPendingException();
+            throw std::runtime_error(std::string("Lua error: ") += msg);
+        }
         else
             return std::move(res);
     }

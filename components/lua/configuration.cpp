@@ -215,7 +215,7 @@ namespace LuaUtil
     {
         if (mScriptIdMapping.empty())
         {
-            if (savedId == -1)
+            if (savedId < 0 || static_cast<size_t>(savedId) >= mScripts.size())
                 return {};
             return savedId;
         }

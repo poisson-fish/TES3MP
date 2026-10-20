@@ -28,6 +28,25 @@ namespace LuaUtil
         void clearTemporaryAndRemoveCallbacks();
         void load(lua_State* state, const std::filesystem::path& path);
         void save(lua_State* state, const std::filesystem::path& path) const;
+        void load(lua_State* state, std::string_view binaryData);
+        std::string save(lua_State* state) const;
+
+        struct SectionSnapshot
+        {
+            std::map<std::string, std::string, std::less<>> mValues;
+            std::vector<Callback> mCallbacks;
+            std::vector<Callback> mMenuScriptsCallbacks;
+            int mLifeTime = 0;
+            bool operator==(const SectionSnapshot& other) const
+            {
+                return mValues == other.mValues && mLifeTime == other.mLifeTime
+                    && mCallbacks.size() == other.mCallbacks.size()
+                    && mMenuScriptsCallbacks.size() == other.mMenuScriptsCallbacks.size();
+            }
+        };
+        using Snapshot = std::map<std::string, SectionSnapshot, std::less<>>;
+        Snapshot snapshot() const;
+        void restore(const Snapshot& saved);
 
         sol::object getSection(
             lua_State* state, std::string_view sectionName, bool readOnly, bool forMenuScripts = false);
@@ -43,11 +62,13 @@ namespace LuaUtil
 
         void setSingleValue(std::string_view section, std::string_view key, const sol::object& value)
         {
+            validateAccess(false);
             getSection(section)->set(key, value);
         }
 
         void setSectionValues(std::string_view section, const sol::optional<sol::table>& values)
         {
+            validateAccess(false);
             getSection(section)->setAll(values);
         }
 
@@ -61,18 +82,30 @@ namespace LuaUtil
         };
         void setListener(const Listener* listener) { mListener = listener; }
         void setActive(bool active) { mActive = active; }
+        void setStrict(bool strict) { mStrict = strict; }
+        bool isStrict() const { return mStrict; }
+        void setValidator(std::function<void(bool readOnly)> validator, bool strict = true)
+        {
+            mValidator = std::move(validator);
+            mStrict = strict;
+        }
 
     private:
         class Value
         {
         public:
             Value() {}
+            explicit Value(std::string serialized)
+                : mSerializedValue(std::move(serialized))
+            {
+            }
             Value(const sol::object& value)
                 : mSerializedValue(serialize(value))
             {
             }
             sol::object getCopy(lua_State* state) const;
             sol::object getReadOnly(lua_State* state) const;
+            const std::string& serialized() const { return mSerializedValue; }
 
         private:
             std::string mSerializedValue;
@@ -109,7 +142,7 @@ namespace LuaUtil
             LifeTime mLifeTime = Persistent;
             static Value sEmpty;
 
-            void checkIfActive() const { mStorage->checkIfActive(); }
+            void checkIfActive(bool readOnly = true) const { mStorage->validateAccess(readOnly); }
         };
         struct SectionView
         {
@@ -124,10 +157,18 @@ namespace LuaUtil
         const Listener* mListener = nullptr;
         std::set<const Section*> mRunningCallbacks;
         bool mActive = false;
+        bool mStrict = false;
+        std::function<void(bool readOnly)> mValidator;
         void checkIfActive() const
         {
             if (!mActive)
                 throw std::logic_error("Trying to access inactive storage");
+        }
+        void validateAccess(bool readOnly) const
+        {
+            checkIfActive();
+            if (mValidator)
+                mValidator(readOnly);
         }
         static void registerLifeTime(LuaUtil::LuaView& view, sol::table& res);
     };

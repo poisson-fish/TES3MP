@@ -199,6 +199,19 @@ namespace LuaUtil
 
         virtual bool isActive() const { return false; }
 
+        void setStrict(bool strict) { mStrict = strict; }
+        bool isStrict() const { return mStrict; }
+        void setValidator(std::function<void()> validator, bool strict = true)
+        {
+            mValidator = std::move(validator);
+            mStrict = strict;
+        }
+        void validateContext() const
+        {
+            if (mValidator)
+                mValidator();
+        }
+
         ScriptsContainerWeakPtr getWeakPointer() const;
 
     protected:
@@ -247,6 +260,7 @@ namespace LuaUtil
         template <typename... Args>
         void callEngineHandlers(EngineHandlerList& handlers, const Args&... args)
         {
+            validateContext();
             ensureLoaded();
             for (Handler& handler : handlers.mList)
             {
@@ -256,6 +270,8 @@ namespace LuaUtil
                 }
                 catch (std::exception& e)
                 {
+                    if (mStrict)
+                        throw;
                     Log(Debug::Error) << mNamePrefix << "[" << scriptPath(handler.mScriptId) << "] " << handlers.mName
                                       << " failed. " << e.what();
                 }
@@ -359,6 +375,8 @@ namespace LuaUtil
 
         ScriptTracker* mTracker;
         bool mRequiredLoading = false;
+        bool mStrict = false;
+        std::function<void()> mValidator;
         friend class ScriptTracker;
 
         static int64_t sInstanceCount; // debug information, shown in Lua profiler

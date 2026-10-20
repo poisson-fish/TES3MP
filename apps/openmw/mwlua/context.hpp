@@ -3,6 +3,8 @@
 
 #include <components/lua/luastate.hpp>
 
+#include "../mwscript/interpretercontext.hpp"
+
 namespace LuaUtil
 {
     class LuaState;
@@ -30,6 +32,32 @@ namespace MWLua
         LuaUtil::UserdataSerializer* mSerializer = nullptr;
         ObjectLists* mObjectLists = nullptr;
         LuaEvents* mLuaEvents = nullptr;
+        MWScript::InterpreterContext* const* mScopedContext = nullptr;
+
+        bool isScoped() const { return mScopedContext != nullptr; }
+
+        MWScript::InterpreterContext& requireScoped() const
+        {
+            if (!mScopedContext || !*mScopedContext || !(*mScopedContext)->getExecutionContext())
+                throw std::runtime_error("Lua binding lacks active scoped execution context");
+            (*mScopedContext)->getExecutionContext()->validate();
+            return **mScopedContext;
+        }
+
+        template <class F>
+        decltype(auto) withScoped(F&& fn) const
+        {
+            try
+            {
+                return fn(requireScoped());
+            }
+            catch (const MWScript::ScriptContextUnavailable&)
+            {
+                if (mLua)
+                    mLua->capturePendingException(std::current_exception());
+                throw;
+            }
+        }
 
         std::string_view typeName() const
         {

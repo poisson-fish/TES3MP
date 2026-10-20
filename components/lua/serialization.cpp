@@ -1,5 +1,9 @@
 #include "serialization.hpp"
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 #include <osg/Matrixf>
 #include <osg/Quat>
 #include <osg/Vec2f>
@@ -211,10 +215,20 @@ namespace LuaUtil
                     "Can not serialize more than 32 nested tables. Likely the table contains itself.");
             sol::table table = obj;
             appendType(out, SerializedType::TABLE_START);
+            std::vector<std::pair<BinaryData, BinaryData>> entries;
             for (auto& [key, value] : table)
             {
-                serialize(out, key, customSerializer, recursionCounter + 1);
-                serialize(out, value, customSerializer, recursionCounter + 1);
+                BinaryData serializedKey;
+                BinaryData serializedValue;
+                serialize(serializedKey, key, customSerializer, recursionCounter + 1);
+                serialize(serializedValue, value, customSerializer, recursionCounter + 1);
+                entries.emplace_back(std::move(serializedKey), std::move(serializedValue));
+            }
+            std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            for (const auto& [serializedKey, serializedValue] : entries)
+            {
+                out.append(serializedKey);
+                out.append(serializedValue);
             }
             appendType(out, SerializedType::TABLE_END);
         }
@@ -255,6 +269,8 @@ namespace LuaUtil
                 typeNameSize = (type & 63) + 1;
                 dataSize = getValue<uint32_t>(binaryData);
             }
+            if (binaryData.size() < typeNameSize + dataSize)
+                throw std::runtime_error("Unexpected end of serialized data.");
             std::string_view typeName = binaryData.substr(0, typeNameSize);
             std::string_view data = binaryData.substr(typeNameSize, dataSize);
             binaryData = binaryData.substr(typeNameSize + dataSize);
@@ -265,6 +281,8 @@ namespace LuaUtil
         if (type & SHORT_STRING_FLAG)
         {
             size_t size = type & 0x1f;
+            if (binaryData.size() < size)
+                throw std::runtime_error("Unexpected end of serialized data.");
             sol::stack::push<std::string_view>(lua, binaryData.substr(0, size));
             binaryData = binaryData.substr(size);
             return;
@@ -280,6 +298,8 @@ namespace LuaUtil
             case SerializedType::LONG_STRING:
             {
                 uint32_t size = getValue<uint32_t>(binaryData);
+                if (binaryData.size() < size)
+                    throw std::runtime_error("Unexpected end of serialized data.");
                 sol::stack::push<std::string_view>(lua, binaryData.substr(0, size));
                 binaryData = binaryData.substr(size);
                 return;
@@ -375,9 +395,18 @@ namespace LuaUtil
             throw std::runtime_error("Incorrect version of Lua serialization format: "
                 + std::to_string(static_cast<unsigned>(binaryData[0])));
         binaryData = binaryData.substr(1);
-        deserializeImpl(lua, binaryData, customSerializer, readOnly);
-        if (!binaryData.empty())
-            throw std::runtime_error("Unexpected data after serialized object");
+        const int top = lua_gettop(lua);
+        try
+        {
+            deserializeImpl(lua, binaryData, customSerializer, readOnly);
+            if (!binaryData.empty())
+                throw std::runtime_error("Unexpected data after serialized object");
+        }
+        catch (...)
+        {
+            lua_settop(lua, top);
+            throw;
+        }
         return sol::stack::pop<sol::object>(lua);
     }
 

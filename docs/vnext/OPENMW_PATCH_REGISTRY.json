@@ -3,6 +3,37 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M5-004",
+      "slice": "scoped Lua bindings, storage, events, timers and transactional rollback/recovery",
+      "owner": "OpenMW MWLua/LuaUtil and native script-context tests",
+      "purpose": "Carry explicit MWScript::ExecutionContext and InterpreterContext ownership through MWLua bindings, LuaStorage, LuaEvents and LuaUtil::ScriptsContainer timers/callbacks. Scoped world.mwscript.getGlobalScript/getGlobalVariables validate player ownership and route member/global reads, writes and isRunning lifecycle changes through the staged script bank; unstaged local scripts, foreign players, shared-context player access and out-of-bounds/nonfinite values reject. Object sendEvent and LuaEvents validate active execution contexts, bound names/payloads, reject menu events in scoped transactions, resolve local targets through the scoped resolver and support snapshot/restore plus strict LUAM/LUAE load validation. LuaStorage adds read/write access validators, bounded section/key checks, callback rollback on listener/subscriber failure, deterministic sorted table serialization, byte save/load and valid-callback snapshot/restore across script reloads. ScriptsContainer and async timer packages validate active contexts, callback ownership, bounded names and finite non-negative delays, reject unsavable timers in strict mode, pop due timers before invocation and restore previous scripts on failed strict loads. LuaState::protectedCall captures and rethrows pending C++ exceptions (including ScriptContextUnavailable and ScriptSourceWait) across Lua pcall/xpcall boundaries without slicing. SafePtr::update uses Environment::tryGet() and clears destroyed non-live references so detached native tests and GObject lifetime checks fail closed without an Environment singleton. Unscoped stock containers, unsavable timers, empty-payload LUAE events and storage remain unchanged.",
+      "paths": [
+        "apps/openmw/mwlua/context.hpp",
+        "apps/openmw/mwlua/luaevents.cpp",
+        "apps/openmw/mwlua/luaevents.hpp",
+        "apps/openmw/mwlua/mwscriptbindings.cpp",
+        "apps/openmw/mwlua/objectbindings.cpp",
+        "apps/openmw/mwworld/ptr.cpp",
+        "components/lua/asyncpackage.cpp",
+        "components/lua/asyncpackage.hpp",
+        "components/lua/configuration.cpp",
+        "components/lua/luastate.cpp",
+        "components/lua/luastate.hpp",
+        "components/lua/scriptscontainer.cpp",
+        "components/lua/scriptscontainer.hpp",
+        "components/lua/serialization.cpp",
+        "components/lua/storage.cpp",
+        "components/lua/storage.hpp"
+      ],
+      "tests": [
+        "tes3mp_native_script_context_tests lua-context",
+        "tes3mp_native_script_context_tests lua-rollback",
+        "tes3mp_native_script_context_tests lua-stock"
+      ],
+      "disposition": "Scoped Lua context, isolated character/story/shared storage, local/global events, serializable timers, wait propagation across pcall/xpcall, atomic rollback/retry and LUAM/storage recovery proven in native script-context tests; unscoped stock Lua behavior preserved.",
+      "removal_condition": "OpenMW supplies equivalent explicit transactional Lua execution context, storage, event and timer rollback interfaces"
+    },
+    {
       "id": "M5-003",
       "slice": "character/story dialogue transactions, authenticated intents and committed presentation",
       "owner": "OpenMW dialogue Filter, Quest/Topic and MWScript stock compiler/opcodes",
@@ -94,6 +125,9 @@
         "tes3mp_native_script_context_tests cross-script",
         "tes3mp_native_script_context_tests cross-script-rollback",
         "tes3mp_native_script_context_tests cross-script-stock",
+        "tes3mp_native_script_context_tests lua-context",
+        "tes3mp_native_script_context_tests lua-rollback",
+        "tes3mp_native_script_context_tests lua-stock",
         "tes3mp_native_world_script_tests script-banks",
         "tes3mp_native_dialogue_tests encounter",
         "tes3mp_native_dialogue_tests stock",

@@ -47,7 +47,6 @@ namespace MWScript
         std::shared_ptr<GlobalScriptDesc> mGlobalScriptDesc;
 
         void requireUnscopedService() const;
-        ScriptState::Binding getScopedScript(const ESM::RefId& id) const;
         struct ScopedMember
         {
             Locals& locals;
@@ -90,6 +89,7 @@ namespace MWScript
 
         const ExecutionContext* getExecutionContext() const
         { return mExecution ? &*mExecution : nullptr; }
+        ScriptState::Binding getScopedScript(const ESM::RefId& id) const;
         MWWorld::Ptr resolveReference(const ESM::RefId& id, bool required = true, bool activeOnly = false) const;
         MWWorld::Ptr resolveReferenceName(std::string_view name, bool required = true, bool activeOnly = false) const;
 

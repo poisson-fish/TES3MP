@@ -117,7 +117,7 @@
     {
       "path": "apps/openmw/mwbase/environment.hpp",
       "status": "M",
-      "purpose": "Exposes the nullable app-owned multiplayer coordinator to the main-menu UI without transferring ownership."
+      "purpose": "Exposes the nullable app-owned multiplayer coordinator to the main-menu UI without transferring ownership, and provides Environment::tryGet() for detached native callers without a global singleton."
     },
     {
       "path": "apps/openmw/mwgui/charactercreation.cpp",
@@ -198,6 +198,31 @@
       "path": "apps/openmw/mwgui/waitdialog.cpp",
       "status": "M",
       "purpose": "Routes confirmed wait and rest choices to multiplayer authority before stock local time or resource mutation."
+    },
+    {
+      "path": "apps/openmw/mwlua/context.hpp",
+      "status": "M",
+      "purpose": "Carries an optional scoped MWScript::InterpreterContext pointer through MWLua bindings and captures ScriptContextUnavailable waits before Lua error conversion."
+    },
+    {
+      "path": "apps/openmw/mwlua/luaevents.cpp",
+      "status": "M",
+      "purpose": "Validates scoped Lua event names, payload bounds, execution contexts, and local target resolution; supports transactional snapshot/restore and atomic strict LUAE loading."
+    },
+    {
+      "path": "apps/openmw/mwlua/luaevents.hpp",
+      "status": "M",
+      "purpose": "Declares optional MenuScripts construction, execution-bound Global/Local event records, scoped target/context callbacks, and event batch snapshot/restore."
+    },
+    {
+      "path": "apps/openmw/mwlua/mwscriptbindings.cpp",
+      "status": "M",
+      "purpose": "Routes scoped world.mwscript global script and variable bindings through InterpreterContext and staged script banks while preserving unscoped Environment callers."
+    },
+    {
+      "path": "apps/openmw/mwlua/objectbindings.cpp",
+      "status": "M",
+      "purpose": "Validates active scoped execution context and live object references before queueing local Lua events from object:sendEvent."
     },
     {
       "path": "apps/openmw/mwmechanics/character.cpp",
@@ -285,6 +310,11 @@
       "purpose": "Expose explicit-service global-script creation for native initialization checks."
     },
     {
+      "path": "apps/openmw/mwscript/interpretercontext.hpp",
+      "status": "M",
+      "purpose": "Exposes scoped ExecutionContext, reference lookup, and staged ScriptState::Binding access for transactional MWScript and MWLua callers."
+    },
+    {
       "path": "apps/openmw/mwscript/locals.cpp",
       "status": "M",
       "purpose": "Share compiler-derived local initialization and assignment with an explicit script manager, preserving inherited global locals."
@@ -343,6 +373,11 @@
       "path": "apps/openmw/mwworld/player.hpp",
       "status": "M",
       "purpose": "Declares the activation interceptor callback and setter/clearer methods on MWWorld::Player."
+    },
+    {
+      "path": "apps/openmw/mwworld/ptr.cpp",
+      "status": "M",
+      "purpose": "Uses Environment::tryGet() in SafePtr and clears non-live references so detached native tests operate without a global Environment singleton."
     },
     {
       "path": "apps/openmw/mwworld/refdata.cpp",
@@ -743,6 +778,56 @@
       "path": "cmake/TES3MPVerifyTargetBoundaries.cmake",
       "status": "A",
       "purpose": "Fail-closed direct-link allowlist and forbidden-include-family checks for approved TES3MP target boundaries."
+    },
+    {
+      "path": "components/lua/asyncpackage.cpp",
+      "status": "M",
+      "purpose": "Validates timer callback container/script ownership and enforces finite non-negative delays for strict transactional Lua timers."
+    },
+    {
+      "path": "components/lua/asyncpackage.hpp",
+      "status": "M",
+      "purpose": "Validates active container context before Lua callback invocation and rethrows callback exceptions in strict transactional mode."
+    },
+    {
+      "path": "components/lua/configuration.cpp",
+      "status": "M",
+      "purpose": "Rejects negative or out-of-range saved Lua script IDs when mapping unconfigured script tables."
+    },
+    {
+      "path": "components/lua/luastate.cpp",
+      "status": "M",
+      "purpose": "Captures and rethrows pending C++ exceptions across Lua protectedCall boundaries so dependency waits and typed errors survive pcall/xpcall."
+    },
+    {
+      "path": "components/lua/luastate.hpp",
+      "status": "M",
+      "purpose": "Stores and rethrows pending C++ exception pointers across LuaUtil::LuaState::protectedCall invocations."
+    },
+    {
+      "path": "components/lua/scriptscontainer.cpp",
+      "status": "M",
+      "purpose": "Enforces strict transactional timer/handler/save/load validation, pops due timers before execution, and restores prior scripts on failed strict loads."
+    },
+    {
+      "path": "components/lua/scriptscontainer.hpp",
+      "status": "M",
+      "purpose": "Adds optional strict transactional mode and execution-context validation callbacks to LuaUtil::ScriptsContainer."
+    },
+    {
+      "path": "components/lua/serialization.cpp",
+      "status": "M",
+      "purpose": "Sorts serialized Lua table entries deterministically, validates string/userdata buffer bounds, and restores the Lua stack on deserialization failure."
+    },
+    {
+      "path": "components/lua/storage.cpp",
+      "status": "M",
+      "purpose": "Adds transactional LuaStorage access validation, bounded section/key names, callback failure rollback, byte save/load, and valid-callback snapshot/restore."
+    },
+    {
+      "path": "components/lua/storage.hpp",
+      "status": "M",
+      "purpose": "Declares LuaStorage byte serialization, transactional SectionSnapshot/Snapshot state, and read/write access validators."
     },
     {
       "path": "components/tes3mp/CMakeLists.txt",

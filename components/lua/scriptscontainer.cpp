@@ -61,6 +61,7 @@ namespace LuaUtil
 
     bool ScriptsContainer::addCustomScript(int scriptId, std::string_view initData)
     {
+        validateContext();
         assert(mLua.getConfiguration().isCustomScript(scriptId));
         bool ok = false;
         mLua.protectedCall([&](LuaView& view) {
@@ -74,6 +75,7 @@ namespace LuaUtil
 
     void ScriptsContainer::addAutoStartedScripts()
     {
+        validateContext();
         mLua.protectedCall([&](LuaView& view) {
             for (const auto& [scriptId, data] : mAutoStartScripts)
             {
@@ -193,6 +195,8 @@ namespace LuaUtil
             auto iter = data.mScripts.find(scriptId);
             mRemovedScriptsMemoryUsage[scriptId] = iter->second.mStats.mMemoryUsage;
             data.mScripts.erase(iter);
+            if (mStrict)
+                throw;
             Log(Debug::Error) << "Can't start " << debugName << "; " << e.what();
             return false;
         }
@@ -223,6 +227,7 @@ namespace LuaUtil
 
     void ScriptsContainer::removeScript(int scriptId)
     {
+        validateContext();
         LoadedData& data = ensureLoaded();
         auto scriptIter = data.mScripts.find(scriptId);
         if (scriptIter == data.mScripts.end())
@@ -266,6 +271,8 @@ namespace LuaUtil
             }
             catch (std::exception& e)
             {
+                if (mStrict)
+                    throw;
                 printError(scriptId, "onInterfaceOverride failed", e);
             }
         }
@@ -277,6 +284,8 @@ namespace LuaUtil
             }
             catch (std::exception& e)
             {
+                if (mStrict)
+                    throw;
                 printError(nextId, "onInterfaceOverride failed", e);
             }
         }
@@ -317,6 +326,8 @@ namespace LuaUtil
                 }
                 catch (std::exception& e)
                 {
+                    if (mStrict)
+                        throw;
                     printError(nextId, "onInterfaceOverride failed", e);
                 }
             }
@@ -349,6 +360,7 @@ namespace LuaUtil
 
     void ScriptsContainer::receiveEvent(std::string_view eventName, std::string_view eventData)
     {
+        validateContext();
         LoadedData& data = ensureLoaded();
         auto it = data.mEventHandlers.find(eventName);
         if (it == data.mEventHandlers.end())
@@ -361,6 +373,8 @@ namespace LuaUtil
             }
             catch (std::exception& e)
             {
+                if (mStrict)
+                    throw;
                 Log(Debug::Error) << mNamePrefix << " can not parse eventData for '" << eventName << "': " << e.what();
                 return;
             }
@@ -376,6 +390,8 @@ namespace LuaUtil
                 }
                 catch (std::exception& e)
                 {
+                    if (mStrict)
+                        throw;
                     Log(Debug::Error) << mNamePrefix << "[" << scriptPath(h.mScriptId) << "] eventHandler[" << eventName
                                       << "] failed. " << e.what();
                 }
@@ -397,12 +413,15 @@ namespace LuaUtil
         }
         catch (std::exception& e)
         {
+            if (mStrict)
+                throw;
             printError(scriptId, "onInit failed", e);
         }
     }
 
     void ScriptsContainer::save(ESM::LuaScripts& data)
     {
+        validateContext();
         if (const UnloadedData* unloadedData = std::get_if<UnloadedData>(&mData))
         {
             data.mScripts = unloadedData->mScripts;
@@ -448,6 +467,8 @@ namespace LuaUtil
                 }
                 catch (std::exception& e)
                 {
+                    if (mStrict)
+                        throw;
                     printError(scriptId, "onSave failed", e);
                 }
             }
@@ -460,8 +481,9 @@ namespace LuaUtil
 
     void ScriptsContainer::load(const ESM::LuaScripts& data)
     {
-        removeAllScripts();
+        validateContext();
         const ScriptsConfiguration& cfg = mLua.getConfiguration();
+        const UserdataSerializer* deserializer = mSavedDataDeserializer ? mSavedDataDeserializer : mSerializer;
 
         std::map<int, ScriptInfo> scripts;
         for (const auto& [scriptId, initData] : mAutoStartScripts)
@@ -471,37 +493,48 @@ namespace LuaUtil
             std::optional<int> scriptId = cfg.mapId(s.mScriptId);
             if (!scriptId)
             {
+                if (mStrict)
+                    throw std::invalid_argument("Unknown saved Lua script id");
                 Log(Debug::Verbose) << "Ignoring " << mNamePrefix << "[" << s.mScriptId << "]; script not registered";
                 continue;
             }
             auto it = scripts.find(*scriptId);
             if (it != scripts.end())
+            {
+                if (mStrict && it->second.mSavedData != nullptr)
+                    throw std::invalid_argument("Duplicate saved Lua script id");
                 it->second.mSavedData = &s;
+            }
             else if (cfg.isCustomScript(*scriptId))
                 scripts[*scriptId] = { cfg[*scriptId].mInitializationData, &s };
             else
+            {
+                if (mStrict)
+                    throw std::invalid_argument("Disallowed saved Lua script id");
                 Log(Debug::Verbose) << "Ignoring " << mNamePrefix << "[" << cfg[*scriptId].mScriptPath
                                     << "]; this script is not allowed here";
+            }
         }
 
+        ESM::LuaScripts stagedContainer;
         mLua.protectedCall([&](LuaView& view) {
-            UnloadedData& container = ensureUnloaded(view);
-
             for (const auto& [scriptId, scriptInfo] : scripts)
             {
                 if (scriptInfo.mSavedData == nullptr)
                     continue;
-                ESM::LuaScript& script = container.mScripts.emplace_back(*scriptInfo.mSavedData);
+                ESM::LuaScript& script = stagedContainer.mScripts.emplace_back(*scriptInfo.mSavedData);
                 script.mScriptId = scriptId;
                 if (!script.mData.empty())
                 {
                     try
                     {
-                        sol::object state = deserialize(view.sol(), script.mData, mSavedDataDeserializer);
+                        sol::object state = deserialize(view.sol(), script.mData, deserializer);
                         script.mData = serialize(state, mSerializer);
                     }
                     catch (std::exception& e)
                     {
+                        if (mStrict)
+                            throw;
                         printError(scriptId, "onLoad failed", e);
                         script.mData.clear();
                     }
@@ -510,7 +543,12 @@ namespace LuaUtil
                 {
                     try
                     {
-                        sol::object arg = deserialize(view.sol(), it->mCallbackArgument, mSavedDataDeserializer);
+                        if (mStrict
+                            && (!std::isfinite(it->mTime) || it->mCallbackName.empty()
+                                || it->mCallbackName.size() > 128
+                                || it->mCallbackName.find('\0') != std::string::npos))
+                            throw std::invalid_argument("Invalid saved Lua timer");
+                        sol::object arg = deserialize(view.sol(), it->mCallbackArgument, deserializer);
                         // It is important if the order of content files was changed. The deserialize-serialize
                         // procedure updates refnums, so timer.mSerializedArg may be not equal to
                         // savedTimer.mCallbackArgument.
@@ -519,12 +557,36 @@ namespace LuaUtil
                     }
                     catch (std::exception& e)
                     {
+                        if (mStrict)
+                            throw;
                         printError(scriptId, "can not load timer", e);
                         it = script.mTimers.erase(it);
                     }
                 }
             }
         });
+
+        ESM::LuaScripts previous;
+        if (mStrict)
+            save(previous);
+        removeAllScripts();
+        mData.emplace<UnloadedData>(std::move(stagedContainer));
+        mRequiredLoading = false;
+        if (mStrict)
+        {
+            try
+            {
+                ensureLoaded();
+            }
+            catch (...)
+            {
+                removeAllScripts();
+                mData.emplace<UnloadedData>(std::move(previous));
+                mRequiredLoading = false;
+                ensureLoaded();
+                throw;
+            }
+        }
     }
 
     ScriptsContainer::LoadedData& ScriptsContainer::ensureLoaded()
@@ -575,6 +637,8 @@ namespace LuaUtil
                     }
                     catch (std::exception& e)
                     {
+                        if (mStrict)
+                            throw;
                         printError(scriptId, "onLoad failed", e);
                     }
                 }
@@ -588,6 +652,8 @@ namespace LuaUtil
 
                     try
                     {
+                        if (mStrict && !data.mScripts.at(scriptId).mRegisteredCallbacks.contains(savedTimer.mCallbackName))
+                            throw std::invalid_argument("Unregistered saved Lua timer callback");
                         timer.mArg
                             = sol::main_object(deserialize(view.sol(), savedTimer.mCallbackArgument, mSerializer));
                         // It is important if the order of content files was changed. The deserialize-serialize
@@ -602,6 +668,8 @@ namespace LuaUtil
                     }
                     catch (std::exception& e)
                     {
+                        if (mStrict)
+                            throw;
                         printError(scriptId, "can not load timer", e);
                     }
                 }
@@ -678,6 +746,10 @@ namespace LuaUtil
     void ScriptsContainer::registerTimerCallback(
         int scriptId, std::string_view callbackName, sol::main_protected_function callback)
     {
+        validateContext();
+        if (mStrict
+            && (callbackName.empty() || callbackName.size() > 128 || callbackName.find('\0') != std::string_view::npos))
+            throw std::invalid_argument("Lua timer callback name exceeds bounds");
         getScript(scriptId).mRegisteredCallbacks.emplace(std::string(callbackName), std::move(callback));
     }
 
@@ -690,6 +762,15 @@ namespace LuaUtil
     void ScriptsContainer::setupSerializableTimer(
         TimerType type, double time, int scriptId, std::string_view callbackName, sol::main_object callbackArg)
     {
+        validateContext();
+        if (mStrict)
+        {
+            if (callbackName.empty() || callbackName.size() > 128 || callbackName.find('\0') != std::string_view::npos
+                || !std::isfinite(time))
+                throw std::invalid_argument("Invalid Lua timer parameters");
+            if (!getScript(scriptId).mRegisteredCallbacks.contains(std::string(callbackName)))
+                throw std::invalid_argument("Unregistered Lua timer callback");
+        }
         Timer t;
         t.mCallback = std::string(callbackName);
         t.mScriptId = scriptId;
@@ -704,6 +785,9 @@ namespace LuaUtil
     void ScriptsContainer::setupUnsavableTimer(
         TimerType type, double time, int scriptId, sol::main_protected_function callback)
     {
+        validateContext();
+        if (mStrict)
+            throw std::runtime_error("Unsavable Lua timer is not allowed in a transactional context");
         Timer t;
         t.mScriptId = scriptId;
         t.mSerializable = false;
@@ -738,6 +822,8 @@ namespace LuaUtil
         }
         catch (std::exception& e)
         {
+            if (mStrict)
+                throw;
             printError(t.mScriptId, "callTimer failed", e);
         }
     }
@@ -746,14 +832,18 @@ namespace LuaUtil
     {
         while (!timerQueue.empty() && timerQueue.front().mTime <= time)
         {
-            callTimer(timerQueue.front());
             std::pop_heap(timerQueue.begin(), timerQueue.end());
+            Timer t = std::move(timerQueue.back());
             timerQueue.pop_back();
+            callTimer(t);
         }
     }
 
     void ScriptsContainer::processTimers(double simulationTime, double gameTime)
     {
+        validateContext();
+        if (mStrict && (!std::isfinite(simulationTime) || !std::isfinite(gameTime)))
+            throw std::invalid_argument("Nonfinite Lua timer clock");
         mLua.protectedCall([&](LuaView& view) {
             LoadedData& data = ensureLoaded();
             updateTimerQueue(data.mSimulationTimersQueue, simulationTime);

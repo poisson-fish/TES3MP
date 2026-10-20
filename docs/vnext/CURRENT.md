@@ -62,24 +62,23 @@ client receipts: `build/logs/m5-wait-adapter.log`.
 Synthetic two-desktop V92–93 waiting/reserved/earned recovery:
 `build/m5-wait-v{92,93}-restart-credit-01/result.json`.
 
-**V94–96:** stock escort/travel; A/B independently arrive. V95 (`native-inventory-95`)
+**V94–96 & Lua (#5):** stock escort/travel; A/B independently arrive. V95 (`native-inventory-95`)
 unifies V85–95, binds placed `npc->mScript` into personal/shared banks
-(`fargoth`, `vodunius nuccius`, `TR_m1_T_Eldale`), supports per-story `EncounterBinding`
-in multi-cell/multi-actor scenes, and admits source-bank
-GetJournalIndex/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
-foreign-NPC ModDisposition and provenance GetItemCount/AddItem/RemoveItem
-(plus Function_Item) so private NPC banks, timers, reads, item transfers/receipts,
-scheduled departure, safe returns and pre-departure life-cursors coexist across public
-deaths/respawns. V96 (`native-inventory-96`) adds persistent opt-in parties and live
-encounter enrollment: compatible/helper enrollment, late-join checks, delegated controller
-choices with dissent/physical-divergence split, per-character costs and
-stock-context rewards with durable `RewardReceipt`s, helper/party OnDeath credit and
-reservation sharing, offline suspension/leader-loss handoff, leave/kick/rejoin,
-and wire v4 `DialogueEncounterStatus`.
-Native: `build/logs/m5-{activity-host,departure-host}-final.log`,
-`build/logs/m5-activity-state-final.log`, `build/logs/m5-npc-bank-{state,script}.log`,
-`build/logs/m5-npc-state.log`, `build/logs/m5-dialogue-stock.log`, `build/logs/m5-quest-audit.log`,
-`build/logs/m5-multi-cell-build.log`, `build/logs/m5-parties-{adapter,dialogue,all-dialogue}.log`.
+(`fargoth`, `vodunius nuccius`, `TR_m1_T_Eldale`), supports multi-cell/actor `EncounterBinding`,
+and admits source-bank GetJournalIndex/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
+foreign-NPC ModDisposition and provenance GetItemCount/AddItem/RemoveItem/Function_Item
+so private NPC banks/timers/reads/items/receipts, departures, safe returns and life-cursors
+coexist across deaths/respawns. V96 (`native-inventory-96`) adds persistent opt-in parties/enrollment:
+compatible/helper enrollment, late-join checks, delegated choices with
+dissent/physical split, per-character costs/stock rewards (`RewardReceipt`s), helper/party OnDeath
+credit/reservations, offline/leader-loss handoff, leave/kick/rejoin, and wire v4 `DialogueEncounterStatus`.
+M5 #5 scopes `MWLua` (`world.mwscript`, `sendEvent`, `LuaEvents`) and `LuaUtil` (`LuaStorage`,
+`ScriptsContainer` timers/callbacks, deterministic serialization, `pcall`/`xpcall` waits,
+`SafePtr` lifetimes) with character/story/shared isolation, rollback/retry, and `LUAM`/storage recovery.
+Native: `build/logs/m5-{activity-host,departure-host,activity-state}-final.log`,
+`build/logs/m5-npc-bank-{state,script}.log`, `build/logs/m5-{npc-state,dialogue-stock,quest-audit,multi-cell-build}.log`,
+`build/logs/m5-parties-{adapter,dialogue,all-dialogue}.log`,
+`build/logs/m5-{lua-build,script-context-lua-{context,rollback,stock}}.log`.
 
 **Next:** run unchanged Seyda Neen and TR (Duel of Riddles) real-content quest verification.
 Source/result preflights: `build/logs/m5-{seyda,tr}-quest-preflight.log`;

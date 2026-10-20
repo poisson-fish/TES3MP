@@ -71,13 +71,21 @@ namespace LuaUtil
                   asyncId.mContainer->registerTimerCallback(asyncId.mScriptId, name, std::move(callback));
                   return TimerCallback{ asyncId, std::string(name) };
               };
-        api["newSimulationTimer"] = [simulationTimeFn](const AsyncPackageId&, double delay,
+        api["newSimulationTimer"] = [simulationTimeFn](const AsyncPackageId& asyncId, double delay,
                                         const TimerCallback& callback, sol::main_object callbackArg) {
+            if (asyncId.mContainer != callback.mAsyncId.mContainer || asyncId.mScriptId != callback.mAsyncId.mScriptId)
+                throw std::runtime_error("TimerCallback belongs to a different script");
+            if (asyncId.mContainer && asyncId.mContainer->isStrict() && (!std::isfinite(delay) || delay < 0))
+                throw std::invalid_argument("Invalid Lua simulation timer delay");
             callback.mAsyncId.mContainer->setupSerializableTimer(TimerType::SIMULATION_TIME, simulationTimeFn() + delay,
                 callback.mAsyncId.mScriptId, callback.mName, std::move(callbackArg));
         };
-        api["newGameTimer"] = [gameTimeFn](const AsyncPackageId&, double delay, const TimerCallback& callback,
+        api["newGameTimer"] = [gameTimeFn](const AsyncPackageId& asyncId, double delay, const TimerCallback& callback,
                                   sol::main_object callbackArg) {
+            if (asyncId.mContainer != callback.mAsyncId.mContainer || asyncId.mScriptId != callback.mAsyncId.mScriptId)
+                throw std::runtime_error("TimerCallback belongs to a different script");
+            if (asyncId.mContainer && asyncId.mContainer->isStrict() && (!std::isfinite(delay) || delay < 0))
+                throw std::invalid_argument("Invalid Lua game timer delay");
             callback.mAsyncId.mContainer->setupSerializableTimer(TimerType::GAME_TIME, gameTimeFn() + delay,
                 callback.mAsyncId.mScriptId, callback.mName, std::move(callbackArg));
         };

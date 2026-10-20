@@ -154,6 +154,8 @@ namespace MWBase
             assert(sThis != nullptr);
             return *sThis;
         }
+
+        static const Environment* tryGet() { return sThis; }
     };
 }
 
