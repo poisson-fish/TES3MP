@@ -541,7 +541,7 @@ namespace TES3MP::Native
                 && item.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
                 && item.getRefIdString().find('\0') == std::string_view::npos);
             const auto record = MWWorld::inventoryItemRecord(content, item);
-            require(record.mScript.empty());
+            require(record.mScript.empty() || content.get<ESM::Script>().search(record.mScript) != nullptr);
             MWWorld::visitInventoryRecord(content, item, [](const auto& base) {
                 require(std::isfinite(base.mData.mWeight) && base.mData.mWeight >= 0.f && base.mData.mValue >= 0);
             });
@@ -1442,6 +1442,15 @@ namespace TES3MP::Native
             std::optional<MWScript::DialogueState> dialogue;
             if (mDialogues) dialogue.emplace(execution, state.dialogue, definition.dialogues, mIntents);
             Bank bank(execution, definition, state);
+            std::optional<FilterContext> filterContext;
+            std::optional<JournalText> journalText;
+            if (dialogue && mIntents)
+            {
+                filterContext.emplace(execution, content, resolver, bank, *dialogue, state.runtime.runtime.globals,
+                    nullptr, std::string_view{}, std::nullopt, referenceState);
+                journalText.emplace(*filterContext, MWScript::DialogueState::Stamp{0, 7, 16});
+                dialogue->setJournalText(*journalText);
+            }
             const auto& scripts = bank.scripts;
             for (size_t i = 0; i < scripts.size(); ++i)
             {

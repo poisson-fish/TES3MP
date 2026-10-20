@@ -183,10 +183,13 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                MWWorld::Ptr target = R()(runtime, false);
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                MWWorld::Ptr target = (R::implicit && context.getExecutionContext())
+                    ? MWWorld::Ptr()
+                    : R()(runtime, context.getExecutionContext() != nullptr);
                 const auto name = runtime.getStringLiteral(runtime[0].mInteger);
                 runtime.pop();
-                static_cast<InterpreterContext&>(runtime.getContext()).startScript(name, target);
+                context.startScript(name, target);
             }
         };
 
@@ -1302,6 +1305,13 @@ namespace MWScript
                 ESM::RefId targetId = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.cast(ptr, spellId, targetId);
+                    return;
+                }
+
                 const ESM::Spell* spell = MWBase::Environment::get().getESMStore()->get<ESM::Spell>().search(spellId);
                 if (!spell)
                 {
@@ -1823,6 +1833,7 @@ namespace MWScript
             extensions.registerFunction("getpcsleep", 'l', "", Compiler::Misc::opcodeGetPcSleep);
             extensions.registerFunction("onactivate", 'l', "", Compiler::Misc::opcodeOnActivate, Compiler::Misc::opcodeOnActivateExplicit);
             extensions.registerInstruction("activate", "x", Compiler::Misc::opcodeActivate, Compiler::Misc::opcodeActivateExplicit);
+            extensions.registerInstruction("cast", "SS", Compiler::Misc::opcodeCast, Compiler::Misc::opcodeCastExplicit);
         }
 
         void installSourceWaitOpcodes(Interpreter::Interpreter& interpreter, bool queries)
@@ -1841,6 +1852,8 @@ namespace MWScript
             interpreter.installSegment5<OpOnActivate<ExplicitRef>>(Compiler::Misc::opcodeOnActivateExplicit);
             interpreter.installSegment5<OpActivate<ImplicitRef>>(Compiler::Misc::opcodeActivate);
             interpreter.installSegment5<OpActivate<ExplicitRef>>(Compiler::Misc::opcodeActivateExplicit);
+            interpreter.installSegment5<OpCast<ImplicitRef>>(Compiler::Misc::opcodeCast);
+            interpreter.installSegment5<OpCast<ExplicitRef>>(Compiler::Misc::opcodeCastExplicit);
         }
 
         void registerEnableOpcodes(Compiler::Extensions& extensions)

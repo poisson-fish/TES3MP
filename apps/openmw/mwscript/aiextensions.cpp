@@ -325,6 +325,12 @@ namespace MWScript
                 MWWorld::Ptr ptr = R()(runtime);
                 Interpreter::Type_Integer value = runtime[0].mInteger;
                 runtime.pop();
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.setAiSetting(ptr, static_cast<int>(mIndex), value);
+                    return;
+                }
                 if (ptr.getClass().isActor())
                 {
                     ptr.getClass().getCreatureStats(ptr).setAiSetting(mIndex, value);
@@ -517,6 +523,13 @@ namespace MWScript
                 ESM::RefId targetID = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.startCombat(actor, targetID);
+                    return;
+                }
+
                 MWWorld::Ptr target = MWBase::Environment::get().getWorld()->searchPtr(targetID, true, false);
                 if (!target.isEmpty() && !target.getBase()->isDeleted()
                     && !target.getClass().getCreatureStats(target).isDead())
@@ -531,6 +544,12 @@ namespace MWScript
             void execute(Interpreter::Runtime& runtime) override
             {
                 MWWorld::Ptr actor = R()(runtime);
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.stopCombat(actor);
+                    return;
+                }
                 if (!actor.getClass().isActor())
                     return;
                 MWBase::Environment::get().getMechanicsManager()->stopCombat(actor);
@@ -582,6 +601,25 @@ namespace MWScript
             interpreter.installSegment3<OpAiTravel<ExplicitRef>>(Compiler::Ai::opcodeAiTravelExplicit);
             interpreter.installSegment3<OpAiEscort<ImplicitRef>>(Compiler::Ai::opcodeAiEscort);
             interpreter.installSegment3<OpAiEscort<ExplicitRef>>(Compiler::Ai::opcodeAiEscortExplicit);
+        }
+
+        void registerCombatOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerInstruction("startcombat", "c", Compiler::Ai::opcodeStartCombat, Compiler::Ai::opcodeStartCombatExplicit);
+            extensions.registerInstruction("stopcombat", "x", Compiler::Ai::opcodeStopCombat, Compiler::Ai::opcodeStopCombatExplicit);
+            extensions.registerInstruction("setfight", "l", Compiler::Ai::opcodeSetFight, Compiler::Ai::opcodeSetFightExplicit);
+        }
+
+        void installCombatOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpStartCombat<ImplicitRef>>(Compiler::Ai::opcodeStartCombat);
+            interpreter.installSegment5<OpStartCombat<ExplicitRef>>(Compiler::Ai::opcodeStartCombatExplicit);
+            interpreter.installSegment5<OpStopCombat<ImplicitRef>>(Compiler::Ai::opcodeStopCombat);
+            interpreter.installSegment5<OpStopCombat<ExplicitRef>>(Compiler::Ai::opcodeStopCombatExplicit);
+            interpreter.installSegment5<OpSetAiSetting<ImplicitRef>>(
+                Compiler::Ai::opcodeSetFight, MWMechanics::AiSetting::Fight);
+            interpreter.installSegment5<OpSetAiSetting<ExplicitRef>>(
+                Compiler::Ai::opcodeSetFightExplicit, MWMechanics::AiSetting::Fight);
         }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)

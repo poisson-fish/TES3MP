@@ -115,6 +115,13 @@ namespace MWScript
         int itemCount(const MWWorld::Ptr& reference, const ESM::RefId& item) const;
         void addItem(const MWWorld::Ptr& reference, const ESM::RefId& item, int count) const;
         void removeItem(const MWWorld::Ptr& reference, const ESM::RefId& item, int count) const;
+        bool hasSpell(const MWWorld::Ptr& reference, const ESM::RefId& spell) const;
+        void addSpell(const MWWorld::Ptr& reference, const ESM::RefId& spell) const;
+        void removeSpell(const MWWorld::Ptr& reference, const ESM::RefId& spell) const;
+        void startCombat(const MWWorld::Ptr& actor, const ESM::RefId& target) const;
+        void stopCombat(const MWWorld::Ptr& actor) const;
+        void setAiSetting(const MWWorld::Ptr& actor, int index, int value) const;
+        void cast(const MWWorld::Ptr& caster, const ESM::RefId& spell, const ESM::RefId& target) const;
         const MWWorld::ESMStore& getContent() const;
         bool hasExplicitPlayer() const { return mExplicitPlayer; }
         DialogueState* getDialogueState() const;

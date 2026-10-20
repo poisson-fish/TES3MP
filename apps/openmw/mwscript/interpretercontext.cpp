@@ -373,6 +373,73 @@ namespace MWScript
         mReferenceState->removeItem(*mExecution, reference, item, count);
     }
 
+    bool InterpreterContext::hasSpell(const MWWorld::Ptr& reference, const ESM::RefId& spell) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference()
+            || !spell.is<ESM::StringRefId>() || spell.empty()
+            || spell.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || spell.getRefIdString().find('\0') != std::string_view::npos)
+            throw std::invalid_argument("GetSpell lacks scoped spellbook transaction");
+        return mReferenceState->hasSpell(*mExecution, reference, spell);
+    }
+
+    void InterpreterContext::addSpell(const MWWorld::Ptr& reference, const ESM::RefId& spell) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference()
+            || !spell.is<ESM::StringRefId>() || spell.empty()
+            || spell.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || spell.getRefIdString().find('\0') != std::string_view::npos)
+            throw std::invalid_argument("AddSpell lacks scoped spellbook transaction");
+        mReferenceState->addSpell(*mExecution, reference, spell);
+    }
+
+    void InterpreterContext::removeSpell(const MWWorld::Ptr& reference, const ESM::RefId& spell) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference()
+            || !spell.is<ESM::StringRefId>() || spell.empty()
+            || spell.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || spell.getRefIdString().find('\0') != std::string_view::npos)
+            throw std::invalid_argument("RemoveSpell lacks scoped spellbook transaction");
+        mReferenceState->removeSpell(*mExecution, reference, spell);
+    }
+
+    void InterpreterContext::startCombat(const MWWorld::Ptr& actor, const ESM::RefId& target) const
+    {
+        if (!mExecution || !mReferenceState || actor.isEmpty() || !actor.hasLiveReference()
+            || !target.is<ESM::StringRefId>() || target.empty()
+            || target.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || target.getRefIdString().find('\0') != std::string_view::npos)
+            throw std::invalid_argument("StartCombat lacks staged combat admission");
+        mReferenceState->startCombat(*mExecution, actor, target);
+    }
+
+    void InterpreterContext::stopCombat(const MWWorld::Ptr& actor) const
+    {
+        if (!mExecution || !mReferenceState || actor.isEmpty() || !actor.hasLiveReference())
+            throw std::invalid_argument("StopCombat lacks staged combat admission");
+        mReferenceState->stopCombat(*mExecution, actor);
+    }
+
+    void InterpreterContext::setAiSetting(const MWWorld::Ptr& actor, int index, int value) const
+    {
+        if (!mExecution || !mReferenceState || actor.isEmpty() || !actor.hasLiveReference())
+            throw std::invalid_argument("AI setting write lacks staged combat admission");
+        mReferenceState->setAiSetting(*mExecution, actor, index, value);
+    }
+
+    void InterpreterContext::cast(const MWWorld::Ptr& caster, const ESM::RefId& spell, const ESM::RefId& target) const
+    {
+        if (!mExecution || !mReferenceState || caster.isEmpty() || !caster.hasLiveReference()
+            || !spell.is<ESM::StringRefId>() || spell.empty()
+            || spell.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || spell.getRefIdString().find('\0') != std::string_view::npos
+            || !target.is<ESM::StringRefId>() || target.empty()
+            || target.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || target.getRefIdString().find('\0') != std::string_view::npos)
+            throw std::invalid_argument("Cast lacks staged spellcast admission");
+        mReferenceState->cast(*mExecution, caster, spell, target);
+    }
+
     void InterpreterContext::position(const MWWorld::Ptr& reference, const std::array<float, 3>& xyz,
         float yaw, const ESM::RefId& cell) const
     {

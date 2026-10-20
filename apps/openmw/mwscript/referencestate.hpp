@@ -43,6 +43,20 @@ namespace MWScript
         { throw std::invalid_argument("AddItem lacks staged inventory admission"); }
         virtual void removeItem(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&, int)
         { throw std::invalid_argument("RemoveItem lacks staged inventory admission"); }
+        virtual bool hasSpell(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&) const
+        { throw std::invalid_argument("GetSpell lacks staged spellbook admission"); }
+        virtual void addSpell(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&)
+        { throw std::invalid_argument("AddSpell lacks staged spellbook admission"); }
+        virtual void removeSpell(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&)
+        { throw std::invalid_argument("RemoveSpell lacks staged spellbook admission"); }
+        virtual void startCombat(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&)
+        { throw std::invalid_argument("StartCombat lacks staged combat admission"); }
+        virtual void stopCombat(const ExecutionContext&, const MWWorld::Ptr&)
+        { throw std::invalid_argument("StopCombat lacks staged combat admission"); }
+        virtual void setAiSetting(const ExecutionContext&, const MWWorld::Ptr&, int, int)
+        { throw std::invalid_argument("AI setting write lacks staged combat admission"); }
+        virtual void cast(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&, const ESM::RefId&)
+        { throw std::invalid_argument("Cast lacks staged spellcast admission"); }
     };
 }
 #endif

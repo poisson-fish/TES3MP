@@ -107,7 +107,7 @@ namespace TES3MP::Native
         const ESM::RefId& source, bool lifeEvents)
         : mRuntime(script, std::move(globals), bank, source, lifeEvents)
     {
-        require(!campaignContent.empty() && campaignContent.size() <= 256);
+        require(!campaignContent.empty() && campaignContent.size() <= 4096);
         // Bind source, ownership/defaults, limits and the content/campaign identity.
         // Stock GSCR/GLOB records remain the state representation.
         auto binding = encode(initial());

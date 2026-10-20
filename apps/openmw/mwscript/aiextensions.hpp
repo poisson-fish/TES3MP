@@ -19,6 +19,8 @@ namespace MWScript
         void installOpcodes(Interpreter::Interpreter& interpreter);
         void registerActivityOpcodes(Compiler::Extensions& extensions);
         void installActivityOpcodes(Interpreter::Interpreter& interpreter);
+        void registerCombatOpcodes(Compiler::Extensions& extensions);
+        void installCombatOpcodes(Interpreter::Interpreter& interpreter);
     }
 }
 

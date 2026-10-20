@@ -48,6 +48,7 @@ namespace MWScript
                     staged->journal(quest, index, &runtime.getContext());
                     return;
                 }
+                requireStockDialogue(runtime);
                 MWWorld::Ptr ptr = R()(runtime, false); // required=false
                 if (ptr.isEmpty())
                     ptr = MWBase::Environment::get().getWorld()->getPlayerPtr();
@@ -84,7 +85,11 @@ namespace MWScript
 
                 if (auto* staged = static_cast<InterpreterContext&>(runtime.getContext()).getDialogueState())
                     staged->setJournalIndex(quest, index);
-                else MWBase::Environment::get().getJournal()->setJournalIndex(quest, index);
+                else
+                {
+                    requireStockDialogue(runtime);
+                    MWBase::Environment::get().getJournal()->setJournalIndex(quest, index);
+                }
             }
         };
 
@@ -97,6 +102,7 @@ namespace MWScript
                 runtime.pop();
 
                 auto* staged = static_cast<InterpreterContext&>(runtime.getContext()).getDialogueState();
+                if (!staged) requireStockDialogue(runtime);
                 int index = staged ? staged->journalIndex(quest) : MWBase::Environment::get().getJournal()->getJournalIndex(quest);
 
                 runtime.push(index);
@@ -147,6 +153,7 @@ namespace MWScript
 
                 if (auto* staged = static_cast<InterpreterContext&>(runtime.getContext()).getDialogueState())
                 { staged->addTopic(topic); return; }
+                requireStockDialogue(runtime);
 
                 if (!MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>().search(topic))
                 {
@@ -360,9 +367,24 @@ namespace MWScript
             extensions.registerFunction("getjournalindex", 'l', "c", Compiler::Dialogue::opcodeGetJournalIndex);
         }
 
+        void registerSourceJournalOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerInstruction("journal", "cl", Compiler::Dialogue::opcodeJournal);
+            extensions.registerInstruction("setjournalindex", "cl", Compiler::Dialogue::opcodeSetJournalIndex);
+            extensions.registerInstruction("addtopic", "S", Compiler::Dialogue::opcodeAddTopic);
+        }
+
         void installJournalQueryOpcode(Interpreter::Interpreter& interpreter)
         {
             interpreter.installSegment5<OpGetJournalIndex>(Compiler::Dialogue::opcodeGetJournalIndex);
+        }
+
+        void installSourceJournalOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpJournal<ImplicitRef>>(Compiler::Dialogue::opcodeJournal);
+            interpreter.installSegment5<OpSetJournalIndex>(Compiler::Dialogue::opcodeSetJournalIndex);
+            installJournalQueryOpcode(interpreter);
+            interpreter.installSegment5<OpAddTopic>(Compiler::Dialogue::opcodeAddTopic);
         }
 
         void installJournalOpcodes(Interpreter::Interpreter& interpreter)

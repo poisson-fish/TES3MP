@@ -37,50 +37,41 @@ GUI lifetime guard closes removed replicas.
 
 **V89–90:** capability 42; stock source Position/PositionCell/GetPos/GetAngle
 retain [bounded admission](DEVELOPMENT.md). V89 stays occupied; V90 returns
-grounded bodies beyond original/destination NPC and peer hulls against the living
-original life. Outcomes stay dormant; B keeps its opportunity. Rejection installs
-nothing; uncertainty closes authority; recovery is silent.
-Native: `build/logs/m5-relocation-return-{state,host-02}.log`;
-V89/V88 regressions: `build/logs/m5-relocation-return-{v89-state,enable-regression}.log`.
+grounded bodies beyond original/destination NPC/peer hulls against the living
+original life. Outcomes stay dormant; B keeps its opportunity; recovery is silent.
+Native: `build/logs/m5-relocation-return-{state,host-02,v89-state,enable-regression}.log`.
 Rendered: `build/m5-relocation-return-{desktop,restart}-01/result.json`.
 
-**V91:** foreign death persists a dependency/paused clock after bank rollback;
-newer lives resume once. Rejection/restart/stale-life/continuation:
-`build/logs/m5-source-wait-{state,host-09}.log`.
-
-**V92–93:** fresh images/capability 41. Stock OnDeath consumes attributed source-life
-history only with bank/gameplay durability. Own/pre-quest credit, foreign/helper
-exclusion, stale-life rejection and retry/restart pass. V93 retains the oldest
-wait's next canonical opportunity until eligible credit; repeated foreign attacks
-cannot consume B's life. No new loot/lives. Summons remain closed.
-Native: `build/logs/m5-life-event-{state,host-03,stock}.log`,
-`build/logs/m5-opportunity-{state,host-03}.log`.
-
-**Health/wait UI:** staged health reads preserve bank/cursor/clock rollback.
-Atomic retry/restart: `build/logs/m5-health-{state-final,host-03}.log`;
-client receipts: `build/logs/m5-wait-adapter.log`.
-Synthetic two-desktop V92–93 waiting/reserved/earned recovery:
+**V91–93:** foreign death persists a dependency/paused clock after bank rollback;
+newer lives resume once (`build/logs/m5-source-wait-{state,host-09}.log`).
+Stock OnDeath consumes attributed source-life history with bank/gameplay durability;
+own/pre-quest credit, foreign/helper exclusion, stale-life rejection and retry/restart pass.
+V93 retains the oldest wait's next canonical opportunity until eligible credit without
+new loot/lives; summons remain closed (`build/logs/m5-{life-event-{state,host-03,stock},opportunity-{state,host-03}}.log`).
+Staged health reads/wait UI: `build/logs/m5-{health-{state-final,host-03},wait-adapter}.log`,
 `build/m5-wait-v{92,93}-restart-credit-01/result.json`.
 
-**V94–96 & Lua (#5):** stock escort/travel; A/B independently arrive. V95 (`native-inventory-95`)
-unifies V85–95, binds placed `npc->mScript` into personal/shared banks
-(`fargoth`, `vodunius nuccius`, `TR_m1_T_Eldale`), supports multi-cell/actor `EncounterBinding`,
-and admits source-bank GetJournalIndex/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
-foreign-NPC ModDisposition and provenance GetItemCount/AddItem/RemoveItem/Function_Item
-so private NPC banks/timers/reads/items/receipts, departures, safe returns and life-cursors
-coexist across deaths/respawns. V96 (`native-inventory-96`) adds persistent opt-in parties/enrollment:
-compatible/helper enrollment, late-join checks, delegated choices with
-dissent/physical split, per-character costs/stock rewards (`RewardReceipt`s), helper/party OnDeath
+**V94–96, Lua (#5) & Content (#6):** stock escort/travel; A/B arrive independently.
+V95 (`native-inventory-95`) unifies V85–95, binds `npc->mScript` into personal/shared banks,
+supports multi-cell/actor `EncounterBinding`, and admits source-bank
+GetJournalIndex/Journal/SetJournalIndex/AddTopic/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
+GetSpell/AddSpell/RemoveSpell, StartCombat/StopCombat/SetFight/Cast, foreign-NPC ModDisposition
+and provenance GetItemCount/AddItem/RemoveItem/Function_Item across deaths/respawns.
+V96 (`native-inventory-96`) adds persistent opt-in parties/helpers, delegated choices with
+dissent/physical split, per-character costs/rewards (`RewardReceipt`s), helper/party OnDeath
 credit/reservations, offline/leader-loss handoff, leave/kick/rejoin, and wire v4 `DialogueEncounterStatus`.
 M5 #5 scopes `MWLua` (`world.mwscript`, `sendEvent`, `LuaEvents`) and `LuaUtil` (`LuaStorage`,
-`ScriptsContainer` timers/callbacks, deterministic serialization, `pcall`/`xpcall` waits,
-`SafePtr` lifetimes) with character/story/shared isolation, rollback/retry, and `LUAM`/storage recovery.
+`ScriptsContainer` timers/callbacks, serialization, `pcall`/`xpcall` waits, `SafePtr` lifetimes)
+with character/story/shared isolation, rollback/retry, and `LUAM`/storage recovery.
+M5 #6 proves unchanged Seyda Neen (`MS_FargothRing`, `MS_Nuccius`/`voduniusScript`,
+`MS_Lookout`/`treestumpScript`, `MV_DeadTaxman`/`processusScript`) and TR *Duel of Riddles*
+(`TR_M1_GS_MQ_4`, `TR_m1_T_EldaleSc`, `TR_m0_TelvanniHortDeathSc`) across A/B with
+concurrent dialogue, failed-write rollback, waiting/reserved restart and attributed `OnDeath`.
 Native: `build/logs/m5-{activity-host,departure-host,activity-state}-final.log`,
 `build/logs/m5-npc-bank-{state,script}.log`, `build/logs/m5-{npc-state,dialogue-stock,quest-audit,multi-cell-build}.log`,
-`build/logs/m5-parties-{adapter,dialogue,all-dialogue}.log`,
-`build/logs/m5-{lua-build,script-context-lua-{context,rollback,stock}}.log`.
+`build/logs/m5-dialogue-{npc-banks,parties,stock}.log`, `build/logs/m5-parties-{adapter,dialogue,all-dialogue}.log`,
+`build/logs/m5-{lua-build,script-context-lua-{context,rollback,stock}}.log`,
+`build/logs/m5-{seyda,tr}-quest-preflight.log`, `build/logs/m5-seyda-content-preflight-final.log`.
 
-**Next:** run unchanged Seyda Neen and TR (Duel of Riddles) real-content quest verification.
-Source/result preflights: `build/logs/m5-{seyda,tr}-quest-preflight.log`;
-routines: `build/logs/m5-seyda-content-preflight-final.log`.
-Package replacement/cross-cell AI remain closed; M5 stays open.
+**Next:** capture two-desktop rendered/acceptance evidence for M5 unchanged Seyda Neen/TR quests
+and V85 substitution/disposition/journal UI before closing M5. Package replacement/cross-cell AI remain closed.

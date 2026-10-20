@@ -2114,13 +2114,19 @@ namespace
         }
         ESM::Global global; global.blank(); global.mId = id("personal_counter");
         global.mValue.setType(ESM::VT_Long); global.mValue.setInteger(0);
-        for (const auto* forbidden : {"Position 200 -32 1 0", "PositionCell 200 -32 1 0 room_e87", "set v to player->GetPos x",
-            "Journal journey_t37 10", "SetJournalIndex journey_t37 10"})
+        for (const auto* forbidden : {"Position 200 -32 1 0", "PositionCell 200 -32 1 0 room_e87", "set v to player->GetPos x"})
         {
             auto invalidScript = scripts[0];
             invalidScript.mScriptText = "begin ledger_v63\nfloat v\n" + std::string(forbidden) + "\nend";
             rejects([&] { SharedWorldScript invalid(invalidScript, {global}, "npc-banks-1", crypto, scripts, id("speaker_r29"), true); },
-                "Scheduled source bank admitted position/journal mutation or foreign reference");
+                "Scheduled source bank admitted position mutation or foreign reference");
+        }
+        for (const auto* sourceOnly : {"Journal journey_t37 10", "SetJournalIndex journey_t37 10", "AddTopic \"passage_k61\""})
+        {
+            auto invalidScript = scripts[0];
+            invalidScript.mScriptText = "begin ledger_v63\nfloat v\n" + std::string(sourceOnly) + "\nend";
+            rejects([&] { SharedWorldScript invalid(invalidScript, {global}, "npc-banks-1", crypto, std::vector{invalidScript, scripts[1]}); },
+                "Source-free bank admitted source-only journal/topic mutation");
         }
         auto primary = std::make_shared<SharedWorldScript>(scripts[0], std::vector{global}, "npc-banks-1", crypto,
             scripts, id("speaker_r29"), true);

@@ -214,7 +214,7 @@ namespace MWScript
         std::vector<std::pair<ESM::RefId, Compiler::Locals>> members;
         require(mSource.empty() || (mBank && mSource.is<ESM::StringRefId>()), "Source query requires a script bank");
         if (!mSource.empty()) name(mSource.getRefIdString());
-        CompilerContext context(mGlobals, members, mSource, !mSource.empty());
+        CompilerContext context(mGlobals, members, mSource, !mSource.empty(), !mSource.empty());
         for (const auto& member : bank)
         {
             require(member.mId.is<ESM::StringRefId>(), "Invalid bank script identity");
@@ -247,9 +247,12 @@ namespace MWScript
             Dialogue::registerJournalQueryOpcode(extensions);
             if (!mSource.empty())
             {
+                Dialogue::registerSourceJournalOpcodes(extensions);
                 Misc::registerSourceWaitOpcodes(extensions);
                 Cell::registerStateOpcodes(extensions);
                 Stats::registerHealthOpcodes(extensions);
+                Stats::registerSpellOpcodes(extensions);
+                Ai::registerCombatOpcodes(extensions);
                 Transformation::registerPositionOpcodes(extensions, false);
                 Container::registerItemOpcodes(extensions);
             }
@@ -377,12 +380,15 @@ namespace MWScript
         if (mLifeEvents) Stats::installDeathOpcodes(interpreter);
         if (!mSource.empty()) Stats::installHealthOpcodes(interpreter);
         if (dialogue && program) Dialogue::installJournalOpcodes(interpreter);
+        else if (dialogue && !mSource.empty()) Dialogue::installSourceJournalOpcodes(interpreter);
         else if (mBank) Dialogue::installJournalQueryOpcode(interpreter);
         if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
         if (referenceState) Misc::installDisableOpcodes(interpreter);
         if (referenceState) Transformation::installPositionOpcodes(interpreter);
         if (referenceState) Ai::installActivityOpcodes(interpreter);
-        if (referenceState) Container::installItemOpcodes(interpreter);
+        if (referenceState || !mSource.empty()) Ai::installCombatOpcodes(interpreter);
+        if (referenceState || !mSource.empty()) Container::installItemOpcodes(interpreter);
+        if (referenceState || !mSource.empty()) Stats::installSpellOpcodes(interpreter);
         // Every admitted opcode is stock core bytecode. At most one stack value
         // is allocated per executed instruction; loops and presentation are bounded.
         interpreter.run(program ? *program : mProgram, *context, MaximumExecutedInstructions, trace);
@@ -407,6 +413,8 @@ namespace MWScript
         {
             Misc::registerDisableOpcodes(extensions);
             Container::registerItemOpcodes(extensions);
+            Stats::registerSpellOpcodes(extensions);
+            Ai::registerCombatOpcodes(extensions);
         }
         require(!restoration || (physical && !reference.empty()), "Restoration lacks bounded source");
         if (restoration) Misc::registerEnableOpcodes(extensions);

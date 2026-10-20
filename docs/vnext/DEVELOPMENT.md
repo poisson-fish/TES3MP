@@ -117,13 +117,14 @@ temporary effects/paralysis/levitation/overencumbrance reject. Offline owners
 suspend; arrival retains private destination without auto-credit/loot.
 Filters: `activities`, `story-activities`, `story-departure`.
 V95 (`native-inventory-95`, capabilities 41–42): unifies V85–95; admits
-source-bank GetPos/GetAngle/GetJournalIndex/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
+source-bank GetPos/GetAngle/GetJournalIndex/Journal/SetJournalIndex/AddTopic/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
+GetSpell/AddSpell/RemoveSpell, StartCombat/StopCombat/SetFight/Cast,
 foreign-NPC ModDisposition and provenance GetItemCount/AddItem/RemoveItem
-(plus Function_Item; rejects `player` non-item ops, journal writes and Position/PositionCell in banks),
+(plus Function_Item; rejects `player` non-item ops, source-free journal writes and Position/PositionCell in banks),
 steps private NPC banks against private pose/journal/activation/items and detached
 spawn stats after activity substeps, commits item receipts atomically,
 suspends terminal Disable banks until safe-return Enable, and enforces reservations.
-Filters: `npc-banks`, `story-npc-banks`, `script-banks`, `quest-audit`.
+Filters: `npc-banks`, `story-npc-banks`, `script-banks`, `quest-audit`, `quest-content`, `tr-quest-content`.
 V96 (`native-inventory-96`): persistent opt-in party/helper enrollment, controller delegation,
 dissent/physical split, per-character costs/rewards with durable `RewardReceipt`s,
 offline suspension/leader-loss handoff, leave/kick/rejoin and wire v4 `DialogueEncounterStatus`.

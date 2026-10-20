@@ -22,6 +22,8 @@ namespace MWScript
         void installDeathOpcodes(Interpreter::Interpreter& interpreter);
         void registerHealthOpcodes(Compiler::Extensions& extensions);
         void installHealthOpcodes(Interpreter::Interpreter& interpreter);
+        void registerSpellOpcodes(Compiler::Extensions& extensions);
+        void installSpellOpcodes(Interpreter::Interpreter& interpreter);
         void installOpcodes(Interpreter::Interpreter& interpreter);
     }
 }

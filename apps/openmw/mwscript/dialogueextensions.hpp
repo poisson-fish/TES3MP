@@ -17,7 +17,9 @@ namespace MWScript
     namespace Dialogue
     {
         void registerJournalQueryOpcode(Compiler::Extensions& extensions);
+        void registerSourceJournalOpcodes(Compiler::Extensions& extensions);
         void installJournalQueryOpcode(Interpreter::Interpreter& interpreter);
+        void installSourceJournalOpcodes(Interpreter::Interpreter& interpreter);
         void installOpcodes(Interpreter::Interpreter& interpreter);
         void installJournalOpcodes(Interpreter::Interpreter& interpreter);
     }

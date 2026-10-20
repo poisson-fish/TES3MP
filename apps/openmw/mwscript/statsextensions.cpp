@@ -525,10 +525,17 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
                 MWWorld::Ptr ptr = R()(runtime);
 
                 ESM::RefId id = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
+
+                if (context.getExecutionContext())
+                {
+                    context.addSpell(ptr, id);
+                    return;
+                }
 
                 if (!ptr.getClass().isActor())
                     return;
@@ -554,10 +561,17 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
                 MWWorld::Ptr ptr = R()(runtime);
 
                 ESM::RefId id = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
+
+                if (context.getExecutionContext())
+                {
+                    context.removeSpell(ptr, id);
+                    return;
+                }
 
                 if (!ptr.getClass().isActor())
                     return;
@@ -617,11 +631,17 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
                 MWWorld::Ptr ptr = R()(runtime);
 
                 ESM::RefId id = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
+
+                if (context.getExecutionContext())
+                {
+                    runtime.push(context.hasSpell(ptr, id) ? 1 : 0);
+                    return;
+                }
 
                 Interpreter::Type_Integer value = 0;
 
@@ -1474,6 +1494,26 @@ namespace MWScript
         {
             interpreter.installSegment5<OpOnDeath<ImplicitRef>>(Compiler::Stats::opcodeOnDeath);
             interpreter.installSegment5<OpOnDeath<ExplicitRef>>(Compiler::Stats::opcodeOnDeathExplicit);
+        }
+
+        void registerSpellOpcodes(Compiler::Extensions& extensions)
+        {
+            extensions.registerInstruction("addspell", "cz", Compiler::Stats::opcodeAddSpell,
+                Compiler::Stats::opcodeAddSpellExplicit);
+            extensions.registerInstruction("removespell", "cz", Compiler::Stats::opcodeRemoveSpell,
+                Compiler::Stats::opcodeRemoveSpellExplicit);
+            extensions.registerFunction("getspell", 'l', "c", Compiler::Stats::opcodeGetSpell,
+                Compiler::Stats::opcodeGetSpellExplicit);
+        }
+
+        void installSpellOpcodes(Interpreter::Interpreter& interpreter)
+        {
+            interpreter.installSegment5<OpAddSpell<ImplicitRef>>(Compiler::Stats::opcodeAddSpell);
+            interpreter.installSegment5<OpAddSpell<ExplicitRef>>(Compiler::Stats::opcodeAddSpellExplicit);
+            interpreter.installSegment5<OpRemoveSpell<ImplicitRef>>(Compiler::Stats::opcodeRemoveSpell);
+            interpreter.installSegment5<OpRemoveSpell<ExplicitRef>>(Compiler::Stats::opcodeRemoveSpellExplicit);
+            interpreter.installSegment5<OpGetSpell<ImplicitRef>>(Compiler::Stats::opcodeGetSpell);
+            interpreter.installSegment5<OpGetSpell<ExplicitRef>>(Compiler::Stats::opcodeGetSpellExplicit);
         }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)
