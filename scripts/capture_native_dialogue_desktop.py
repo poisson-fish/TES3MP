@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import time
 
@@ -123,9 +124,8 @@ def capture(args):
             if args.no_screenshots:
                 return
             destination = args.output / f"{role}-{label}.png"
-            subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                str(Path(__file__).with_name("capture_desktop_window.ps1")), "-ProcessId", str(processes[role].pid),
-                "-Output", str(destination)], check=True, capture_output=True)
+            command(role, "screenshot")
+            shutil.copyfile(f"{paths[role]}.control.{sequences[role]}.png", destination)
             result.setdefault("screenshots", []).append(destination.name)
 
         def reconnect(role):
@@ -219,17 +219,32 @@ def capture(args):
                     screenshot("Bob", "before-own-topic")
                     command("Bob", 'dialoguetopic "north_passage_91 (story 91)"')
                     wait(lambda: progression("Bob", 91, 1, 10, 2), "Bob owns separate choices")
+                    screenshot("Bob", "private-choice")
                     for role in paths:
                         command(role, "dialoguechoice " + ("7" if role == "Alice" else "9"), asynchronous=True)
                     wait(lambda: progression("Alice", 91, 2, 20, 0) and progression("Bob", 91, 2, 30, 0),
                          "concurrent divergent progression")
                     for role in paths:
+                        command(role, "dialogueclose")
+                        command(role, "journal")
+                        time.sleep(.15)
+                        screenshot(role, "journal")
+                        command(role, "close")
+                        command(role, 'dialoguestart "npc_door_actor"')
+                    for role in paths:
                         command(role, 'dialoguetopic "south_passage_92 (story 92)"', asynchronous=True)
                     wait(lambda: all(progression(r, 92, 1, 10, 2) for r in paths), "independent second story pending choices")
                     result["checks"].append(dict(private_responses=True, private_choices=True, concurrent_divergence=True,
-                                                 separate_stories=True))
+                                                 separate_stories=True, journal_ui=True))
                 for role in paths:
                     reconnect(role)
+                if previous:
+                    for role in paths:
+                        command(role, "dialogueclose")
+                        command(role, "journal")
+                        time.sleep(.15)
+                        screenshot(role, "journal-restart")
+                        command(role, "close")
                 for role in paths:
                     for story, direction in ((91, "north"), (92, "south")):
                         transients = [v for v in views(role, story) if v["response"] or v["messages"]]
@@ -248,7 +263,7 @@ def capture(args):
                                 p = profiles[role]
                                 response = (f'{role} ({p["race"]}, {p["class"]}), '
                                             f'{args.speaker_name} greets you in {args.start}. ' + response)
-                            messages = [f'Private {direction} notice'] if v["revision"] == 1 else []
+                            messages = ["#{sJournalEntry}", f"Private {direction} notice"] if v["revision"] == 1 else ["#{sJournalEntry}"]
                             if v["response"] != response or v["messages"] != messages:
                                 raise RuntimeError("Private response/choice branch differs")
                 if not previous:

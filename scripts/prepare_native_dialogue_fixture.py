@@ -139,7 +139,8 @@ for number, direction in (((91, 'north'),) if args.life_events else ((91, 'north
     for i, stage in enumerate((10, 20, 30)):
         payload = string(b'INAM', f'{direction}_journal_{stage}') + string(b'PNAM', f'{direction}_journal_{(10,20,30)[i-1]}' if i else '')
         payload += string(b'NNAM', f'{direction}_journal_{(10,20,30)[i+1]}' if i < 2 else '')
-        payload += sub(b'DATA', struct.pack('<iibbbb', 4, stage, -1, -1, -1, 0)) + string(b'NAME', 'A personal milestone.')
+        payload += sub(b'DATA', struct.pack('<iibbbb', 4, stage, -1, -1, -1, 0)) + string(
+            b'NAME', text_prefix + f'A personal {direction} milestone ({stage}).' if args.substitutions else 'A personal milestone.')
         if stage != 10: payload += sub(b'QSTF', b'\1')
         blob += record(b'INFO', payload)
     stories += [f'story {number} scripts 1 script "{bank}" running 0 globals 0 dialogues 2 "{topic}" "{quest}"']

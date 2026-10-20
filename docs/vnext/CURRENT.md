@@ -19,8 +19,9 @@ proof: `build/m5-ambient-desktop-{02,restart-01,ui-01}/result.json`,
 private relationships, substitutions and journal text/calendar commit with banks.
 Stats accepted,
 2026-10-07: `build/m5-dialogue-ui-01/agent-signoff.json` and
-`build/logs/m5-dialogue-operator-restart-01.log`. Substitution/disposition/journal visual
-acceptance remains open. NPC relationships/atomic recovery:
+`build/logs/m5-dialogue-operator-restart-01.log`. Rendered substitutions/disposition/journal UI:
+`build/m5-dialogue-substitutions-{desktop-05,restart-02}/result.json`,
+`build/m5-dialogue-disposition-{desktop-03,restart-02}/result.json`. NPC relationships/atomic recovery:
 `build/logs/m5-npc-state{,-host}.log`; journal: `build/logs/m5-journal-host.log`.
 
 **V86–88:** capability 41; one dry interior/NPC. Stock Disable discovers private
@@ -74,4 +75,4 @@ Native: `build/logs/m5-{activity-host,departure-host,activity-state}-final.log`,
 `build/logs/m5-{seyda,tr}-quest-preflight.log`, `build/logs/m5-seyda-content-preflight-final.log`.
 
 **Next:** capture two-desktop rendered/acceptance evidence for M5 unchanged Seyda Neen/TR quests
-and V85 substitution/disposition/journal UI before closing M5. Package replacement/cross-cell AI remain closed.
+before closing M5. Package replacement/cross-cell AI remain closed.

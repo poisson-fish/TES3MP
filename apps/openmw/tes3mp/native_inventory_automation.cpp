@@ -25,8 +25,11 @@
 #include "../mwmechanics/combat.hpp"
 #include "../mwmechanics/spellcasting.hpp"
 #include "../mwrender/animation.hpp"
+#include "../mwrender/postprocessor.hpp"
 #include "../mwphysics/raycasting.hpp"
 #include "../mwworld/esmstore.hpp"
+#include <condition_variable>
+#include <mutex>
 #include <cmath>
 #include <iomanip>
 #include <bit>
@@ -100,6 +103,56 @@ namespace TES3MP::OpenMWAdapter
             return {MWWorld::inventoryRecordId(ref.getRefId()), std::bit_cast<uint32_t>(ref.getCharge()),
                 std::bit_cast<uint32_t>(ref.getEnchantmentCharge()),
                 ref.getSoul().empty() ? 0 : MWWorld::inventoryRecordId(ref.getSoul())};
+        }
+        struct GuiScreenshotCallback : public osg::Drawable::DrawCallback
+        {
+            explicit GuiScreenshotCallback(osg::Image* image)
+                : mImage(image)
+            {
+            }
+            void drawImplementation(osg::RenderInfo& renderInfo, const osg::Drawable*) const override
+            {
+                const osg::Viewport* vp = renderInfo.getState() ? renderInfo.getState()->getCurrentViewport() : nullptr;
+                const int screenW = vp ? static_cast<int>(vp->width()) : 0;
+                const int screenH = vp ? static_cast<int>(vp->height()) : 0;
+                if (screenW > 0 && screenH > 0)
+                    mImage->readPixels(0, 0, screenW, screenH, GL_RGB, GL_UNSIGNED_BYTE);
+                std::lock_guard<std::mutex> lock(mMutex);
+                mDone = true;
+                mCondition.notify_all();
+            }
+            void wait() const
+            {
+                std::unique_lock<std::mutex> lock(mMutex);
+                mCondition.wait_for(lock, std::chrono::seconds(2), [this] { return mDone; });
+            }
+            osg::ref_ptr<osg::Image> mImage;
+            mutable std::mutex mMutex;
+            mutable std::condition_variable mCondition;
+            mutable bool mDone = false;
+        };
+
+        osg::Camera* findGuiCamera(osg::Group* group)
+        {
+            if (!group)
+                return nullptr;
+            for (unsigned int i = 0; i < group->getNumChildren(); ++i)
+            {
+                osg::Node* child = group->getChild(i);
+                if (!child)
+                    continue;
+                if (child->getName() == "GUI Root")
+                {
+                    if (auto* guiGroup = child->asGroup())
+                        for (unsigned int j = 0; j < guiGroup->getNumChildren(); ++j)
+                            if (auto* cam = dynamic_cast<osg::Camera*>(guiGroup->getChild(j)))
+                                return cam;
+                }
+                if (auto* subgroup = child->asGroup())
+                    if (auto* cam = findGuiCamera(subgroup))
+                        return cam;
+            }
+            return nullptr;
         }
         uint64_t characterId(std::string_view record)
         {
@@ -1005,9 +1058,28 @@ namespace TES3MP::OpenMWAdapter
         else if (action == "screenshot")
         {
             osg::ref_ptr<osg::Image> image = new osg::Image;
+            osg::ref_ptr<osg::Image> guiImage = new osg::Image;
+            osg::Camera* guiCamera = findGuiCamera(world->getPostProcessor());
+            osg::ref_ptr<osg::Drawable> tempGuiDrw;
+            osg::ref_ptr<GuiScreenshotCallback> guiCallback;
+            if (guiCamera)
+            {
+                guiCallback = new GuiScreenshotCallback(guiImage);
+                tempGuiDrw = new osg::Drawable;
+                tempGuiDrw->setDrawCallback(guiCallback);
+                tempGuiDrw->setCullingActive(false);
+                tempGuiDrw->getOrCreateStateSet()->setRenderBinDetails(
+                    100, "RenderBin", osg::StateSet::USE_RENDERBIN_DETAILS);
+                guiCamera->addChild(tempGuiDrw);
+            }
             world->screenshot(image, 1000, 700);
+            if (guiCallback)
+                guiCallback->wait();
+            if (guiCamera && tempGuiDrw)
+                guiCamera->removeChild(tempGuiDrw);
+            const osg::Image& outImage = (guiImage->s() > 0 && guiImage->t() > 0) ? *guiImage : *image;
             const auto path = mTraversalControl.string() + "." + std::to_string(sequence) + ".png";
-            if (!osgDB::writeImageFile(*image, path))
+            if (!osgDB::writeImageFile(outImage, path))
                 throw std::runtime_error("Traversal screenshot could not be written");
         }
         else if (action == "detect")
