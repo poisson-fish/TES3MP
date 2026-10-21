@@ -2199,6 +2199,19 @@ namespace TES3MP::Native
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareSelectedRestore(
         std::span<const char> bytes, std::span<const ActorSceneDoor> doors, std::span<const uint64_t> removed)
     {
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        std::vector<ActorSceneDoor> defaultDoors;
+        if (doors.empty() && (!mImpl->mDoors.empty() || mNeighbor || !mScenery.empty()))
+        {
+            for (auto* scene = this; scene; scene = scene->mNeighbor.get())
+                defaultDoors.insert(defaultDoors.end(), scene->mImpl->mDoors.begin(), scene->mImpl->mDoors.end());
+            for (const auto& scene : mScenery)
+                defaultDoors.insert(defaultDoors.end(), scene->mImpl->mDoors.begin(), scene->mImpl->mDoors.end());
+            std::ranges::sort(defaultDoors, {}, &ActorSceneDoor::mId);
+            defaultDoors.erase(std::unique(defaultDoors.begin(), defaultDoors.end(), [](const auto& a, const auto& b) {
+                return a.mId == b.mId; }), defaultDoors.end());
+            doors = defaultDoors;
+        }
         if (!mNeighbor) return prepareRestore(bytes, doors, removed);
         const auto combined = joinActorImages(bytes, mNeighbor->image());
         return prepareRestore(combined, doors, removed);
@@ -2348,7 +2361,8 @@ namespace TES3MP::Native
             travel.hasDestination = boolean(); travel.destination = vector();
             travel.door = word(); travel.avoidance.mDuration = real(); travel.avoidance.mLastPos = vector();
             const auto direction = word(), random = word();
-            if (!mImpl->mDynamicDestination && travel.hasDestination != mImpl->mTravel.hasDestination)
+            if (!mImpl->mDynamicDestination && !mImpl->mWaterNavigation
+                && travel.hasDestination != mImpl->mTravel.hasDestination)
                 throw std::invalid_argument("Actor destination presence outside binding");
             if (travel.destination != mImpl->mTravel.destination
                     && (!mImpl->mDynamicDestination && !mImpl->mWaterNavigation
@@ -2405,9 +2419,9 @@ namespace TES3MP::Native
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareScopedNavigation(
         std::span<const char> image, const ActorMovement& movement, const std::array<float, 3>& destination)
     {
-        if (mNeighbor || !mScenery.empty()) throw std::invalid_argument("Activity exceeds one actor/interior");
-        auto before = prepareRestore(image);
-        return prepareNavigationFrom(before.get(), movement, {}, destination);
+        if (!mImpl) throw std::logic_error("Actor scene is unloaded");
+        auto before = prepareSelectedRestore(image);
+        return prepareNavigationFrom(before.get(), movement, mImpl->mDoors, destination);
     }
 
     std::unique_ptr<InteriorActorScene::Prepared> InteriorActorScene::prepareNavigationFrom(

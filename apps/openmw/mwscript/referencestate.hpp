@@ -18,6 +18,29 @@ namespace MWScript
         virtual void aiTravel(const ExecutionContext&, const MWWorld::Ptr&, const std::array<float, 3>&, bool,
             const ESM::RefId&, float)
         { throw std::invalid_argument("AI package lacks staged activity admission"); }
+        virtual void aiPackage(const ExecutionContext& context, const MWWorld::Ptr& ptr, int packageType,
+            const std::array<float, 3>& destination, bool repeat, const ESM::RefId& targetActor, float duration,
+            std::string_view cellName = {})
+        {
+            if ((packageType == 1 || packageType == 2) && cellName.empty())
+            {
+                aiTravel(context, ptr, destination, repeat, targetActor, duration);
+                return;
+            }
+            throw std::invalid_argument("AI package lacks staged activity admission");
+        }
+        virtual bool aiPackageDone(const ExecutionContext&, const MWWorld::Ptr&) const
+        { throw std::invalid_argument("GetAiPackageDone lacks staged activity admission"); }
+        virtual int currentAiPackage(const ExecutionContext&, const MWWorld::Ptr&) const
+        { throw std::invalid_argument("GetCurrentAIPackage lacks staged activity admission"); }
+        virtual bool pcCell(const ExecutionContext&, std::string_view) const
+        { throw std::invalid_argument("GetPCCell lacks staged cell admission"); }
+        virtual float distance(const ExecutionContext&, const MWWorld::Ptr&, const ESM::RefId&) const
+        { throw std::invalid_argument("GetDistance lacks staged position admission"); }
+        virtual void forceGreeting(const ExecutionContext&, const MWWorld::Ptr&)
+        { throw std::invalid_argument("ForceGreeting lacks staged dialogue admission"); }
+        virtual void goodbye(const ExecutionContext&)
+        { throw std::invalid_argument("Goodbye lacks staged dialogue admission"); }
         virtual bool onDeath(const ExecutionContext&, const MWWorld::Ptr&)
         { throw std::invalid_argument("OnDeath lacks attributed life-event admission"); }
         virtual float health(const ExecutionContext&, const MWWorld::Ptr&, bool) const

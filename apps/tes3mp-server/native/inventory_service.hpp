@@ -516,6 +516,9 @@ namespace TES3MP::Native
         bool applyPartyDisconnect(uint64_t story, PlayerId player, const NativeInventoryCommit& persist);
         bool applyPartyResume(uint64_t story, PlayerId player, bool asHelper, const NativeInventoryCommit& persist);
         bool applyPartyController(uint64_t story, PlayerId newController, const NativeInventoryCommit& persist);
+        bool hasLockedQuestProvenance(PlayerId player, const ESM::RefId& item) const;
+        bool applyQuestItemPickup(uint64_t story, PlayerId player, uint64_t sourceId, const ESM::RefId& item,
+            int count, const NativeInventoryCommit& persist);
         bool hasStoryEncounters() const override { return mBinding.mPersonalScripts && mBinding.mPersonalScripts->encounters(); }
         bool hasStoryRelocations() const override { return mBinding.mPersonalScripts && mBinding.mPersonalScripts->relocations(); }
         std::optional<PlayerPhysicsBaseline> projectPlayerPhysics(const CanonicalServerState&, PlayerId,

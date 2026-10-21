@@ -338,7 +338,7 @@ namespace TES3MP::Native
 
     namespace
     {
-        void activity(std::vector<char>& bytes, const PersonalScripts::Instance& state)
+        void activity(std::vector<char>& bytes, const PersonalScripts::Instance& state, bool npcBanks = false)
         {
             word(bytes, bool(state.activity));
             if (!state.activity) return;
@@ -350,8 +350,13 @@ namespace TES3MP::Native
             word(bytes, std::bit_cast<uint32_t>(a.walkSpeed));
             word(bytes, a.tick); word(bytes, a.steps); word(bytes, a.actorImage.size());
             bytes.insert(bytes.end(), a.actorImage.begin(), a.actorImage.end());
+            if (npcBanks)
+            {
+                word(bytes, std::bit_cast<uint32_t>(a.packageType));
+                ref(bytes, a.destinationCell);
+            }
         }
-        void activity(Cursor& input, PersonalScripts::Instance* state)
+        void activity(Cursor& input, PersonalScripts::Instance* state, bool npcBanks = false)
         {
             const auto present = input.word(); require(present <= 1);
             if (!present) return;
@@ -363,6 +368,14 @@ namespace TES3MP::Native
             a.destinationTimer = real(); a.followDistance = real(); a.walkSpeed = real(); a.tick = input.word(); a.steps = input.word();
             const auto size = input.word(); require(size <= 65536);
             const auto image = input.take(size);
+            if (npcBanks)
+            {
+                const auto pkgBits = input.word(); require(pkgBits <= UINT32_MAX);
+                a.packageType = std::bit_cast<int32_t>(uint32_t(pkgBits));
+                a.destinationCell = ref(input);
+                require(a.packageType >= -1 && a.packageType <= 3
+                    && (a.destinationCell.empty() || a.packageType == 2 || a.packageType == 3));
+            }
             require(a.steps <= a.tick && (!a.steps || size) && (!a.completed || a.steps));
             // Validate scalars on the preflight pass without allocating the physics image.
             const auto steps = a.steps; const auto completed = a.completed;
@@ -534,6 +547,15 @@ namespace TES3MP::Native
                 state.rewardReceipts.push_back({occurrence, effect, transfer.character, partyId, sourceKind, sourceId,
                     topic, info, transfer.receipt.item, transfer.receipt.count});
             }
+        }
+        bool cellExists(const MWWorld::ESMStore& content, std::string_view name)
+        {
+            if (name.empty()) return false;
+            const auto& cells = content.get<ESM::Cell>();
+            if (cells.search(name) != nullptr) return true;
+            for (auto it = cells.extBegin(); it != cells.extEnd(); ++it)
+                if (Misc::StringUtils::ciEqual(it->mName, name)) return true;
+            return false;
         }
         void validateInventoryItem(const MWWorld::ESMStore& content, const ESM::RefId& item)
         {
@@ -964,14 +986,14 @@ namespace TES3MP::Native
         require(!state.encounterEnabled || (mEnables && state.encounterLife && state.encounterReturned && !state.relocation));
         require(!mEnables || state.encounterEnabled == (state.encounterReturned && !state.relocation));
         require(!state.relocation || (mRelocations && state.encounterLife && !state.encounterEnabled));
-        if (state.relocation) state.relocation->validate();
+        if (state.relocation) state.relocation->validate(mNpcBanks);
         require(!state.activity || (mActivities && state.relocation && state.encounterLife
-            && (!state.encounterReturned || (mNpcBanks && state.activity->completed))));
+            && (!state.encounterReturned || (mNpcBanks && (state.activity->completed || state.activity->effectivePackageType() == 0)))));
         require(!mActivities || mNpcBanks || bool(state.activity) == bool(state.encounterLife));
         if (state.activity)
         {
             state.activity->validate();
-            Instance::Relocation target{state.relocation->origin, state.activity->destination, 0}; target.validate();
+            Instance::Relocation target{state.relocation->origin, state.activity->destination, 0}; target.validate(mNpcBanks);
         }
         if (state.encounterLife)
             require(std::ranges::any_of(state.npcs, [&](const auto& npc) {
@@ -1088,9 +1110,10 @@ namespace TES3MP::Native
                 const auto& r = state.itemReceipts[i];
                 require((r.scope == 1 || r.scope == index + 2
                             || (mParties && r.scope >= 2 && r.scope <= mDefinitions.size() + 1))
-                    && (r.sourceKind == 1 || r.sourceKind == 2)
-                    && expected.encounter && r.sourceId == expected.encounter->reference && r.step >= 1
-                    && r.step <= last.invocation && r.step >= previousStep && r.item.is<ESM::StringRefId>()
+                    && (r.sourceKind == 1 || r.sourceKind == 2
+                        || (r.sourceKind == 3 && r.sourceId != 0 && r.playerTarget && r.addition && r.step == 1))
+                    && (r.sourceKind == 3 || (expected.encounter && r.sourceId == expected.encounter->reference)) && r.step >= 1
+                    && (r.sourceKind == 3 || (r.step <= last.invocation && r.step >= previousStep)) && r.item.is<ESM::StringRefId>()
                     && !r.item.empty() && r.item.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
                     && r.item.getRefIdString().find('\0') == std::string_view::npos && r.count >= 1
                     && r.count <= MaximumItemTransferCount);
@@ -1104,13 +1127,13 @@ namespace TES3MP::Native
                         if (prev.sourceKind == r.sourceKind && prev.sourceId == r.sourceId
                             && prev.playerTarget == r.playerTarget && prev.item == r.item)
                         {
-                            if (prev.step < r.step && prev.addition) priorGrant = true;
+                            if ((r.sourceKind == 3 || prev.step < r.step) && prev.addition) priorGrant = true;
                             priorNet += prev.addition ? prev.count : -prev.count;
                         }
                     }
                     require(!priorGrant || priorNet <= 0);
                 }
-                previousStep = r.step;
+                if (r.sourceKind != 3) previousStep = r.step;
             }
         }
         else
@@ -1182,6 +1205,12 @@ namespace TES3MP::Native
             && std::isfinite(destinationTimer) && destinationTimer >= -1.f/30 && destinationTimer <= 2
             && std::isfinite(followDistance) && followDistance >= 250 && followDistance <= 4096
             && std::isfinite(walkSpeed) && walkSpeed >= 0 && walkSpeed <= 4096
+            && packageType >= -1 && packageType <= 3
+            && (destinationCell.empty()
+                || (destinationCell.is<ESM::StringRefId>()
+                    && destinationCell.getRefIdString().size() <= MWScript::WorldScript::MaximumNameBytes
+                    && destinationCell.getRefIdString().find('\0') == std::string_view::npos
+                    && (packageType == 2 || packageType == 3)))
             && actorImage.size() <= 65536 && steps <= tick && (!steps || !actorImage.empty())
             && (!completed || steps));
     }
@@ -1255,7 +1284,7 @@ namespace TES3MP::Native
                         word(bytes, std::bit_cast<uint32_t>(state[i].relocation->yaw));
                     }
                 }
-                if (mActivities) activity(bytes, state[i]);
+                if (mActivities) activity(bytes, state[i], mNpcBanks);
                 if (mNpcBanks) items(bytes, state[i]);
                 if (mParties) party(bytes, state[i]);
             }
@@ -1322,10 +1351,10 @@ namespace TES3MP::Native
                         };
                         for (auto& value : pose.origin) value = real();
                         for (auto& value : pose.position) value = real();
-                        pose.yaw = real(); pose.validate();
+                        pose.yaw = real(); pose.validate(mNpcBanks);
                     }
                 }
-                if (mActivities) activity(preflight, nullptr);
+                if (mActivities) activity(preflight, nullptr, mNpcBanks);
                 if (mNpcBanks) items(preflight, nullptr);
                 if (mParties) party(preflight, nullptr);
             }
@@ -1366,7 +1395,7 @@ namespace TES3MP::Native
                     for (auto& value : entry.relocation->position) value = std::bit_cast<float>(uint32_t(input.word()));
                     entry.relocation->yaw = std::bit_cast<float>(uint32_t(input.word()));
                 }
-                if (mActivities) activity(input, &entry);
+                if (mActivities) activity(input, &entry, mNpcBanks);
                 if (mNpcBanks) items(input, &entry);
                 if (mParties) party(input, &entry);
             }
@@ -1490,7 +1519,7 @@ namespace TES3MP::Native
         return prepared;
     }
 
-    void PersonalScripts::Instance::Relocation::validate() const
+    void PersonalScripts::Instance::Relocation::validate(bool crossCell) const
     {
         double distance = 0;
         for (size_t i = 0; i < 3; ++i)
@@ -1499,7 +1528,8 @@ namespace TES3MP::Native
                 && std::abs(origin[i]) <= 1000000 && std::abs(position[i]) <= 1000000);
             const double delta = double(position[i]) - origin[i]; distance += delta * delta;
         }
-        require(distance <= 4096. * 4096 && std::isfinite(yaw) && std::abs(yaw) <= 6.283186f);
+        const double maxDisplacement = crossCell ? 262144. : 4096.;
+        require(distance <= maxDisplacement * maxDisplacement && std::isfinite(yaw) && std::abs(yaw) <= 6.283186f);
     }
 
     const PersonalScripts::Instance::Relocation* PersonalScripts::relocation(const State& state, uint64_t character)
@@ -1542,12 +1572,13 @@ namespace TES3MP::Native
                 || bool(a.activity) != bool(b.activity) || bool(a.sourceWait) != bool(b.sourceWait)
                 || a.choices != b.choices || !sameQuests
                 || a.dialogue.topics != b.dialogue.topics
-                || a.runtime.runtime.globals != b.runtime.runtime.globals
                 || a.runtime.runtime.script.mRunning != b.runtime.runtime.script.mRunning
                 || a.members.size() != b.members.size())
                 return false;
             if (a.activity && (a.activity->escort != b.activity->escort
                     || a.activity->completed != b.activity->completed
+                    || a.activity->effectivePackageType() != b.activity->effectivePackageType()
+                    || a.activity->destinationCell != b.activity->destinationCell
                     || a.activity->destination != b.activity->destination))
                 return false;
             if (!a.choices.empty() && (a.dialogueRequest.speaker != b.dialogueRequest.speaker
@@ -1907,6 +1938,61 @@ namespace TES3MP::Native
         return prepared;
     }
 
+    PersonalScripts::Prepared PersonalScripts::prepareQuestItemAcquisition(const State& before, uint64_t story,
+        uint64_t character, uint64_t sourceId, const ESM::RefId& item, int count, const MWWorld::ESMStore& content) const
+    {
+        Prepared prepared;
+        try
+        {
+            require(mNpcBanks && story && character && sourceId && count > 0 && count <= MaximumItemTransferCount);
+            validateInventoryItem(content, item);
+            require(MWWorld::inventoryItemRecord(content, item).mScript.empty());
+            (void)encode(before);
+            const auto tIt = std::ranges::find_if(before, [&](const auto& s) {
+                return s.last.character == character && s.last.story == story;
+            });
+            require(tIt != before.end());
+            const size_t tIdx = size_t(tIt - before.begin());
+            prepared.state = before;
+            auto& inst = prepared.state[tIdx];
+            require(inst.itemReceipts.size() < MaximumItemReceiptsPerStory);
+            int64_t priorNet = 0;
+            bool priorGrant = false;
+            for (const auto& prev : inst.itemReceipts)
+                if (prev.sourceKind == 3 && prev.sourceId == sourceId && prev.playerTarget && prev.item == item)
+                {
+                    if (prev.addition) priorGrant = true;
+                    priorNet += prev.addition ? prev.count : -prev.count;
+                }
+            require(!priorGrant || priorNet <= 0);
+            auto found = std::ranges::find(inst.playerItems, item, &ItemBalance::item);
+            if (found == inst.playerItems.end())
+            {
+                require(inst.playerItems.size() < MaximumTrackedItemsPerStory);
+                inst.playerItems.push_back({item, 0});
+                found = std::prev(inst.playerItems.end());
+            }
+            require(found->count <= MaximumItemTransferCount - count);
+            found->count += count;
+            const ItemReceipt receipt{physicalScope(before, character), 3, sourceId, 1, true, true, item, count};
+            inst.itemReceipts.push_back(receipt);
+            prepared.itemTransfers.push_back({character, story, receipt});
+            prepared.image = encode(prepared.state);
+            prepared.result.outcome = SharedWorldScript::Outcome::Committed;
+            prepared.result.executed = true;
+        }
+        catch (const std::exception& error)
+        {
+            prepared.state.clear();
+            prepared.image.clear();
+            prepared.itemTransfers.clear();
+            prepared.result.outcome = SharedWorldScript::Outcome::Rejected;
+            prepared.result.executed = false;
+            prepared.result.diagnostic = std::string_view(error.what()).substr(0, SharedWorldScript::MaximumDiagnosticBytes);
+        }
+        return prepared;
+    }
+
     PersonalScripts::Prepared PersonalScripts::prepareReturn(const State& before, uint64_t character,
         const MWWorld::ESMStore* content, uint64_t sourceLife) const
     {
@@ -1920,7 +2006,7 @@ namespace TES3MP::Native
         prepared.result.outcome = SharedWorldScript::Outcome::Committed;
         if (found->encounterReturned) return prepared;
         const auto index = size_t(found - before.begin());
-        require(!found->activity || (mNpcBanks && found->activity->completed));
+        require(!found->activity || (mNpcBanks && (found->activity->completed || found->activity->effectivePackageType() == 0)));
         if (found->relocation) require(sourceLife == found->encounterLife);
         const bool enable = mEnables && !found->relocation;
         if (enable)
@@ -2007,16 +2093,20 @@ namespace TES3MP::Native
         try
         {
             execution.validate(); (void)encode(before);
-            require(mDialogues && execution.campaign == mCampaign && execution.physicalScope == 1
-                && physicalScope(before, execution.character) == 1
-                && execution.ownership == MWScript::ExecutionContext::Ownership::Character
-                && execution.sourceReference && execution.sourceLife && execution.causalEvent
-                && choice >= -1 && disposition >= 0 && disposition <= 100 && cellName.size() <= 256);
             const auto found = std::ranges::find_if(mDefinitions, [&](const auto& entry) {
                 return entry.character == execution.character && entry.story == execution.story; });
             require(found != mDefinitions.end());
             const auto index = size_t(found - mDefinitions.begin()); const auto& current = before[index];
-            require(!current.encounterLife); // A dormant removal never reopens this story's source.
+            const bool activeRelocatedScope = mNpcBanks && current.encounterLife && current.relocation && !current.encounterReturned;
+            const uint64_t expectedScope = activeRelocatedScope
+                ? (mParties && current.party.sharedScope ? current.party.sharedScope : index + 2)
+                : 1;
+            require(mDialogues && execution.campaign == mCampaign && execution.physicalScope == expectedScope
+                && physicalScope(before, execution.character) == expectedScope
+                && execution.ownership == MWScript::ExecutionContext::Ownership::Character
+                && execution.sourceReference && execution.sourceLife && execution.causalEvent
+                && choice >= -1 && disposition >= 0 && disposition <= 100 && cellName.size() <= 256);
+            require(!current.encounterLife || (activeRelocatedScope && execution.sourceLife == current.encounterLife));
             if (current.sourceWait) throw MWScript::ScriptContextUnavailable();
             result.script = current.runtime.runtime.script.mId;
             if (execution == current.last)
@@ -2034,7 +2124,10 @@ namespace TES3MP::Native
                 seedPlayerItems(content, state.playerItems, *playerInventory);
             }
             auto runningExecution = execution;
-            if (encounterPrepared) runningExecution.physicalScope = index + 2;
+            if (encounterPrepared || activeRelocatedScope)
+                runningExecution.physicalScope = (mParties && current.party.sharedScope && !current.encounterReturned)
+                    ? current.party.sharedScope
+                    : index + 2;
             const auto origin = mEncounters ? resolver.resolve(execution, {}, false) : MWWorld::Ptr{};
             if (mEncounters) require(origin.hasLiveReference() && origin.getType() == ESM::NPC::sRecordId);
             struct Scene final : MWScript::ReferenceState
@@ -2042,7 +2135,9 @@ namespace TES3MP::Native
                 MWScript::ExecutionContext expected;
                 MWWorld::Ptr source;
                 bool prepared = false, removed = false, reservedByOther = false;
+                bool relocated = false, activityChanged = false, goodbyeCalled = false;
                 bool relocations = false, activities = false, npcBanks = false;
+                std::string_view playerCellName;
                 std::optional<Instance::Activity> activity;
                 ESM::RefId cell;
                 std::array<float, 3> origin{};
@@ -2069,11 +2164,15 @@ namespace TES3MP::Native
                     const std::array<float, 3>& xyz, float yaw, const ESM::RefId& destination) override
                 {
                     validate(execution, ptr);
-                    require(relocations && (!activities || npcBanks) && !removed && !activity
-                        && !reservedByOther && (destination.empty() || destination == cell));
-                    Instance::Relocation pose{origin, xyz, yaw}; pose.validate();
+                    require(relocations && (!activities || npcBanks) && !removed && !activityChanged
+                        && (!activity || npcBanks) && !reservedByOther
+                        && (destination.empty() || destination == cell
+                            || (npcBanks && items.content && cellExists(*items.content, destination.getRefIdString()))));
+                    Instance::Relocation pose{origin, xyz, yaw}; pose.validate(npcBanks);
                     if (!prepared) throw EncounterPreparationRequired{};
                     relocation = pose;
+                    relocated = true;
+                    if (npcBanks) activity.reset();
                     auto p = source.getRefData().getPosition();
                     std::copy(xyz.begin(), xyz.end(), p.pos); p.rot[2] = yaw;
                     source.getRefData().setPosition(p);
@@ -2081,16 +2180,108 @@ namespace TES3MP::Native
                 void aiTravel(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr,
                     const std::array<float, 3>& destination, bool repeat, const ESM::RefId& follower, float duration) override
                 {
+                    aiPackage(execution, ptr, follower.empty() ? 1 : 2, destination, repeat, follower, duration, {});
+                }
+                void aiPackage(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, int packageType,
+                    const std::array<float, 3>& destination, bool repeat, const ESM::RefId& follower, float duration,
+                    std::string_view cellName) override
+                {
                     validate(execution, ptr);
-                    require(activities && !repeat && duration == 0 && !removed && !relocation && !activity
-                        && !reservedByOther && (follower.empty() || follower == ESM::RefId::stringRefId("player")));
-                    Instance::Relocation target{origin, destination, 0}; target.validate();
-                    if (!prepared) throw EncounterPreparationRequired{};
-                    // The stock opcode supplies package arguments; stock completion/range
-                    // policy advances the durable continuation with detached navigation.
-                    activity.emplace(); activity->escort = !follower.empty(); activity->destination = destination;
+                    require(activities && !removed && !relocated && !reservedByOther);
                     const auto& p = source.getRefData().getPosition();
-                    relocation = Instance::Relocation{origin, origin, p.rot[2]};
+                    const std::array<float, 3> curPos{p.pos[0], p.pos[1], p.pos[2]};
+                    if (!npcBanks)
+                    {
+                        require((packageType == 1 || packageType == 2) && cellName.empty() && !repeat && duration == 0
+                            && !relocation && !activity && !activityChanged
+                            && (follower.empty() || follower == ESM::RefId::stringRefId("player")));
+                        Instance::Relocation target{origin, destination, 0}; target.validate(false);
+                        if (!prepared) throw EncounterPreparationRequired{};
+                        activity.emplace(); activity->escort = !follower.empty(); activity->destination = destination;
+                        relocation = Instance::Relocation{origin, origin, p.rot[2]};
+                        activityChanged = true;
+                        return;
+                    }
+                    require(packageType >= 0 && packageType <= 3 && std::isfinite(duration) && duration >= 0 && duration <= 720);
+                    ESM::RefId destCell;
+                    if (!cellName.empty())
+                    {
+                        require((packageType == 2 || packageType == 3) && items.content
+                            && cellExists(*items.content, cellName));
+                        destCell = ESM::RefId::stringRefId(cellName);
+                    }
+                    if (packageType == 0)
+                        require(follower.empty());
+                    else if (packageType == 1)
+                        require(duration == 0 && follower.empty());
+                    else
+                        require(follower == ESM::RefId::stringRefId("player"));
+                    const std::array<float, 3> targetPos = packageType == 0 ? curPos : destination;
+                    Instance::Relocation target{origin, targetPos, 0}; target.validate(true);
+                    if (!prepared) throw EncounterPreparationRequired{};
+                    Instance::Activity next;
+                    if (activity)
+                    {
+                        next.walkSpeed = activity->walkSpeed;
+                        next.tick = activity->tick;
+                        next.actorImage = activity->actorImage;
+                    }
+                    next.escort = (packageType == 2 || packageType == 3);
+                    next.completed = false;
+                    next.destination = targetPos;
+                    next.destinationTimer = 2;
+                    next.followDistance = 450;
+                    next.steps = 0;
+                    next.packageType = (packageType == 0 || packageType == 3 || !destCell.empty()) ? packageType : -1;
+                    next.destinationCell = std::move(destCell);
+                    activity = std::move(next);
+                    if (!relocation)
+                        relocation = Instance::Relocation{origin, curPos, p.rot[2]};
+                    activityChanged = true;
+                }
+                bool aiPackageDone(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
+                {
+                    validate(execution, ptr);
+                    require(npcBanks);
+                    return activity && activity->completed;
+                }
+                int currentAiPackage(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
+                {
+                    validate(execution, ptr);
+                    require(npcBanks);
+                    return activity ? activity->effectivePackageType() : -1;
+                }
+                bool pcCell(const MWScript::ExecutionContext& execution, std::string_view name) const override
+                {
+                    require(npcBanks && execution == expected && !name.empty()
+                        && name.size() <= MWScript::ExecutionContext::MaximumReferenceNameBytes
+                        && name.find('\0') == std::string_view::npos);
+                    return !playerCellName.empty()
+                        && Misc::StringUtils::ciCompareLen(name, playerCellName, name.length()) == 0;
+                }
+                float distance(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& from,
+                    const ESM::RefId& toId) const override
+                {
+                    require(npcBanks && execution == expected && items.resolver);
+                    const auto to = items.resolver->resolve(execution, toId, false);
+                    const auto player = items.resolver->resolve(execution, ESM::RefId::stringRefId("player"), false);
+                    require((from == source && to == player) || (from == player && to == source));
+                    const auto& a = from.getRefData().getPosition().pos;
+                    const auto& b = to.getRefData().getPosition().pos;
+                    const double dx = double(a[0]) - b[0], dy = double(a[1]) - b[1], dz = double(a[2]) - b[2];
+                    const float dist = static_cast<float>(std::sqrt(dx * dx + dy * dy + dz * dz));
+                    require(std::isfinite(dist));
+                    return dist;
+                }
+                void forceGreeting(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
+                {
+                    validate(execution, ptr);
+                    require(npcBanks && !removed);
+                }
+                void goodbye(const MWScript::ExecutionContext& execution) override
+                {
+                    require(npcBanks && execution == expected);
+                    goodbyeCalled = true;
                 }
                 void enable(const MWScript::ExecutionContext&, const MWWorld::Ptr&) override
                 { throw std::invalid_argument("Enable requires safe-return restoration admission"); }
@@ -2102,9 +2293,12 @@ namespace TES3MP::Native
                 void disable(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
                 {
                     validate(execution, ptr);
-                    require((!activities || npcBanks) && !relocation && !activity && !reservedByOther); // Mixed physical outcomes need separate admission.
+                    require((!activities || npcBanks) && !relocated && !activityChanged
+                        && ((!relocation && !activity) || npcBanks) && !reservedByOther);
                     if (!prepared) throw EncounterPreparationRequired{};
                     removed = true;
+                    relocation.reset();
+                    activity.reset();
                     source.getRefData().disable();
                 }
                 bool disabled(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
@@ -2135,16 +2329,31 @@ namespace TES3MP::Native
                     && origin.getCellRef().getRefId() == found->encounter->record && origin.getRefData().isEnabled());
                 privateSource.emplace(content, found->encounter->record);
                 privateSource->getPtr().getCellRef() = origin.getCellRef();
-                privateSource->getPtr().getRefData().setPosition(origin.getRefData().getPosition());
+                ESM::Position sourcePose = origin.getRefData().getPosition();
+                if (activeRelocatedScope)
+                {
+                    std::copy(current.relocation->position.begin(), current.relocation->position.end(), sourcePose.pos);
+                    sourcePose.rot[2] = current.relocation->yaw;
+                }
+                privateSource->getPtr().getRefData().setPosition(sourcePose);
                 const auto owner = mFairOpportunities ? reservationOwner(before, execution.sourceLife, execution.sourceReference) : 0;
-                scene.expected = runningExecution; scene.source = privateSource->getPtr(); scene.prepared = encounterPrepared;
+                scene.expected = runningExecution; scene.source = privateSource->getPtr();
+                scene.prepared = encounterPrepared || activeRelocatedScope;
                 scene.reservedByOther = mFairOpportunities
                     && (mParties
                             ? !reservationAllows(before, execution.sourceLife, execution.character, execution.sourceReference)
                             : (owner != 0 && owner != execution.character));
                 scene.relocations = mRelocations; scene.activities = mActivities; scene.npcBanks = mNpcBanks;
+                scene.playerCellName = cellName;
                 scene.cell = found->encounter->cell;
-                std::copy(std::begin(origin.getRefData().getPosition().pos), std::end(origin.getRefData().getPosition().pos), scene.origin.begin());
+                if (activeRelocatedScope)
+                {
+                    scene.origin = current.relocation->origin;
+                    scene.relocation = current.relocation;
+                    scene.activity = current.activity;
+                }
+                else
+                    std::copy(std::begin(origin.getRefData().getPosition().pos), std::end(origin.getRefData().getPosition().pos), scene.origin.begin());
                 scene.items = {&content, &scopedResolver, found->encounter->record, execution.character, execution.story,
                     execution.sourceReference, 1, scene.source, &state.playerItems, &state.npcItems, &state.itemReceipts,
                     &prepared.itemTransfers};
@@ -2226,9 +2435,25 @@ namespace TES3MP::Native
             auto invocation = found->script->executeResult(state.runtime, runningExecution, content, runningResolver,
                 bank, actorBank != bank.instances.end() ? *actorBank : bank.instances.front(), dialogue,
                 program->program, result.trace, npcStats ? &*npcStats : nullptr, mEncounters ? &scene : nullptr);
+            if (scene.goodbyeCalled)
+            {
+                require(mNpcBanks && dialogue.choices.empty());
+                const bool sameQuests = std::ranges::equal(state.dialogue.quests, current.dialogue.quests,
+                    [](const ESM::QuestState& x, const ESM::QuestState& y) {
+                        return x.mTopic == y.mTopic && x.mState == y.mState && x.mFinished == y.mFinished;
+                    });
+                const bool progressed = !sameQuests
+                    || state.dialogue.topics != current.dialogue.topics
+                    || invocation.state.globals != current.runtime.runtime.globals
+                    || (npcStats && npcStats->getBaseDisposition() != priorDisposition)
+                    || std::ranges::any_of(dialogue.npcDispositions, [](const auto& d) { return d.modified; })
+                    || scene.removed || scene.relocated || scene.activityChanged || !prepared.itemTransfers.empty();
+                require(progressed);
+            }
             if (scene.removed || scene.relocation)
             {
-                require(dialogue.choices.empty()); // A removed speaker cannot own a pending choice.
+                if (scene.removed || !activeRelocatedScope || scene.relocated || scene.activityChanged)
+                    require(dialogue.choices.empty()); // A removed/relocating speaker cannot own a pending choice.
                 if (mFairOpportunities)
                 {
                     if (mParties)
@@ -2245,8 +2470,16 @@ namespace TES3MP::Native
                     }
                 }
                 state.encounterLife = execution.sourceLife;
-                state.relocation = scene.relocation;
-                state.activity = std::move(scene.activity);
+                if (scene.removed)
+                {
+                    state.relocation.reset();
+                    state.activity.reset();
+                }
+                else
+                {
+                    state.relocation = scene.relocation;
+                    state.activity = std::move(scene.activity);
+                }
             }
             if (scene.removed || scene.relocation || (npcStats && (ownedNpc != state.npcs.end() || npcStats->getBaseDisposition() != priorDisposition)))
             {
@@ -2281,7 +2514,10 @@ namespace TES3MP::Native
             ++state.runtime.tick;
             bank.write(state);
             state.last = runningExecution; state.eventCursor = execution.causalEvent;
-            if (state.encounterLife) state.last.physicalScope = index + 2;
+            if (state.encounterLife)
+                state.last.physicalScope = (mParties && state.party.sharedScope && !state.encounterReturned)
+                    ? state.party.sharedScope
+                    : index + 2;
             state.lastTopic = topic; state.lastInfo = response.second->mId; state.lastChoice = choice;
             if (!mIntents)
                 prepared.image = encode(prepared.state);
@@ -2524,7 +2760,9 @@ namespace TES3MP::Native
                         && (bool(pState.activity) == bool(cState.activity))
                         && (!pState.activity
                             || (pState.activity->escort == cState.activity->escort
-                                && pState.activity->destination == cState.activity->destination));
+                                && pState.activity->effectivePackageType() == cState.activity->effectivePackageType()
+                                && pState.activity->destination == cState.activity->destination
+                                && pState.activity->destinationCell == cState.activity->destinationCell));
                     if (!samePhysical)
                     {
                         // Incompatible physical writes split safely before commitment.
@@ -2708,18 +2946,25 @@ namespace TES3MP::Native
             struct SourceResolver final : MWScript::ReferenceResolver, MWScript::ReferenceState
             {
                 const Source& source;
+                const MWWorld::ESMStore& store;
                 MWWorld::ManualRef reference;
                 MWWorld::ManualRef playerReference;
-                bool events, encounters;
+                bool events, encounters, activities = false, npcBanks = false;
                 uint64_t cursor = 0, expectedScope = 1, expectedLife = 0;
                 bool privateScope = false, reservedByOther = false, removed = false, activated = false;
+                bool activityChanged = false, forcedGreeting = false;
+                std::array<float, 3> origin{}, currentPos{};
+                float currentYaw = 0;
+                std::optional<Instance::Activity> activeActivity;
                 std::vector<uint64_t> partyMembers;
                 std::vector<uint64_t> helperExcludedLives;
                 StoryItemTransaction items;
                 std::vector<Prepared::StagedItemTransfer> transfers;
-                SourceResolver(const Source& value, const MWWorld::ESMStore& store, bool lifeEvents, bool allowEncounters)
-                    : source(value), reference(store, value.record), playerReference(store, value.record)
-                    , events(lifeEvents), encounters(allowEncounters), expectedLife(value.life)
+                SourceResolver(const Source& value, const MWWorld::ESMStore& contentStore, bool lifeEvents,
+                    bool allowEncounters, bool allowActivities = false, bool allowNpcBanks = false)
+                    : source(value), store(contentStore), reference(contentStore, value.record), playerReference(contentStore, value.record)
+                    , events(lifeEvents), encounters(allowEncounters), activities(allowActivities), npcBanks(allowNpcBanks)
+                    , expectedLife(value.life)
                 {
                     reference.getPtr().getRefData().setPosition(value.position);
                 }
@@ -2776,9 +3021,106 @@ namespace TES3MP::Native
                         && ptr.hasLiveReference() && ptr.getType() == ESM::NPC::sRecordId);
                     if (!privateScope && !source.living && !ownDeath(execution.character))
                         throw MWScript::ScriptSourceWait(source.reference, source.life, source.respawnTick);
-                    require((privateScope || source.living) && !reservedByOther);
+                    require((privateScope || source.living) && !reservedByOther && !activityChanged);
                     removed = true;
+                    activeActivity.reset();
                     reference.getPtr().getRefData().disable();
+                }
+                void aiTravel(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr,
+                    const std::array<float, 3>& destination, bool repeat, const ESM::RefId& follower, float duration) override
+                {
+                    aiPackage(execution, ptr, follower.empty() ? 1 : 2, destination, repeat, follower, duration, {});
+                }
+                void aiPackage(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr, int packageType,
+                    const std::array<float, 3>& destination, bool repeat, const ESM::RefId& follower, float duration,
+                    std::string_view cellName) override
+                {
+                    require(encounters && activities && npcBanks && ptr == resolve(execution, source.record, false)
+                        && ptr.hasLiveReference() && ptr.getType() == ESM::NPC::sRecordId);
+                    validateScope(execution);
+                    require((privateScope || source.living) && !removed && !reservedByOther);
+                    require(packageType >= 0 && packageType <= 3 && std::isfinite(duration) && duration >= 0 && duration <= 720);
+                    ESM::RefId destCell;
+                    if (!cellName.empty())
+                    {
+                        require((packageType == 2 || packageType == 3)
+                            && cellExists(store, cellName));
+                        destCell = ESM::RefId::stringRefId(cellName);
+                    }
+                    if (packageType == 0)
+                        require(follower.empty());
+                    else if (packageType == 1)
+                        require(duration == 0 && follower.empty());
+                    else
+                        require(follower == ESM::RefId::stringRefId("player"));
+                    const std::array<float, 3> targetPos = packageType == 0 ? currentPos : destination;
+                    Instance::Relocation target{origin, targetPos, 0}; target.validate(true);
+                    Instance::Activity next;
+                    if (activeActivity)
+                    {
+                        next.walkSpeed = activeActivity->walkSpeed;
+                        next.tick = activeActivity->tick;
+                        next.actorImage = activeActivity->actorImage;
+                    }
+                    next.escort = (packageType == 2 || packageType == 3);
+                    next.completed = false;
+                    next.destination = targetPos;
+                    next.destinationTimer = 2;
+                    next.followDistance = 450;
+                    next.steps = 0;
+                    next.packageType = (packageType == 0 || packageType == 3 || !destCell.empty()) ? packageType : -1;
+                    next.destinationCell = std::move(destCell);
+                    activeActivity = std::move(next);
+                    activityChanged = true;
+                }
+                bool aiPackageDone(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
+                {
+                    require(encounters && activities && npcBanks && ptr == resolve(execution, source.record, false));
+                    validateScope(execution);
+                    return activeActivity && activeActivity->completed;
+                }
+                int currentAiPackage(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
+                {
+                    require(encounters && activities && npcBanks && ptr == resolve(execution, source.record, false));
+                    validateScope(execution);
+                    return activeActivity ? activeActivity->effectivePackageType() : -1;
+                }
+                bool pcCell(const MWScript::ExecutionContext& execution, std::string_view name) const override
+                {
+                    require(encounters && npcBanks && !name.empty()
+                        && name.size() <= MWScript::ExecutionContext::MaximumReferenceNameBytes
+                        && name.find('\0') == std::string_view::npos);
+                    validateScope(execution);
+                    const auto loc = std::ranges::find(source.playerLocations, execution.character, &PlayerLocation::character);
+                    if (loc == source.playerLocations.end() || loc->cellName.empty()) return false;
+                    return Misc::StringUtils::ciCompareLen(name, loc->cellName, name.length()) == 0;
+                }
+                float distance(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& from,
+                    const ESM::RefId& toId) const override
+                {
+                    require(encounters && npcBanks);
+                    validateScope(execution);
+                    const auto to = resolve(execution, toId, false);
+                    const auto srcPtr = reference.getPtr();
+                    const auto plrPtr = playerReference.getPtr();
+                    require((from == srcPtr && to == plrPtr) || (from == plrPtr && to == srcPtr));
+                    const auto& npcPos = srcPtr.getRefData().getPosition().pos;
+                    std::array<float, 3> plrPos{plrPtr.getRefData().getPosition().pos[0],
+                        plrPtr.getRefData().getPosition().pos[1], plrPtr.getRefData().getPosition().pos[2]};
+                    const auto loc = std::ranges::find(source.playerLocations, execution.character, &PlayerLocation::character);
+                    if (loc != source.playerLocations.end()) plrPos = loc->position;
+                    const double dx = double(npcPos[0]) - plrPos[0], dy = double(npcPos[1]) - plrPos[1],
+                                 dz = double(npcPos[2]) - plrPos[2];
+                    const float dist = static_cast<float>(std::sqrt(dx * dx + dy * dy + dz * dz));
+                    require(std::isfinite(dist));
+                    return dist;
+                }
+                void forceGreeting(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) override
+                {
+                    require(encounters && npcBanks && ptr == resolve(execution, source.record, false));
+                    validateScope(execution);
+                    require(!disabled(execution, ptr));
+                    forcedGreeting = true;
                 }
                 bool disabled(const MWScript::ExecutionContext& execution, const MWWorld::Ptr& ptr) const override
                 {
@@ -2894,11 +3236,12 @@ namespace TES3MP::Native
             }
             for (size_t i = 0; i < before.size(); ++i)
             {
-                const auto* source = findSource(i);
+                source = findSource(i);
                 std::unique_ptr<SourceResolver> sourceResolver;
                 if (mSourceWaits)
                     sourceResolver = std::make_unique<SourceResolver>(
-                        *source, content, mLifeEvents, mEncounters && (!mLifeEvents || mNpcBanks) && (!mActivities || mNpcBanks));
+                        *source, content, mLifeEvents, mEncounters && (!mLifeEvents || mNpcBanks) && (!mActivities || mNpcBanks),
+                        mActivities, mNpcBanks);
                 const auto& current = prepared.state[i];
                 if (mParties && (current.party.suspended || current.party.helper
                         || (current.party.partyId && !current.party.controller)))
@@ -2938,6 +3281,9 @@ namespace TES3MP::Native
                                 : (owner != 0 && owner != execution.character));
                     sourceResolver->removed = false;
                     sourceResolver->activated = false;
+                    sourceResolver->activityChanged = false;
+                    sourceResolver->forcedGreeting = false;
+                    sourceResolver->activeActivity = current.activity;
                     sourceResolver->reference.getPtr().getRefData() = MWWorld::RefData();
                     (void)sourceResolver->reference.getPtr().getRefData().onActivate();
                     if (source->activated && (!source->activatedCharacter || source->activatedCharacter == execution.character))
@@ -2948,7 +3294,12 @@ namespace TES3MP::Native
                         require(bool(current.relocation));
                         std::copy(current.relocation->position.begin(), current.relocation->position.end(), pose.pos);
                         pose.rot[2] = current.relocation->yaw;
+                        sourceResolver->origin = current.relocation->origin;
                     }
+                    else
+                        std::copy(std::begin(source->position.pos), std::end(source->position.pos), sourceResolver->origin.begin());
+                    std::copy(std::begin(pose.pos), std::end(pose.pos), sourceResolver->currentPos.begin());
+                    sourceResolver->currentYaw = pose.rot[2];
                     sourceResolver->reference.getPtr().getRefData().setPosition(pose);
                     if (mNpcBanks)
                     {
@@ -3046,10 +3397,10 @@ namespace TES3MP::Native
                     if (mFairOpportunities && prepared.state[i].reservedLife
                         && prepared.state[i].deathCursor >= prepared.state[i].reservedLife)
                     { prepared.state[i].reservedLife = 0; prepared.state[i].reservationTick = 0; }
-                    if (sourceResolver->removed)
+                    if (sourceResolver->removed || sourceResolver->activityChanged)
                     {
                         auto& state = prepared.state[i];
-                        state.choices.clear();
+                        if (sourceResolver->removed) state.choices.clear();
                         if (mFairOpportunities)
                         {
                             if (mParties)
@@ -3066,8 +3417,18 @@ namespace TES3MP::Native
                             }
                         }
                         state.encounterLife = execution.sourceLife;
-                        state.relocation.reset();
-                        state.activity.reset();
+                        if (sourceResolver->removed)
+                        {
+                            state.relocation.reset();
+                            state.activity.reset();
+                        }
+                        else
+                        {
+                            if (!state.relocation)
+                                state.relocation = Instance::Relocation{sourceResolver->origin,
+                                    sourceResolver->currentPos, sourceResolver->currentYaw};
+                            state.activity = std::move(sourceResolver->activeActivity);
+                        }
                         state.last.physicalScope = (mParties && state.party.sharedScope) ? state.party.sharedScope : i + 2;
                         auto ownedNpc = std::ranges::find(state.npcs, execution.sourceReference, &Instance::Npc::reference);
                         if (ownedNpc == state.npcs.end())
@@ -3115,7 +3476,12 @@ namespace TES3MP::Native
                             continue;
                         const bool samePhysical = (mState.encounterLife == cState.encounterLife)
                             && (mState.relocation == cState.relocation)
-                            && (bool(mState.activity) == bool(cState.activity));
+                            && (bool(mState.activity) == bool(cState.activity))
+                            && (!mState.activity
+                                || (mState.activity->escort == cState.activity->escort
+                                    && mState.activity->effectivePackageType() == cState.activity->effectivePackageType()
+                                    && mState.activity->destination == cState.activity->destination
+                                    && mState.activity->destinationCell == cState.activity->destinationCell));
                         if (!samePhysical)
                         {
                             const bool online

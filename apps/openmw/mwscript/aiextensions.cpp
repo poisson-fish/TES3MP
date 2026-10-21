@@ -85,7 +85,7 @@ namespace MWScript
                 auto& context = static_cast<InterpreterContext&>(runtime.getContext());
                 if (context.getExecutionContext())
                 {
-                    context.aiTravel(ptr, {x, y, z}, repeat, {}, 0);
+                    context.aiPackage(ptr, 1, {x, y, z}, repeat, {}, 0);
                     return;
                 }
                 if (!ptr.getClass().isActor() || ptr == MWMechanics::getPlayer())
@@ -129,7 +129,7 @@ namespace MWScript
                 auto& context = static_cast<InterpreterContext&>(runtime.getContext());
                 if (context.getExecutionContext())
                 {
-                    context.aiTravel(ptr, {x, y, z}, repeat, actorID, duration);
+                    context.aiPackage(ptr, 2, {x, y, z}, repeat, actorID, duration);
                     return;
                 }
                 if (!ptr.getClass().isActor() || ptr == MWMechanics::getPlayer())
@@ -173,6 +173,12 @@ namespace MWScript
                 for (unsigned int i = 0; i < arg0; ++i)
                     runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.aiPackage(ptr, 2, {x, y, z}, repeat, actorID, duration, cellID);
+                    return;
+                }
                 if (!ptr.getClass().isActor() || ptr == MWMechanics::getPlayer())
                     return;
 
@@ -196,6 +202,13 @@ namespace MWScript
             void execute(Interpreter::Runtime& runtime) override
             {
                 MWWorld::Ptr ptr = R()(runtime);
+
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    runtime.push(context.aiPackageDone(ptr) ? 1 : 0);
+                    return;
+                }
 
                 bool done = false;
                 if (ptr.getClass().isActor())
@@ -253,6 +266,14 @@ namespace MWScript
                 // discard additional arguments, because we have no idea what they mean.
                 for (unsigned int i = 0; i < arg0; ++i)
                     runtime.pop();
+
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.aiPackage(ptr, 0, {static_cast<float>(range), static_cast<float>(duration), static_cast<float>(time)},
+                        repeat, {}, static_cast<float>(duration));
+                    return;
+                }
 
                 if (!ptr.getClass().isActor() || ptr == MWMechanics::getPlayer())
                     return;
@@ -367,6 +388,13 @@ namespace MWScript
                 for (unsigned int i = 0; i < arg0; ++i)
                     runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.aiPackage(ptr, 3, {x, y, z}, repeat, actorID, duration);
+                    return;
+                }
+
                 if (!ptr.getClass().isActor() || ptr == MWMechanics::getPlayer())
                     return;
 
@@ -408,6 +436,13 @@ namespace MWScript
                 for (unsigned int i = 0; i < arg0; ++i)
                     runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.aiPackage(ptr, 3, {x, y, z}, repeat, actorID, duration, cellID);
+                    return;
+                }
+
                 if (!ptr.getClass().isActor() || ptr == MWMechanics::getPlayer())
                     return;
 
@@ -424,6 +459,13 @@ namespace MWScript
             void execute(Interpreter::Runtime& runtime) override
             {
                 MWWorld::Ptr ptr = R()(runtime);
+
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    runtime.push(context.currentAiPackage(ptr));
+                    return;
+                }
 
                 Interpreter::Type_Integer value = -1;
                 if (ptr.getClass().isActor())
@@ -593,6 +635,12 @@ namespace MWScript
         {
             extensions.registerInstruction("aitravel", "fff/lx", Compiler::Ai::opcodeAiTravel, Compiler::Ai::opcodeAiTravelExplicit);
             extensions.registerInstruction("aiescort", "cffff/l", Compiler::Ai::opcodeAiEscort, Compiler::Ai::opcodeAiEscortExplicit);
+            extensions.registerInstruction("aiescortcell", "ccffff/l", Compiler::Ai::opcodeAiEscortCell, Compiler::Ai::opcodeAiEscortCellExplicit);
+            extensions.registerInstruction("aiwander", "fff/llllllllll", Compiler::Ai::opcodeAiWander, Compiler::Ai::opcodeAiWanderExplicit);
+            extensions.registerInstruction("aifollow", "cffff/llllllll", Compiler::Ai::opcodeAiFollow, Compiler::Ai::opcodeAiFollowExplicit);
+            extensions.registerInstruction("aifollowcell", "ccffff/l", Compiler::Ai::opcodeAiFollowCell, Compiler::Ai::opcodeAiFollowCellExplicit);
+            extensions.registerFunction("getaipackagedone", 'l', "", Compiler::Ai::opcodeGetAiPackageDone, Compiler::Ai::opcodeGetAiPackageDoneExplicit);
+            extensions.registerFunction("getcurrentaipackage", 'l', "", Compiler::Ai::opcodeGetCurrentAiPackage, Compiler::Ai::opcodeGetCurrentAiPackageExplicit);
         }
 
         void installActivityOpcodes(Interpreter::Interpreter& interpreter)
@@ -601,6 +649,18 @@ namespace MWScript
             interpreter.installSegment3<OpAiTravel<ExplicitRef>>(Compiler::Ai::opcodeAiTravelExplicit);
             interpreter.installSegment3<OpAiEscort<ImplicitRef>>(Compiler::Ai::opcodeAiEscort);
             interpreter.installSegment3<OpAiEscort<ExplicitRef>>(Compiler::Ai::opcodeAiEscortExplicit);
+            interpreter.installSegment3<OpAiEscortCell<ImplicitRef>>(Compiler::Ai::opcodeAiEscortCell);
+            interpreter.installSegment3<OpAiEscortCell<ExplicitRef>>(Compiler::Ai::opcodeAiEscortCellExplicit);
+            interpreter.installSegment3<OpAiWander<ImplicitRef>>(Compiler::Ai::opcodeAiWander);
+            interpreter.installSegment3<OpAiWander<ExplicitRef>>(Compiler::Ai::opcodeAiWanderExplicit);
+            interpreter.installSegment3<OpAiFollow<ImplicitRef>>(Compiler::Ai::opcodeAiFollow);
+            interpreter.installSegment3<OpAiFollow<ExplicitRef>>(Compiler::Ai::opcodeAiFollowExplicit);
+            interpreter.installSegment3<OpAiFollowCell<ImplicitRef>>(Compiler::Ai::opcodeAiFollowCell);
+            interpreter.installSegment3<OpAiFollowCell<ExplicitRef>>(Compiler::Ai::opcodeAiFollowCellExplicit);
+            interpreter.installSegment5<OpGetAiPackageDone<ImplicitRef>>(Compiler::Ai::opcodeGetAiPackageDone);
+            interpreter.installSegment5<OpGetAiPackageDone<ExplicitRef>>(Compiler::Ai::opcodeGetAiPackageDoneExplicit);
+            interpreter.installSegment5<OpGetCurrentAIPackage<ImplicitRef>>(Compiler::Ai::opcodeGetCurrentAiPackage);
+            interpreter.installSegment5<OpGetCurrentAIPackage<ExplicitRef>>(Compiler::Ai::opcodeGetCurrentAiPackageExplicit);
         }
 
         void registerCombatOpcodes(Compiler::Extensions& extensions)

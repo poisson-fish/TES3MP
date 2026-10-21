@@ -290,6 +290,64 @@ namespace MWScript
         mReferenceState->aiTravel(*mExecution, reference, destination, repeat, follower, duration);
     }
 
+    void InterpreterContext::aiPackage(const MWWorld::Ptr& reference, int packageType,
+        const std::array<float, 3>& destination, bool repeat, const ESM::RefId& targetActor, float duration,
+        std::string_view cellName) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference()
+            || cellName.size() > ExecutionContext::MaximumReferenceNameBytes
+            || cellName.find('\0') != std::string_view::npos)
+            throw std::invalid_argument("AI package lacks staged activity scope");
+        mReferenceState->aiPackage(*mExecution, reference, packageType, destination, repeat, targetActor, duration, cellName);
+    }
+
+    bool InterpreterContext::aiPackageDone(const MWWorld::Ptr& reference) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference())
+            throw std::invalid_argument("GetAiPackageDone lacks staged activity scope");
+        return mReferenceState->aiPackageDone(*mExecution, reference);
+    }
+
+    int InterpreterContext::currentAiPackage(const MWWorld::Ptr& reference) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference())
+            throw std::invalid_argument("GetCurrentAIPackage lacks staged activity scope");
+        return mReferenceState->currentAiPackage(*mExecution, reference);
+    }
+
+    bool InterpreterContext::pcCell(std::string_view name) const
+    {
+        if (!mExecution || !mReferenceState || name.empty()
+            || name.size() > ExecutionContext::MaximumReferenceNameBytes
+            || name.find('\0') != std::string_view::npos)
+            throw std::invalid_argument("GetPCCell lacks staged cell scope");
+        return mReferenceState->pcCell(*mExecution, name);
+    }
+
+    float InterpreterContext::distance(const MWWorld::Ptr& from, const ESM::RefId& toId) const
+    {
+        if (!mExecution || !mReferenceState || from.isEmpty() || !from.hasLiveReference()
+            || !toId.is<ESM::StringRefId>() || toId.empty()
+            || toId.getRefIdString().size() > ExecutionContext::MaximumReferenceNameBytes
+            || toId.getRefIdString().find('\0') != std::string_view::npos)
+            throw std::invalid_argument("GetDistance lacks staged position scope");
+        return mReferenceState->distance(*mExecution, from, toId);
+    }
+
+    void InterpreterContext::forceGreeting(const MWWorld::Ptr& reference) const
+    {
+        if (!mExecution || !mReferenceState || reference.isEmpty() || !reference.hasLiveReference())
+            throw std::invalid_argument("ForceGreeting lacks staged dialogue scope");
+        mReferenceState->forceGreeting(*mExecution, reference);
+    }
+
+    void InterpreterContext::goodbye() const
+    {
+        if (!mExecution || !mReferenceState)
+            throw std::invalid_argument("Goodbye lacks staged dialogue scope");
+        mReferenceState->goodbye(*mExecution);
+    }
+
     const ESM::Position& InterpreterContext::position(const MWWorld::Ptr& reference) const
     {
         if (!mExecution) return reference.getRefData().getPosition();

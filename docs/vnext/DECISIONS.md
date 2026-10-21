@@ -145,21 +145,18 @@ is evidenced API coverage, not a promise to infer arbitrary author intent.
 
 ### Acquisition, rewards and death
 
-Public loot remains shared. A finite quest resource needs an evidenced acquisition
-route and a durable right keyed by character/story and source origin/occurrence,
-not item name or inventory absence. If foreign ownership/depletion blocks an
-unclaimed right, offer one personal recovery copy through that route. Original
-public items remain transferable; acquiring one records the same entitlement.
-Voluntary sale/consumption/surrender spends the right. Dropping preserves identity;
-restart, new parties and new scopes cannot refresh it. Ambiguous routes reject
-automatic recovery; GetItemCount zero never authorizes a grant.
+Public loot remains shared. Finite quest resources need evidenced routes and durable
+rights keyed by character/story and source origin/occurrence, not item name or absence.
+Loose/container quest items mint per-player rights on pickup/take while staying
+available for others. Provenance locks quest items against drop and container/player
+transfer while ordinary items stay droppable; scripted `RemoveItem` remains available.
+Sale/consumption/surrender spends the right; restart, parties and scopes never refresh
+it. Ambiguous routes and GetItemCount zero reject automatic grants.
 
-Recovery copies prohibit foreign pickup/corpse loot/public trade; supported
-scripted use/consumption remains available. Preserve provenance through
-stack/split/drop and conversions; unsupported conversions reject before consumption.
-Copied encounter loot cannot create extra public possessions. Legitimate scripted
-rewards may leave once their transaction commits. Persist depletion and reward
-receipts; scene recreation is never a repeatable-content occurrence.
+Preserve provenance through stack/split and conversions; unsupported conversions
+reject. Copied encounter loot creates no extra public items; committed scripted
+rewards may leave. Persist depletion and reward receipts; scene recreation never
+repeats content.
 
 M4 placement/life/death/corpse/deadline identity remains authoritative. Stock
 respawn restores initially living placements, preserving story locals; deadlines
@@ -191,7 +188,8 @@ receive no story advancement/reward. Party size respects runtime limits; broader
 Freeze participating characters/stories and membership revision for each causal
 step. Execute its shared physical outcome once; evaluate personal conditions,
 costs, progression and reward effects separately for every eligible participant.
-Shared objectives happen once; personal acquisition rights/costs remain per-character.
+Shared objectives happen once; personal acquisition rights/costs remain per-character,
+and enrolled party members share kill XP.
 Each eligible player receives their own stock-context reward, never a divided
 pool or a copy of the leader's entire result. Differing personal outcomes may
 coexist; incompatible physical writes split/defer before commitment. Prove effect

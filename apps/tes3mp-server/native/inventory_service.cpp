@@ -1554,6 +1554,17 @@ namespace TES3MP::Native
             }
         }
         mRuntime.mPreserveIdentity = [this](ESM::RefNum item) {
+            if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->npcBanks() && item.isSet())
+            {
+                const auto ptr = mWorld.getPtr(item);
+                if (!ptr.isEmpty())
+                {
+                    const auto refId = ptr.getCellRef().getRefId();
+                    for (const auto player : mBinding.mPlayers)
+                        if (hasLockedQuestProvenance(player, refId))
+                            return true;
+                }
+            }
             return mBinding.mEquipmentFamily && std::ranges::any_of(mTimedEffects, [&](const auto& effect) {
                 return std::ranges::any_of(effect.boundItems, [&](const auto& bound) { return bound.item.isSet() && bound.item == item; });
             });
@@ -2112,6 +2123,8 @@ namespace TES3MP::Native
                     || item.getContainerStore() != &mRuntime.storage(actor(bound.player()))
                     || mItemIds.at(item.getCellRef().getRefId()) != command.prototypeId)
                     throw std::invalid_argument("World drop ownership or prototype invalid");
+                if (hasLockedQuestProvenance(bound.player(), item.getCellRef().getRefId()))
+                    throw std::invalid_argument("Quest provenance item rejects world drop");
             }
             return;
         }
@@ -2165,6 +2178,9 @@ namespace TES3MP::Native
             || !positionsWithinReach(player.transform().position(), command.interactionOrigin, originReach)
             || (!actorInventory(sharedOwner) && !interactionVisible(player.transform(), shared.mId.value())))
             throw std::invalid_argument("Native container command shape, revision, identity or reach invalid");
+        if (command.kind == InventoryTransactionKind::PutIntoContainer
+            && hasLockedQuestProvenance(bound.player(), item.getCellRef().getRefId()))
+            throw std::invalid_argument("Quest provenance item rejects container transfer");
         if (command.kind == InventoryTransactionKind::PutIntoContainer && !actorInventory(sharedOwner))
         {
             const auto* base = mRuntime.ownerPtr(sharedIndex + 2).get<ESM::Container>()->mBase;
@@ -2575,8 +2591,9 @@ namespace TES3MP::Native
         try
         {
             const auto& input = binding->transaction();
-            if (hasStoryEncounters() && (input.kind == InventoryTransactionKind::DropItem
-                || input.kind == InventoryTransactionKind::PickupItem)) return {};
+            if (hasStoryEncounters() && !(mBinding.mPersonalScripts && mBinding.mPersonalScripts->npcBanks())
+                && (input.kind == InventoryTransactionKind::DropItem
+                    || input.kind == InventoryTransactionKind::PickupItem)) return {};
             // A custom projectile's recoverable state lives on its consumed
             // source stack until contact. Keep that state frozen while flying.
             if (mCombat && std::ranges::any_of(mCombat->arrows, [&](const auto& arrow) {
@@ -3301,10 +3318,12 @@ namespace TES3MP::Native
                     if (story.activity->tick > decoded.tick || story.activity->actorImage.empty())
                         throw std::invalid_argument("Activity clock/frame differs from durable gameplay");
                     const auto activityFrame = mBinding.mNavigatingActor->forActor(story.last.sourceReference)
-                        .prepareRestore(story.activity->actorImage);
+                        .prepareSelectedRestore(story.activity->actorImage, actorDoorFrames());
                     if (activityFrame->snapshot().mPosition != story.relocation->position
                         || activityFrame->snapshot().mYaw != story.relocation->yaw
-                        || (story.activity->steps && activityFrame->destination() != story.activity->destination))
+                        || (story.activity->steps
+                            && (story.activity->effectivePackageType() == 1 || story.activity->effectivePackageType() == 2)
+                            && activityFrame->destination() != story.activity->destination))
                         throw std::invalid_argument("Activity frame differs from scoped pose");
                 }
                 if (story.relocation && !mBinding.mNavigatingActor->actorPoseClear(story.last.sourceReference,
@@ -5423,7 +5442,8 @@ namespace TES3MP::Native
 
         std::vector<size_t> stagePersonalItemTransfers(EquipmentSessionValues& values, const MWWorld::ESMStore& store,
             const std::array<PlayerId, 2>& players,
-            std::span<const PersonalScripts::Prepared::StagedItemTransfer> transfers)
+            std::span<const PersonalScripts::Prepared::StagedItemTransfer> transfers,
+            std::shared_ptr<const MWWorld::EquipmentScriptLocals> scriptLocals = nullptr)
         {
             std::vector<size_t> owners;
             auto counter = values.mActors[0].mLastGenerated;
@@ -5504,6 +5524,12 @@ namespace TES3MP::Native
                 for (auto& actor : values.mActors) actor.mLastGenerated = counter;
                 for (auto& container : values.mContainers) container.mLastGenerated = counter;
                 if (values.mWorldItems) values.mWorldItems->mLastGenerated = counter;
+                for (const size_t owner : owners)
+                {
+                    auto restored = RestoredPlainEquipment::restore(
+                        values.mActors[owner], store, values.mActors[owner].mActor, scriptLocals);
+                    restored.exportValues(values.mActors[owner]);
+                }
             }
             return owners;
         }
@@ -5566,7 +5592,11 @@ namespace TES3MP::Native
             if (!prior) candidate = std::make_unique<DialogueTransaction>(*this);
             return true; // Terminal disabled sources can acknowledge exact receipts silently.
         }
-        if (receipt->encounterLife || PersonalScripts::physicalScope(currentState, session->playerId().value()) != 1)
+        const uint64_t callerScope = PersonalScripts::physicalScope(currentState, session->playerId().value());
+        const bool activeRelocatedSpeaker = mBinding.mPersonalScripts->npcBanks() && receipt->encounterLife
+            && receipt->relocation && !receipt->encounterReturned && callerScope != 1
+            && receipt->last.sourceReference == request.speaker && receipt->encounterLife == request.life;
+        if ((receipt->encounterLife || callerScope != 1) && !activeRelocatedSpeaker)
             return reject("story encounter source disabled");
         if (hasStoryEncounters() && (!mCombat || mNpcCast || !mProjectiles.empty()
             || std::ranges::any_of(mTimedEffects, [](const auto& effect) { return effect.sourceKind != 3 && effect.sourceKind != 5; })
@@ -5591,8 +5621,13 @@ namespace TES3MP::Native
         if (owner == mBinding.mContainers.end())
             return reject("speaker inventory");
         const auto* player = players.findPlayer(session->playerId());
-        const auto frame = npc == 2 ? mBinding.mNavigatingActor->snapshot()
-                                    : mBinding.mNavigatingActor->neighborSnapshots().at(npc - 3);
+        auto frame = npc == 2 ? mBinding.mNavigatingActor->snapshot()
+                              : mBinding.mNavigatingActor->neighborSnapshots().at(npc - 3);
+        if (activeRelocatedSpeaker)
+        {
+            frame.mPosition = receipt->relocation->position;
+            frame.mYaw = receipt->relocation->yaw;
+        }
         if (!player || player->transform().cell() != actorCell(frame))
             return reject("speaker cell");
         const auto position = player->transform().position();
@@ -5629,6 +5664,11 @@ namespace TES3MP::Native
         std::copy(frame.mPosition.begin(), frame.mPosition.end(), sourcePose.pos);
         sourcePose.rot[2] = frame.mYaw;
         source.getPtr().getRefData().setPosition(sourcePose);
+        auto playerPose = mRuntime.mActors[self]->getPtr().getRefData().getPosition();
+        playerPose.pos[0] = float(double(position.x()) / 1024);
+        playerPose.pos[1] = float(double(position.y()) / 1024);
+        playerPose.pos[2] = float(double(position.z()) / 1024);
+        mRuntime.mActors[self]->getPtr().getRefData().setPosition(playerPose);
         resolver.ptr = source.getPtr();
         resolver.player = mRuntime.mActors[self]->getPtr();
         const auto& current = prior ? prior->state : *mPersonalScriptState;
@@ -5777,7 +5817,8 @@ namespace TES3MP::Native
                 std::ignore = stagedWeaponCore({}, nullptr, {}, nullptr, {}, &testValues);
                 auto combined = prior->itemTransfers;
                 combined.insert(combined.end(), prepared.itemTransfers.begin(), prepared.itemTransfers.end());
-                const auto owners = stagePersonalItemTransfers(testValues, mRuntime.mStore, mBinding.mPlayers, combined);
+                const auto owners = stagePersonalItemTransfers(
+                    testValues, mRuntime.mStore, mBinding.mPlayers, combined, mRuntime.mScriptLocals);
                 for (const size_t idx : owners)
                     testValues.mActors[idx].validate(
                         mRuntime.mStore, testValues.mActors[idx].mActor, mRuntime.mScriptLocals.get());
@@ -5792,7 +5833,7 @@ namespace TES3MP::Native
             auto& story = *std::ranges::find_if(prepared.state, [&](const auto& value) {
                 return value.last.character == session->playerId().value() && value.last.story == request.story;
             });
-            if (story.activity)
+            if (story.activity && story.activity->actorImage.empty())
             {
                 if (mCombat->knockedDown[npc] || mCombat->hitRecoveryTicks[npc]
                     || hasParalysis(mTimedEffects, npc)
@@ -6302,6 +6343,76 @@ namespace TES3MP::Native
             = mBinding.mPersonalScripts->preparePartyController(*mPersonalScriptState, story, newController.value());
         return commitPersonalPartyChange(prepared, mBinding, mPersonalScriptState, mPersonalScriptImage, mActorImage,
             mRuntime.mFailedClosed, persist);
+    }
+
+    bool InventoryService::hasLockedQuestProvenance(PlayerId player, const ESM::RefId& item) const
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->npcBanks() || item.empty()) return false;
+        const auto* state = personalState(nullptr);
+        if (!state) return false;
+        for (const auto& inst : *state)
+        {
+            if (inst.last.character != player.value()) continue;
+            for (const auto& r : inst.itemReceipts)
+                if (r.playerTarget && r.addition && r.item == item) return true;
+            for (const auto& r : inst.rewardReceipts)
+                if (r.item == item) return true;
+        }
+        return false;
+    }
+
+    bool InventoryService::applyQuestItemPickup(uint64_t story, PlayerId player, uint64_t sourceId,
+        const ESM::RefId& item, int count, const NativeInventoryCommit& persist)
+    {
+        if (!mBinding.mPersonalScripts || !mBinding.mPersonalScripts->npcBanks() || !mPersonalScriptState
+            || !mBinding.mNavigatingActor || mRuntime.mFailedClosed || inventoryImage().empty())
+            return false;
+        const auto prepared = mBinding.mPersonalScripts->prepareQuestItemAcquisition(
+            *mPersonalScriptState, story, player.value(), sourceId, item, count, mRuntime.mStore);
+        if (prepared.result.outcome != SharedWorldScript::Outcome::Committed || !prepared.result.executed
+            || prepared.itemTransfers.empty())
+            return false;
+        try
+        {
+            EquipmentSessionValues values;
+            std::ignore = stagedWeaponCore({}, nullptr, {}, nullptr, {}, &values, nullptr);
+            const auto modified = stagePersonalItemTransfers(
+                values, mRuntime.mStore, mBinding.mPlayers, prepared.itemTransfers, mRuntime.mScriptLocals);
+            if (modified.empty()) return false;
+            if (values.mRevision <= mWorld.getPtrRegistryRevision())
+                values.mRevision = mWorld.getPtrRegistryRevision() + 1;
+            EquipmentBytes wornCore;
+            mRuntime.encodeSession(values, wornCore);
+            auto loot = mRuntime.prepareProjectileLoot(values, modified);
+            auto wornInventory = replaceAreaCore(mImage, wornCore);
+            const auto retainedActor = readActorCampaign(mActorImage).actor;
+            auto sealed = sealActor(wornInventory, retainedActor, mActorTick, mActorVelocity, mMelee, mMeleeTarget,
+                mMeleeContacted, mCombat, mLife, mNeighborLives, mProjectiles, mTimedEffects, mNpcCast, nullptr,
+                nullptr, {}, std::span(prepared.image));
+            const auto outcome = persist(std::as_bytes(std::span(sealed)));
+            if (outcome == CanonicalDurabilityResult::Failed)
+            {
+                mRuntime.mFailedClosed = true;
+                return false;
+            }
+            if (outcome != CanonicalDurabilityResult::Committed)
+                return false;
+            mRuntime.installProjectileLoot(*loot);
+            mCoreImage.swap(wornCore);
+            mImage.swap(wornInventory);
+            *mPersonalScriptState = prepared.state;
+            mPersonalScriptImage = prepared.image;
+            mActorImage.swap(sealed);
+            return true;
+        }
+        catch (const std::exception&)
+        {
+            return false;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     SharedWorldScript::Result InventoryService::stagePersonalScript(PreparedNativeInventory& candidate,
@@ -6817,10 +6928,14 @@ namespace TES3MP::Native
                 if (!player || !transaction->states[index].root || !room.hasPlayer(PlayerHullBase + index)
                     || std::ranges::none_of(inputPlayers.activeSessions(), [&](const auto& session) { return session.playerId() == owner; })
                     || !native->combat || native->combat->actors[index][8][2] <= 0
-                    || containerIt == mBinding.mContainers.end()
-                    || transaction->states[index].root->cell() != containerIt->mCell)
+                    || containerIt == mBinding.mContainers.end())
                     continue; // Offline/absent owners suspend; never catch up or reset.
                 auto& actorRoom = room.forActor(sourceRef);
+                if ((transaction->states[index].root->cell() != containerIt->mCell
+                        && !sharesGameplayArea(transaction->states[index].root->cell(), containerIt->mCell)
+                        && !actorRoom.sharesCollisionWorld(room.forPlayer(PlayerHullBase + index)))
+                    || !actorRoom.contains(story.relocation->position))
+                    continue;
                 auto& activity = *story.activity;
                 const auto& pose = *story.relocation;
                 const auto p = transaction->states[index].root->position();
@@ -6828,7 +6943,25 @@ namespace TES3MP::Native
                 const osg::Vec3f leader(pose.position[0], pose.position[1], pose.position[2]);
                 const auto extents = actorRoom.selectedActorHalfExtents();
                 const float maxExtent = std::max({extents[0], extents[1], extents[2]});
-                const bool moving = !activity.escort || MWMechanics::AiEscort::followerInRange(leader, follower, activity.followDistance);
+                const int pkgType = activity.effectivePackageType();
+                std::array<float, 3> navTarget = activity.destination;
+                bool moving = false;
+                if (pkgType == 0)
+                {
+                    moving = false;
+                    navTarget = pose.position;
+                }
+                else if (pkgType == 1)
+                    moving = true;
+                else if (pkgType == 2)
+                    moving = MWMechanics::AiEscort::followerInRange(leader, follower, activity.followDistance);
+                else if (pkgType == 3)
+                {
+                    constexpr float followDist = 186.f;
+                    moving = (follower - leader).length2() > followDist * followDist;
+                    const std::array<float, 3> followerPos{follower.x(), follower.y(), follower.z()};
+                    navTarget = actorRoom.contains(followerPos) ? followerPos : pose.position;
+                }
                 std::vector<uint64_t> hidden;
                 const uint64_t ownerScope = PersonalScripts::physicalScope(stories, owner.value());
                 for (size_t peer = 0; peer < 2; ++peer)
@@ -6839,21 +6972,44 @@ namespace TES3MP::Native
                 std::unique_ptr<InteriorActorScene::Prepared> step;
                 room.withPlayerHulls(activityHulls, [&] { room.withHiddenActors(hidden, [&] {
                     step = actorRoom.prepareScopedNavigation(activity.actorImage,
-                        ActorMovement{.enabled = true, .walkSpeed = moving ? activity.walkSpeed : 0.f}, activity.destination);
+                        ActorMovement{.enabled = true, .walkSpeed = moving ? activity.walkSpeed : 0.f}, navTarget);
                 }); });
                 const auto frame = step->snapshot();
                 const osg::Vec3f destination(activity.destination[0], activity.destination[1], activity.destination[2]);
-                // Use stock package completion and escort distance hysteresis. No journal/reward effect follows arrival.
-                if (activity.escort)
+                bool inTargetCell = true;
+                if (!activity.destinationCell.empty())
                 {
-                    activity.completed = moving && (step->pathCompleted() || (osg::Vec3f(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]) - destination).length2() <= maxExtent * maxExtent);
+                    const auto frameCell = actorCell(frame);
+                    const auto engineCellIt = mBinding.mEngineCells.find(frameCell);
+                    if (engineCellIt == mBinding.mEngineCells.end())
+                        inTargetCell = false;
+                    else
+                    {
+                        const MWWorld::Cell c(*mRuntime.mStore.get<ESM::Cell>().find(engineCellIt->second));
+                        inTargetCell = Misc::StringUtils::ciEqual(
+                            c.getCellName(mRuntime.mStore), activity.destinationCell.getRefIdString());
+                    }
+                }
+                // Use stock package completion and escort distance hysteresis. No journal/reward effect follows arrival.
+                if (pkgType == 0)
+                    activity.completed = true;
+                else if (pkgType == 2)
+                {
+                    activity.completed = inTargetCell && moving && (step->pathCompleted() || (osg::Vec3f(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]) - destination).length2() <= maxExtent * maxExtent);
                     activity.followDistance = MWMechanics::AiEscort::followDistance(maxExtent, moving);
+                }
+                else if (pkgType == 3)
+                {
+                    constexpr float followDist = 186.f;
+                    activity.completed = inTargetCell
+                        && (osg::Vec3f(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]) - destination).length2()
+                            <= followDist * followDist;
                 }
                 else activity.completed = MWMechanics::AiTravel::destinationReached(
                     {frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]}, destination, extents[2], activity.walkSpeed,
                     1.f/30, step->pathCompleted(), activity.destinationTimer);
                 story.relocation->position = frame.mPosition; story.relocation->yaw = frame.mYaw;
-                story.relocation->validate();
+                story.relocation->validate(mBinding.mPersonalScripts->npcBanks());
                 activity.actorImage.assign(step->image().begin(), step->image().end());
                 activity.tick = tick.value(); ++activity.steps; changed = true;
                 if (mBinding.mPersonalScripts->parties() && story.party.partyId && story.party.sharedScope > 1)
@@ -6890,6 +7046,8 @@ namespace TES3MP::Native
                 std::vector<std::vector<PersonalScripts::LifeEvent>> lifeEvents;
                 std::array<std::vector<PersonalScripts::ItemBalance>, 2> playerItemStorage;
                 std::vector<PersonalScripts::PlayerInventory> playerInventories;
+                std::array<std::string, 2> playerCellNameStorage;
+                std::vector<PersonalScripts::PlayerLocation> playerLocations;
                 if (mBinding.mPersonalScripts->sourceWaits())
                 {
                     if (!native->life || !native->combat || native->combat->npcPlacements.empty())
@@ -6902,6 +7060,24 @@ namespace TES3MP::Native
                                 : combatEquipmentValues(i, native->command.get());
                             playerItemStorage[i] = extractPersonalPlayerItems(values, mRuntime.mStore);
                             playerInventories.push_back({mBinding.mPlayers[i].value(), playerItemStorage[i]});
+                            const auto* plr = inputPlayers.findPlayer(mBinding.mPlayers[i]);
+                            const std::optional<Transform> rootTransform = transaction->states[i].root
+                                ? transaction->states[i].root
+                                : (plr ? std::optional(plr->transform()) : std::nullopt);
+                            std::array<float, 3> plrPos{};
+                            if (rootTransform)
+                            {
+                                const auto p = rootTransform->position();
+                                plrPos = {
+                                    float(double(p.x()) / 1024), float(double(p.y()) / 1024), float(double(p.z()) / 1024)};
+                                const auto engineCellIt = mBinding.mEngineCells.find(rootTransform->cell());
+                                if (engineCellIt != mBinding.mEngineCells.end())
+                                {
+                                    const MWWorld::Cell c(*mRuntime.mStore.get<ESM::Cell>().find(engineCellIt->second));
+                                    playerCellNameStorage[i] = c.getCellName(mRuntime.mStore);
+                                }
+                            }
+                            playerLocations.push_back({mBinding.mPlayers[i].value(), plrPos, playerCellNameStorage[i]});
                         }
                     const size_t nPlacements = native->combat->npcPlacements.size();
                     sources.reserve(nPlacements);
@@ -6942,7 +7118,10 @@ namespace TES3MP::Native
                             src.events = lifeEvents[k];
                         }
                         if (mBinding.mPersonalScripts->npcBanks())
+                        {
                             src.playerInventories = playerInventories;
+                            src.playerLocations = playerLocations;
+                        }
                         sources.push_back(src);
                     }
                 }
@@ -6961,6 +7140,42 @@ namespace TES3MP::Native
                 }
                 if (scripts.result.executed)
                 {
+                    if (mBinding.mPersonalScripts->activities())
+                    {
+                        bool seededActivity = false;
+                        const auto& defs = mBinding.mPersonalScripts->definitions();
+                        for (size_t s = 0; s < scripts.state.size(); ++s)
+                        {
+                            auto& st = scripts.state[s];
+                            if (!st.activity || !st.activity->actorImage.empty()) continue;
+                            const uint64_t srcRef = (s < defs.size() && defs[s].encounter)
+                                ? defs[s].encounter->reference
+                                : st.last.sourceReference;
+                            const auto placementIt = std::ranges::find(native->combat->npcPlacements, srcRef);
+                            const size_t npcIdx = 2 + (placementIt == native->combat->npcPlacements.end()
+                                ? 0 : size_t(placementIt - native->combat->npcPlacements.begin()));
+                            const auto ownerIt = std::ranges::find(mBinding.mContainers, srcRef,
+                                [](const auto& c) { return c.mId.value(); });
+                            if (ownerIt == mBinding.mContainers.end())
+                                throw std::invalid_argument("Scheduled activity source absent");
+                            const auto spkStats = loadCombatStats(mRuntime.mStore, native->combat->actors.at(npcIdx),
+                                native->timedEffects, npcIdx);
+                            const auto& settings = mRuntime.mStore.get<ESM::GameSetting>();
+                            const auto setting = [&](const char* name) { return settings.find(name)->mValue.getFloat(); };
+                            const float weight = std::max(0.f, mRuntime.storage(2 + size_t(ownerIt - mBinding.mContainers.begin())).getWeight());
+                            const float encumbrance = MWClass::normalizedEncumbrance(weight,
+                                spkStats.getAttribute(ESM::Attribute::Strength).getModified() * setting("fEncumbranceStrMult"));
+                            if (encumbrance > 1.f) throw std::invalid_argument("Scheduled activity source overencumbered");
+                            st.activity->walkSpeed = MWClass::npcWalkSpeed(
+                                spkStats.getAttribute(ESM::Attribute::Speed).getModified(),
+                                encumbrance, setting("fMinWalkSpeed"), setting("fMaxWalkSpeed"), setting("fEncumberedMoveEffect"));
+                            st.activity->actorImage = room.forActor(srcRef).selectedImage();
+                            st.activity->validate();
+                            seededActivity = true;
+                        }
+                        if (seededActivity)
+                            scripts.image = mBinding.mPersonalScripts->encode(scripts.state);
+                    }
                     if (native->personalInvocations + scripts.invocations
                         > PersonalScripts::MaximumInvocationsPerTransaction)
                         throw std::invalid_argument("Dialogue and scheduled invocation budget exceeded");
@@ -6987,7 +7202,9 @@ namespace TES3MP::Native
                                 all.push_back({c.mBase, c.mPlacement});
                                 if (i >= mBinding.mStaticContainers) dynamic.push_back(all.back());
                             }
-                            mRuntime.encodeSession(values, native->wornCore, all);
+                            mRuntime.encodeSession(values, native->wornCore,
+                                native->membership ? std::span<const EquipmentContainerBinding>(all)
+                                                   : std::span<const EquipmentContainerBinding>{});
                             std::vector<size_t> owners;
                             for (size_t i = 0; i < values.mContainers.size() + 2; ++i)
                                 if (native->membership || (native->loot && native->loot->replaces(i))
@@ -9830,6 +10047,11 @@ namespace TES3MP::Native
             if (success && weapon && !request.projectile && !mBinding.mExpandedEffects) applyStrike(magicCaster(owner), *held, *weapon, attacker, victim, defender, rng);
             if (success && request.projectile)
                 recoverProjectile(*request.projectile, defender, owner, projectileEnchantmentApplied, rng);
+            if (success && mBinding.mPersonalScripts && mBinding.mPersonalScripts->parties())
+            {
+                auto& skillStat = attacker.getSkill(skill);
+                skillStat.setProgress(skillStat.getProgress() + 1.f);
+            }
             combat->rng = uint32_t(std::stoul(Misc::Rng::serialize(rng)));
             saveCombatStats(combat->actors[owner], attacker, timedEffects, owner);
             saveCombatStats(combat->actors[defender], victim, timedEffects, defender);
@@ -12818,6 +13040,57 @@ namespace TES3MP::Native
             }
         }
         processPassiveSources();
+        if (mBinding.mPersonalScripts && mBinding.mPersonalScripts->parties() && combat)
+        {
+            if (const auto* pState = personalState(nullptr))
+            {
+                for (size_t index = 2; index < combat->actors.size(); ++index)
+                {
+                    const auto& currentLife = index == 2 ? *life : neighborLives.at(index - 3);
+                    const auto& previousLife = index == 2 ? *mLife : mNeighborLives.at(index - 3);
+                    if (!currentLife.respawnTick || previousLife.respawnTick
+                        || currentLife.generation != previousLife.generation || currentLife.deaths.empty())
+                        continue;
+                    const auto& death = currentLife.deaths.back();
+                    if (death.killerKind != 1) continue;
+                    const auto killerStory = std::ranges::find_if(*pState, [&](const auto& s) {
+                        return s.last.character == death.killer && s.party.partyId && !s.party.suspended;
+                    });
+                    if (killerStory == pState->end()) continue;
+                    const size_t killerIdx = actor(PlayerId::fromValue(death.killer).value());
+                    const auto killerValues = candidateEquipmentValues(killerIdx);
+                    const auto rightSlot = killerValues.mSlots[MWWorld::InventoryStore::Slot_CarriedRight];
+                    const ESM::Weapon* weapon = nullptr;
+                    if (rightSlot.isSet())
+                    {
+                        const auto wObj = std::ranges::find(
+                            killerValues.mObjects, rightSlot, [](const auto& o) { return o.mRef.mRefNum; });
+                        if (wObj != killerValues.mObjects.end() && wObj->mRef.mCount > 0)
+                            weapon = mRuntime.mStore.get<ESM::Weapon>().search(wObj->mRef.mRefID);
+                    }
+                    const auto skillId
+                        = weapon ? MWMechanics::getWeaponType(weapon->mData.mType)->mSkill : ESM::Skill::HandToHand;
+                    const int skillIndex = ESM::Skill::refIdToIndex(skillId);
+                    if (skillIndex < 0 || skillIndex >= ESM::Skill::Length) continue;
+                    const size_t statIdx = ESM::Attribute::Length + 3 + size_t(skillIndex);
+                    for (size_t pIdx = 0; pIdx < mBinding.mPlayers.size(); ++pIdx)
+                    {
+                        const auto pid = mBinding.mPlayers[pIdx];
+                        if (combat->actors[pIdx][8][2] <= 0
+                            || std::ranges::none_of(inputPlayers.activeSessions(),
+                                [&](const auto& session) { return session.playerId() == pid; }))
+                            continue;
+                        const bool isMember = pid.value() == death.killer
+                            || std::ranges::any_of(*pState, [&](const auto& ps) {
+                                   return ps.last.character == pid.value() && ps.last.story == killerStory->last.story
+                                       && ps.party.partyId == killerStory->party.partyId && !ps.party.suspended;
+                               });
+                        if (isMember)
+                            combat->actors[pIdx][statIdx][4] += 1.f;
+                    }
+                }
+            }
+        }
         struct SoulCapture { size_t owner; ESM::RefId soul; int value; };
         std::vector<std::vector<SoulCapture>> soulCaptures;
         if (mBinding.mObjectTravelFamily && combat)
@@ -13312,8 +13585,8 @@ namespace TES3MP::Native
                     for (size_t i = 0; i < values.mContainers.size() + 2; ++i)
                         if (transaction->loot->replaces(i))
                             (i < 2 ? values.mActors[i] : values.mContainers[i - 2]) = transaction->loot->values(i);
-                const auto modified
-                    = stagePersonalItemTransfers(values, mRuntime.mStore, mBinding.mPlayers, dialogue->itemTransfers);
+                const auto modified = stagePersonalItemTransfers(
+                    values, mRuntime.mStore, mBinding.mPlayers, dialogue->itemTransfers, mRuntime.mScriptLocals);
                 if (!modified.empty())
                 {
                     if (values.mRevision <= mWorld.getPtrRegistryRevision())
@@ -13495,6 +13768,41 @@ namespace TES3MP::Native
                     std::erase_if(view.motions, [&](const auto& motion) { return motion.placement != encounterRef; });
                     for (auto& motion : view.motions)
                     { motion.position = pose->position; motion.yaw = pose->yaw; motion.velocity = velocity; }
+                    if (view.motions.empty())
+                    {
+                        const auto* player = players.findPlayer(session->playerId());
+                        const auto ownerIt = std::ranges::find(mBinding.mContainers, encounterRef,
+                            [](const auto& c) { return c.mId.value(); });
+                        if (player && ownerIt != mBinding.mContainers.end())
+                        {
+                            const auto poseCell = ownerIt->mCell.asExterior()
+                                ? CellId::exterior(ownerIt->mCell.asExterior()->worldspace(),
+                                      int32_t(std::floor(double(pose->position[0]) / 8192)),
+                                      int32_t(std::floor(double(pose->position[1]) / 8192)))
+                                : ownerIt->mCell;
+                            if (player->transform().cell() == poseCell || player->transform().cell() == ownerIt->mCell)
+                            {
+                                const size_t ownerIdx = size_t(ownerIt - mBinding.mContainers.begin()) + 2;
+                                const auto& sharedValues = (moving && moving->loot && moving->loot->replaces(ownerIdx))
+                                    ? moving->loot->values(ownerIdx)
+                                    : mRuntime.installedValues(ownerIdx);
+                                std::array<std::optional<ItemPrototypeId>, static_cast<size_t>(EquipmentSlot::Count)> slots{};
+                                for (int slot = 0; slot < InventoryStore::Slots; ++slot)
+                                    if (sharedValues.mSlots[slot].isSet())
+                                    {
+                                        const auto item = std::ranges::find(sharedValues.mObjects, sharedValues.mSlots[slot],
+                                            [](const auto& object) { return object.mRef.mRefNum; });
+                                        if (item != sharedValues.mObjects.end())
+                                            slots[slot] = mItemIds.at(item->mRef.mRefID);
+                                    }
+                                if (view.actors.empty())
+                                    view.actors.push_back({ownerIt->mId, slots});
+                                view.motions.push_back({encounterRef,
+                                    moving ? moving->tick : std::max<uint64_t>(1, mActorTick),
+                                    pose->position, velocity, pose->yaw});
+                            }
+                        }
+                    }
                 }
                 else
                 {

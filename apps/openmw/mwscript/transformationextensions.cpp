@@ -53,6 +53,13 @@ namespace MWScript
                 ESM::RefId name = ESM::RefId::stringRefId(runtime.getStringLiteral(runtime[0].mInteger));
                 runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    runtime.push(context.distance(from, name));
+                    return;
+                }
+
                 if (from.isEmpty())
                 {
                     std::string error = "Missing implicit ref";
@@ -836,6 +843,7 @@ namespace MWScript
             }
             extensions.registerFunction("getpos", 'f', "c", opcodeGetPos, opcodeGetPosExplicit);
             extensions.registerFunction("getangle", 'f', "c", opcodeGetAngle, opcodeGetAngleExplicit);
+            extensions.registerFunction("getdistance", 'f', "c", opcodeGetDistance, opcodeGetDistanceExplicit);
         }
 
         void installPositionOpcodes(Interpreter::Interpreter& interpreter)
@@ -849,6 +857,8 @@ namespace MWScript
             interpreter.installSegment5<OpGetPos<ExplicitRef>>(opcodeGetPosExplicit);
             interpreter.installSegment5<OpGetAngle<ImplicitRef>>(opcodeGetAngle);
             interpreter.installSegment5<OpGetAngle<ExplicitRef>>(opcodeGetAngleExplicit);
+            interpreter.installSegment5<OpGetDistance<ImplicitRef>>(opcodeGetDistance);
+            interpreter.installSegment5<OpGetDistance<ExplicitRef>>(opcodeGetDistanceExplicit);
         }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)

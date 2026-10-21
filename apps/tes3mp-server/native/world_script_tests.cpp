@@ -825,13 +825,16 @@ namespace
                 && missingRingAttempt.state[0].itemReceipts.empty(),
                 "Fargoth ring choice 2 without ring_keley did not take Morrowind.esm's no-ring branch (index 10, no transfer)");
 
+            const unsigned char ringFinished = std::ranges::any_of(ringQuest->mInfo, [](const auto& info) {
+                return info.mData.mJournalIndex == 100 && info.mQuestStatus == ESM::DialInfo::QS_Finished;
+            }) ? 1 : 0;
             auto aRingFinish = ringPolicy.prepareIntent(ringState, 11, 3,
                 {501, 101, 1, ringState[0].dialogueRevision, "ring", 2}, "Seyda Neen", loadout.store(), ringResolver, 4,
                 &playerStats, {}, &fargothStats, stamp, std::span<const PersonalScripts::ItemBalance>(hasRing));
             require(aRingFinish.result.executed
                 && aRingFinish.state[0].dialogue.quests.size() == 1
                 && aRingFinish.state[0].dialogue.quests.front().mState == 100
-                && aRingFinish.state[0].dialogue.quests.front().mFinished == 1
+                && aRingFinish.state[0].dialogue.quests.front().mFinished == ringFinished
                 && aRingFinish.state[0].playerItems.empty()
                 && aRingFinish.state[0].itemReceipts.size() == 2
                 && aRingFinish.state[0].npcs.size() == 2
@@ -852,7 +855,7 @@ namespace
                 ringResolver, 4, &playerStats, {}, &fargothStats, stamp,
                 std::span<const PersonalScripts::ItemBalance>(hasRing));
             require(bRingFinish.result.executed && bRingFinish.state[1].dialogue.quests.front().mState == 100
-                && bRingFinish.state[1].dialogue.quests.front().mFinished == 1,
+                && bRingFinish.state[1].dialogue.quests.front().mFinished == ringFinished,
                 ("B failed to complete MS_FargothRing independently after restart: " + bRingFinish.result.diagnostic).c_str());
 
             // 2. MS_Nuccius: unchanged vodunius nuccius (voduniusScript) departure on CellChanged when MS_Nuccius >= 100.
@@ -953,8 +956,123 @@ namespace
                 && std::ranges::find(taxmanTickB.state[1].dialogue.topics, id("murder of Processus Vitellius"))
                     != taxmanTickB.state[1].dialogue.topics.end(),
                 "B failed to activate processus vitellius independently after restart");
-            std::cout << "Seyda Neen quest content: unchanged MS_FargothRing, MS_Nuccius (voduniusScript), "
-                "MS_Lookout (treestumpScript), and MV_DeadTaxman (processusScript) admitted and verified for A/B\n";
+
+            // 5. MV_TraderAbandoned (Pemenie): unchanged pemenieScript + cross-cell AiFollow -> Gnaar Mok arrival -> AiWander replacement -> Boots of Blinding Speed turn-in across A/B.
+            const auto* pemenie = loadout.store().get<ESM::NPC>().find(id("pemenie"));
+            const auto* pemenieScript = loadout.store().get<ESM::Script>().find(pemenie->mScript);
+            const std::vector<ESM::Script> pemenieBank{*pemenieScript};
+            auto pemenieProg = std::make_shared<const SharedWorldScript>(
+                *pemenieScript, std::vector<ESM::Global>{}, content, crypto, pemenieBank, pemenie->mId, true);
+            const auto* pemenieQuest = loadout.store().get<ESM::Dialogue>().find(id("MV_TraderAbandoned"));
+            const auto* dealTopicFull = loadout.store().get<ESM::Dialogue>().find(id("making a deal"));
+            const auto* traderTopicFull = loadout.store().get<ESM::Dialogue>().find(id("Pemenie the trader"));
+            const auto* greeting1Full = loadout.store().get<ESM::Dialogue>().find(id("Greeting 1"));
+            require(pemenieQuest->mType == ESM::Dialogue::Journal && dealTopicFull->mType == ESM::Dialogue::Topic,
+                "Unchanged MV_TraderAbandoned records missing");
+            ESM::Dialogue dealTopic = *dealTopicFull;
+            std::erase_if(dealTopic.mInfo, [&](const auto& info) {
+                return info.mResultScript.find("MV_TraderAbandoned") == std::string::npos;
+            });
+            ESM::Dialogue traderTopic = *traderTopicFull;
+            traderTopic.mInfo.clear();
+            ESM::Dialogue greeting1Topic = *greeting1Full;
+            greeting1Topic.mType = ESM::Dialogue::Topic;
+            std::erase_if(greeting1Topic.mInfo, [&](const auto& info) {
+                return info.mResultScript.find("boots of blinding speed[unique]") == std::string::npos;
+            });
+            require(!dealTopic.mInfo.empty() && !greeting1Topic.mInfo.empty(),
+                "Unchanged Pemenie dialogue entries missing");
+            const PersonalScripts::EncounterBinding pemenieBind{105, pemenie->mId, ESM::RefId::esm3ExteriorCell(-3, 3)};
+            std::vector<PersonalScripts::Definition> pemenieDefs;
+            for (const uint64_t ch : both)
+                pemenieDefs.push_back({ch, 505, pemenieProg, {}, true,
+                    {*pemenieQuest, dealTopic, traderTopic, greeting1Topic}, pemenieBind});
+            PersonalScripts pemeniePolicy(95, pemenieDefs, crypto, true, true, true, true, true, true, true, true, true, true, true);
+            auto pemenieState = pemeniePolicy.initial();
+            for (auto& inst : pemenieState)
+                inst.dialogue.topics.push_back(id("Greeting 1"));
+            MWWorld::ManualRef pemenieRef(loadout.store(), pemenie->mId);
+            ESM::Position pemenieStart{};
+            pemenieStart.pos[0] = -20400.f; pemenieStart.pos[1] = 26000.f; pemenieStart.pos[2] = 600.f;
+            pemenieRef.getPtr().getRefData().setPosition(pemenieStart);
+            MWWorld::ManualRef pemeniePlayerRef(loadout.store(), pemenie->mId);
+            pemeniePlayerRef.getPtr().getRefData().setPosition(pemenieStart);
+            IntentResolver pemenieResolver;
+            pemenieResolver.actor = pemenieRef.getPtr();
+            pemenieResolver.player = pemeniePlayerRef.getPtr();
+            MWMechanics::NpcStats pemenieStats(loadout.store());
+            pemenieStats.setBaseDisposition(pemenie->mNpdt.mDisposition);
+
+            const auto runPemenieComplete = [&](uint64_t ch, uint64_t& cmdSeq) {
+                const size_t idx = ch == 11 ? 0 : 1;
+                auto dealAsk = pemeniePolicy.prepareIntent(pemenieState, ch, cmdSeq++,
+                    {505, 105, 1, pemenieState[idx].dialogueRevision, "making a deal", -1},
+                    "West Gash Region", loadout.store(), pemenieResolver, 4, &playerStats, {}, &pemenieStats, stamp,
+                    std::span<const PersonalScripts::ItemBalance>(noRing));
+                require(dealAsk.result.executed && dealAsk.state[idx].dialogue.quests.front().mState == 10
+                    && dealAsk.state[idx].choices.size() == 2,
+                    ("Pemenie making a deal stage 10 failed: " + dealAsk.result.diagnostic).c_str());
+                pemenieState.swap(dealAsk.state);
+
+                auto dealAccept = pemeniePolicy.prepareIntent(pemenieState, ch, cmdSeq++,
+                    {505, 105, 1, pemenieState[idx].dialogueRevision, "making a deal", 1},
+                    "West Gash Region", loadout.store(), pemenieResolver, 4, &playerStats, {}, &pemenieStats, stamp,
+                    std::span<const PersonalScripts::ItemBalance>(noRing));
+                require(dealAccept.result.executed && dealAccept.state[idx].dialogue.quests.front().mState == 20
+                    && dealAccept.state[idx].encounterLife == 1 && dealAccept.state[idx].activity
+                    && dealAccept.state[idx].activity->effectivePackageType() == 3
+                    && dealAccept.state[idx].activity->destination == std::array<float, 3>{17153.f, 30966.f, 795.f},
+                    ("Pemenie AiFollow choice 1 failed: " + dealAccept.result.diagnostic).c_str());
+                pemenieState.swap(dealAccept.state);
+
+                // Cross-cell travel to Gnaar Mok (-56000, 30000); scheduled pemenieScript detects GetPCCell "Gnaar Mok",
+                // GetCurrentAIPackage == 3, GetDistance Player < 512, writes Journal MV_TraderAbandoned 90, ForceGreeting, and replaces package with AiWander (0).
+                pemenieState[idx].relocation->position = {-56000.f, 30000.f, 128.f};
+                pemenieState[idx].activity->actorImage = {'p', 'e', 'm'};
+                pemenieState[idx].activity->tick = cmdSeq;
+                pemenieState[idx].activity->steps = 1;
+                const std::array<PersonalScripts::PlayerLocation, 2> gnaarLocations{{
+                    {11, {-56100.f, 30050.f, 128.f}, ch == 11 ? "Gnaar Mok" : "West Gash Region"},
+                    {22, {-56100.f, 30050.f, 128.f}, ch == 22 ? "Gnaar Mok" : "West Gash Region"}}};
+                PersonalScripts::Source pemenieSource{105, 1, 0, pemenie->mId, true, 0, 0, events, &publicStats,
+                    pemenieStart, &privateStats, false, false, 0, 0, false, 0, emptyInvs, gnaarLocations};
+                auto arrivalTick = pemeniePolicy.prepareScheduled(
+                    pemenieState, cmdSeq++, both, loadout.store(), noFallback, &pemenieSource);
+                require(arrivalTick.result.executed
+                    && arrivalTick.state[idx].dialogue.quests.front().mState == 90
+                    && arrivalTick.state[idx].activity
+                    && arrivalTick.state[idx].activity->effectivePackageType() == 0,
+                    ("Unchanged pemenieScript failed to advance MV_TraderAbandoned to 90 and replace AiFollow with AiWander in Gnaar Mok: "
+                        + arrivalTick.result.diagnostic).c_str());
+                pemenieState = pemeniePolicy.restore(arrivalTick.image);
+
+                // Talk to Pemenie at her relocated position in Gnaar Mok ("Greeting 1") -> transfers boots of blinding speed[unique] and finishes MV_TraderAbandoned 100.
+                const unsigned char pemenieFinished = std::ranges::any_of(pemenieQuest->mInfo, [](const auto& info) {
+                    return info.mData.mJournalIndex == 100 && info.mQuestStatus == ESM::DialInfo::QS_Finished;
+                }) ? 1 : 0;
+                auto rewardStep = pemeniePolicy.prepareIntent(pemenieState, ch, cmdSeq++,
+                    {505, 105, 1, pemenieState[idx].dialogueRevision, "Greeting 1", -1},
+                    "Gnaar Mok", loadout.store(), pemenieResolver, 4, &playerStats, {}, &pemenieStats, stamp,
+                    std::span<const PersonalScripts::ItemBalance>(noRing));
+                require(rewardStep.result.executed
+                    && rewardStep.state[idx].dialogue.quests.front().mState == 100
+                    && rewardStep.state[idx].dialogue.quests.front().mFinished == pemenieFinished
+                    && rewardStep.state[idx].playerItems == std::vector<PersonalScripts::ItemBalance>{
+                        {id("boots of blinding speed[unique]"), 1}}
+                    && rewardStep.state[idx].npcItems == std::vector<PersonalScripts::ItemBalance>{
+                        {id("boots of blinding speed[unique]"), 0}},
+                    ("Pemenie Gnaar Mok reward Greeting 1 failed: " + rewardStep.result.diagnostic).c_str());
+                pemenieState = pemeniePolicy.restore(rewardStep.image);
+            };
+            uint64_t pemCmd = 1;
+            runPemenieComplete(11, pemCmd);
+            require(pemenieState[1].dialogue.quests.empty() && pemenieState[1].playerItems.empty()
+                && PersonalScripts::physicalScope(pemenieState, 22) == 1,
+                "A's Pemenie cross-cell escort mutated B's opportunity");
+            runPemenieComplete(22, pemCmd);
+
+            std::cout << "Seyda Neen & Pemenie quest content: unchanged MS_FargothRing, MS_Nuccius (voduniusScript), "
+                "MS_Lookout (treestumpScript), MV_DeadTaxman (processusScript), and MV_TraderAbandoned (pemenieScript) admitted and verified for A/B\n";
         }
         std::cout << "Quest content verification passed; unchanged content records executed with A/B isolation and recovery\n";
     }
@@ -1029,6 +1147,21 @@ namespace
             "AddTopic \"puzzling riddles\"\n"
             "AddSpell \"TR_m1_Telvanni_Levitate\"\n"
             "RemoveSpell \"TR_m1_Telvanni_Levitate\"\n"
+            "if ( GetPCCell \"Eldale\" == 1 )\n"
+            "if ( GetCurrentAIPackage == 3 )\n"
+            "if ( GetDistance player < 512 )\n"
+            "ForceGreeting\n"
+            "AiWander 0 0 0 60 40 20 0 0 0 0 0 0\n"
+            "endif\n"
+            "endif\n"
+            "endif\n"
+            "if ( GetAiPackageDone == 1 )\n"
+            "AiTravel -11468.5 -71511.5 173.7\n"
+            "AiEscort player 0 70685 126106 835\n"
+            "AiEscortCell player \"Eldale\" 0 200 -32 1\n"
+            "AiFollow player 0 17153 30966 795\n"
+            "AiFollowCell player \"Eldale\" 0 200 -32 1\n"
+            "endif\n"
             "if ( GetSpell \"TR_m1_Telvanni_Levitate\" == 1 )\n"
             "TR_m1_Ultern->StartCombat player\n"
             "Cast \"TR_m1_Eldale_Shield\" TR_m1_T_Eldale\n"
@@ -1045,7 +1178,9 @@ namespace
             "if ( player->GetItemCount \"tax record\" >= 1 )\nplayer->RemoveItem \"tax record\" 1\n"
             "player->RemoveItem \"extravagant_ring_processus\" 1\nplayer->AddItem \"gold_001\" 500\nendif\n"
             "if ( GetItemCount \"gold_001\" >= 50 )\nRemoveItem \"gold_001\" 50\nplayer->AddItem \"gold_001\" 50\nendif",
-            "Journal \"MV_DeadTaxman\" 85\nSetFight 100\nAddTopic \"Processus' Ring\"\nGoodbye"})
+            "Journal \"MV_DeadTaxman\" 85\nSetFight 100\nAddTopic \"Processus' Ring\"\nGoodbye",
+            "Journal \"MV_TraderAbandoned\" 20\nTR_m1_T_Eldale->AiFollow player 0 17153 30966 795 0\nGoodbye",
+            "TR_m1_T_Eldale->AiEscortCell player \"Eldale\" 0 12000 -8000 100\nAiWander 0 0 0 60 30 10 0 0 0 0 0 0"})
             require(!admittedBank.compileResult(resultOp, true, id("TR_m1_T_Eldale"), false, true, true).mInstructions.empty(),
                 "Batch-3/4 opcode failed admission in dialogue result");
         rejects([&] { (void)admittedBank.compileResult("player->Equip \"ring_keley\"", true, id("TR_m1_T_Eldale"), false, true, true); },

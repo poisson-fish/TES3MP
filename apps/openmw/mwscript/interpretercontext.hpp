@@ -105,6 +105,14 @@ namespace MWScript
         float health(const MWWorld::Ptr& reference, bool ratio) const;
         bool disabled(const MWWorld::Ptr& reference) const;
         void aiTravel(const MWWorld::Ptr&, const std::array<float, 3>&, bool, const ESM::RefId&, float) const;
+        void aiPackage(const MWWorld::Ptr&, int, const std::array<float, 3>&, bool, const ESM::RefId&, float,
+            std::string_view = {}) const;
+        bool aiPackageDone(const MWWorld::Ptr&) const;
+        int currentAiPackage(const MWWorld::Ptr&) const;
+        bool pcCell(std::string_view) const;
+        float distance(const MWWorld::Ptr&, const ESM::RefId&) const;
+        void forceGreeting(const MWWorld::Ptr&) const;
+        void goodbye() const;
         void position(const MWWorld::Ptr&, const std::array<float, 3>&, float, const ESM::RefId&) const;
         const ESM::Position& position(const MWWorld::Ptr&) const;
         bool cellChanged() const;

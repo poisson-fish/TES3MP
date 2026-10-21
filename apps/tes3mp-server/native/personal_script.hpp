@@ -101,7 +101,7 @@ namespace TES3MP::Native
                 std::array<float, 3> origin{}, position{};
                 float yaw = 0;
                 bool operator==(const Relocation&) const = default;
-                void validate() const;
+                void validate(bool crossCell = false) const;
             };
             struct Npc
             {
@@ -117,6 +117,9 @@ namespace TES3MP::Native
                 float destinationTimer = 2, followDistance = 450, walkSpeed = 0;
                 uint64_t tick = 0, steps = 0;
                 std::vector<char> actorImage; // Same placement/origin life; no store or new actor identity.
+                int packageType = -1; // -1 uses default (escort ? 2 : 1); 0=Wander, 1=Travel, 2=Escort, 3=Follow.
+                ESM::RefId destinationCell;
+                int effectivePackageType() const noexcept { return packageType >= 0 ? packageType : (escort ? 2 : 1); }
                 bool operator==(const Activity&) const = default;
                 void validate() const;
             };
@@ -167,6 +170,12 @@ namespace TES3MP::Native
             uint64_t character = 0;
             std::span<const ItemBalance> items;
         };
+        struct PlayerLocation
+        {
+            uint64_t character = 0;
+            std::array<float, 3> position{};
+            std::string_view cellName;
+        };
         struct Source
         {
             uint64_t reference = 0, life = 0, respawnTick = 0;
@@ -182,6 +191,7 @@ namespace TES3MP::Native
             bool activated = false;
             uint64_t activatedCharacter = 0;
             std::span<const PlayerInventory> playerInventories = {};
+            std::span<const PlayerLocation> playerLocations = {};
         };
         using State = std::vector<Instance>;
         struct Prepared
@@ -237,6 +247,8 @@ namespace TES3MP::Native
         Prepared preparePartyDisconnect(const State&, uint64_t story, uint64_t character) const;
         Prepared preparePartyResume(const State&, uint64_t story, uint64_t character, bool asHelper = false) const;
         Prepared preparePartyController(const State&, uint64_t story, uint64_t newController) const;
+        Prepared prepareQuestItemAcquisition(const State&, uint64_t story, uint64_t character, uint64_t sourceId,
+            const ESM::RefId& item, int count, const MWWorld::ESMStore&) const;
         Prepared prepareReturn(const State&, uint64_t character, const MWWorld::ESMStore* = nullptr,
             uint64_t sourceLife = 0) const;
         State initial() const;

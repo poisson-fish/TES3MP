@@ -81,8 +81,9 @@ owns behavior, party defaults, admission rules and acceptance; sequence bounded 
    repeated foreign deaths, retry/restart and bounded diagnostics.
 4. **Physical scope and acquisition:** implement reservations, durable activities,
    coherent instances across cells and provenance-based acquisition/depletion.
-   Prove escorts/departures, stock AI packages, scoped inventory/spawns and
-   recovery-copy restrictions.
+   Prove cross-cell escorts/departures, package replacement, stock AI packages,
+   quest-item drop/transfer provenance locks, non-depleting loose/container
+   quest-item acquisition rights and recovery-copy restrictions.
 5. **Lua and recovery:** carry context through bindings/storage/events/timers; prove
    rollback before admission. Generalize coherent recovery already required by earlier
    slices. No quest handlers, prerequisite graphs or inference of ambiguous origins.
@@ -90,9 +91,10 @@ owns behavior, party defaults, admission rules and acceptance; sequence bounded 
    unchanged TR quest. A finishes; B completes without A/items. Exercise concurrent
    dialogue, failed writes, waiting/reserved restart and retained M4 behavior.
 7. **Party addition:** compatible enrollment, shared choices/events, helper roles,
-   per-character costs/rewards and durable receipts. Prove late join, disagreement,
-   offline/leader loss, leave/kick/rejoin and independent continuation. General
-   progress merging stays deferred; parties do not delay the first shared-script slice.
+   per-character costs/rewards, shared party kill XP and durable receipts. Prove late
+   join, disagreement, offline/leader loss, leave/kick/rejoin and independent
+   continuation. General progress merging stays deferred; parties do not delay the
+   first shared-script slice.
 
 **Acceptance:** satisfy the contract's proof obligations using arbitrary-name fixtures
 and unchanged content; no mutation leaks, duplicate public loot/spawns/rewards or

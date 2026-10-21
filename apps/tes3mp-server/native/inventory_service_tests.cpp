@@ -5757,7 +5757,7 @@ namespace TES3MP::Native::Testing
 
             auto npc = *base.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player"));
             npc.mId = ESM::RefId::stringRefId("npc_door_actor");
-            npc.mScript = npcBanks ? ESM::RefId::stringRefId("ledger_x73") : ESM::RefId{};
+            npc.mScript = {};
             npc.mInventory.mList = {{1, ESM::RefId::stringRefId("common_shirt_01")}};
             std::array<ESM::Enchantment, 4> passiveEnchantments;
             std::array<ESM::Clothing, 4> passiveShirts;
@@ -6325,10 +6325,10 @@ namespace TES3MP::Native::Testing
                             + (npcBanks ? name == "ledger_x73"
                                 ? "if ( MenuMode == 1 )\nreturn\nendif\nif ( GetPCSleep == 1 )\nreturn\nendif\n"
                                   "if ( CellChanged == 1 )\nreturn\nendif\nset stage to GetJournalIndex \"journey_t37\"\n"
-                                  "set items to player->GetItemCount \"common_shirt_01\" + GetItemCount \"common_shirt_01\"\n"
+                                  "set items to ( player->GetItemCount \"common_shirt_01\" ) + ( GetItemCount \"common_shirt_01\" )\n"
                                   "set posx to GetPos x\nset posy to GetPos y\nset yaw to GetAngle z\n"
                                 : "set stage to GetJournalIndex \"journey_t37\"\n"
-                                  "set items to player->GetItemCount \"common_shirt_01\" + npc_door_actor->GetItemCount \"common_shirt_01\"\n"
+                                  "set items to ( player->GetItemCount \"common_shirt_01\" ) + ( npc_door_actor->GetItemCount \"common_shirt_01\" )\n"
                                   "set posx to npc_door_actor->GetPos x\nset posy to npc_door_actor->GetPos y\nset yaw to npc_door_actor->GetAngle z\n" : "")
                             + "\nend " + name;
                         out.startRecord(ESM::Script::sRecordId, 0); script.save(out); out.endRecord(ESM::Script::sRecordId);
@@ -6442,6 +6442,7 @@ namespace TES3MP::Native::Testing
                     if (npcBanks)
                     {
                         for (const auto& [scriptId, scriptText] : std::vector<std::pair<const char*, const char*>>{
+                            {"fargoth_helper", "begin fargoth_helper\nlong calls\nset calls to calls + 1\nend fargoth_helper\n"},
                             {"fargothScript", "begin fargothScript\nshort ring\nlong calls\nset calls to calls + 1\n"
                                 "if ( GetJournalIndex \"MS_FargothRing\" >= 100 )\nset ring to 1\nendif\nend fargothScript\n"},
                             {"nucciusScript", "begin nucciusScript\nshort state\nlong calls\nset calls to calls + 1\n"
@@ -6469,7 +6470,7 @@ namespace TES3MP::Native::Testing
                         }
                         for (const auto& [dialId, isJournal, actorId, resultScript] : std::vector<std::tuple<const char*, bool, const char*, const char*>>{
                             {"MS_FargothRing", true, "", ""},
-                            {"ring", false, "fargoth", "Journal MS_FargothRing 100\nModDisposition 50\nplayer->AddItem \"common_shirt_01\" 1\n"},
+                            {"fargoth_ring_topic", false, "fargoth", "Journal MS_FargothRing 100\nModDisposition 50\nplayer->AddItem \"common_shirt_01\" 1\n"},
                             {"MS_Nuccius", true, "", ""},
                             {"nuccius_topic", false, "vodunius nuccius", "Journal MS_Nuccius 100\nplayer->AddItem \"common_shirt_01\" 1\n"},
                             {"TR_M1_GS_MQ_4", true, "", ""},
@@ -7242,7 +7243,7 @@ namespace TES3MP::Native::Testing
             if (socialLifecycle)
             {
                 auto witness = npc;
-                witness.mId = ESM::RefId::stringRefId("npc_witness_alarm");
+                witness.mId = ESM::RefId::stringRefId("npc_witness_alarm"); witness.mScript = {};
                 witness.mAiData.mAlarm = 100;
                 witness.mAiData.mFight = boundEquipment || objectSpells || projectileNeighbors || neighborPhysics ? 0 : 100;
                 if (neighborCombat) witness.mNpdt.mHealth = summons ? 1000 : neighborPhysics ? 200 : 5;
@@ -7336,8 +7337,8 @@ namespace TES3MP::Native::Testing
                                 out.startRecord(ESM::BodyPart::sRecordId, 0); missing.save(out); out.endRecord(ESM::BodyPart::sRecordId);
                                 break;
                             }
-                auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.setIsMale(false);
-                auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast");
+                auto female = npc; female.mId = ESM::RefId::stringRefId("npc_hit_female"); female.mScript = {}; female.setIsMale(false);
+                auto beast = npc; beast.mId = ESM::RefId::stringRefId("npc_hit_beast"); beast.mScript = {};
                 if (boundEquipment || aiDisposition || effectFamily == "ai-creature")
                 {
                     female.mSpells.mList = beast.mSpells.mList = aiPlayerSpells;
@@ -7708,7 +7709,7 @@ namespace TES3MP::Native::Testing
                 spell.mData.mType = ESM::Spell::ST_Spell; spell.mData.mCost = 1;
                 spell.mEffects.populate({{ESM::MagicEffect::DamageHealth, {}, {}, ESM::RT_Target, 10, 3, 1, 1}});
                 out.startRecord(ESM::Spell::sRecordId, 0); spell.save(out); out.endRecord(ESM::Spell::sRecordId);
-                auto caster = npc; caster.mId = ESM::RefId::stringRefId("cell_actor_caster");
+                auto caster = npc; caster.mId = ESM::RefId::stringRefId("cell_actor_caster"); caster.mScript = {};
                 caster.mAiData.mFight = 100; caster.mAiData.mFlee = 0;
                 caster.mInventory.mList.clear(); caster.mSpells.mList = {spell.mId};
                 caster.mNpdt.mHealth = 1000; caster.mNpdt.mMana = 1000; caster.mNpdt.mFatigue = 1000;
@@ -7831,7 +7832,7 @@ namespace TES3MP::Native::Testing
             if (characterCreation)
             {
                 auto placedNpc = npc;
-                placedNpc.mId = ESM::RefId::stringRefId("chargen_autocalc_npc");
+                placedNpc.mId = ESM::RefId::stringRefId("chargen_autocalc_npc"); placedNpc.mScript = {};
                 placedNpc.mNpdtType = ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS;
                 placedNpc.mFlags |= ESM::NPC::Autocalc;
                 placedNpc.mAiData.mFight = 0;
@@ -7908,7 +7909,7 @@ namespace TES3MP::Native::Testing
             }
             for (auto record : {placedActor, floor.mId, door.mId})
             {
-                if (storyEncounter && !npcBanks && record == door.mId) continue;
+                if (storyEncounter && record == door.mId) continue;
                 ESM::CellRef placed; placed.blank(); placed.mRefNum = {++index, 0}; placed.mRefID = record;
                 // Leave the door clear for the two-desktop Touch capture.
                 if (record == placedActor) placed.mPos = worldCollision
@@ -9781,7 +9782,7 @@ namespace TES3MP::Native::Testing
                     const auto prepare = [&](InventoryService& owner, uint64_t tick, uint64_t session, uint64_t command,
                                              DialogueIntent intent) {
                         std::unique_ptr<PreparedNativeInventory> input;
-                        require(owner.appendDialogueIntent(authority, proposal(session, command, intent), input, &world),
+                        if (!owner.appendDialogueIntent(authority, proposal(session, command, intent), input, &world)) return std::unique_ptr<PreparedNativeInventory>{}; require(true,
                             "Authenticated dialogue intent rejected");
                         return owner.prepareNativePlayerTick(
                             authority, id<ServerTick>(tick), 1.f / 30, std::move(input), &world, {}, {});
@@ -10160,6 +10161,56 @@ namespace TES3MP::Native::Testing
                             InventoryHost enrolledRestart(descriptor, manifest, *establishedRegistry, *crypto, proposed);
                             require(image(enrolledRestart.service()) == proposed,
                                 "Party enrollment failed exact InventoryHost recovery");
+                            auto& partyCombat = dynamic_cast<InventoryService&>(enrolledRestart.service());
+                            const auto read = [](const auto& bytes) {
+                                return readActorCampaign({reinterpret_cast<const char*>(bytes.data()), bytes.size()});
+                            };
+                            const size_t lbStat = 11 + size_t(ESM::Skill::refIdToIndex(ESM::Skill::LongBlade));
+                            const float p2BeforeProgress = read(image(partyCombat)).combat->actors[1][lbStat][4];
+                            uint64_t killTick = 4;
+                            bool partyKilled = false;
+                            for (; killTick < 605 && !partyKilled;)
+                            {
+                                partyCombat.synchronizeCells(authority);
+                                const auto core = read(image(partyCombat));
+                                const bool launch = (!core.combat->swings[0] || !core.combat->swings[0]->pending())
+                                    && !core.combat->hitRecoveryTicks[0];
+                                std::unique_ptr<PreparedNativeInventory> input;
+                                if (launch)
+                                {
+                                    const auto* player = authority.findPlayer(id<PlayerId>(1));
+                                    ClientMeleeAttackCommand command{id<SessionId>(1), SessionGeneration::initial(),
+                                        id<CommandSequence>(killTick + 1), id<CommandId>(killTick + 1),
+                                        id<CanonicalRevision>(killTick + 1), id<ActorId>(request.speaker),
+                                        id<ServerTick>(killTick + 1), id<CombatRevision>(killTick + 1),
+                                        id<CombatRevision>(killTick + 1), MeleeAttackType::Chop, 1.f};
+                                    ServerCommandProposal swingInput(id<SessionId>(1), SessionGeneration::initial(),
+                                        command.commandSequence, command.commandId, command.observedCanonicalRevision,
+                                        EntityPrecondition(player->entityId(), player->entityRevision(), player->authorityEpoch()),
+                                        MeleeAttackCommandProposal(command));
+                                    input = partyCombat.prepareMeleeAttack(authority, swingInput, id<ServerTick>(killTick + 1));
+                                    require(bool(input), "Party killer melee swing rejected");
+                                }
+                                auto step = partyCombat.prepareNativePlayerTick(
+                                    authority, id<ServerTick>(++killTick), 1.f / 30, std::move(input), &world, {}, {});
+                                require(step
+                                    && step->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                        == CanonicalDurabilityResult::Committed,
+                                    "Party combat tick failed");
+                                const auto after = read(image(partyCombat));
+                                if (after.life->respawnTick)
+                                {
+                                    require(after.combat->actors[1][lbStat][4] == p2BeforeProgress + 1.f
+                                        && after.combat->actors[0][lbStat][4] > p2BeforeProgress + 1.f,
+                                        "Party kill did not share combat skill XP progress with enrolled party member");
+                                    partyKilled = true;
+                                }
+                            }
+                            require(partyKilled, "Party killer did not defeat source in bounded ticks");
+                            const auto postKillSaved = image(partyCombat);
+                            InventoryHost postKillRestart(descriptor, manifest, *establishedRegistry, *crypto, postKillSaved);
+                            require(image(postKillRestart.service()) == postKillSaved,
+                                "Party kill XP state failed exact InventoryHost recovery");
                         }
 
                         // 2. Non-controller cannot initiate shared dialogue step; controller advances both into shared scope 2.
@@ -10180,7 +10231,7 @@ namespace TES3MP::Native::Testing
                             && viewA[0].encounter->controller == 1 && viewB[0].encounter->controller == 1
                             && viewA[0].encounter->physicalScope == 2 && viewB[0].encounter->physicalScope == 2
                             && !viewA[0].encounter->helper && !viewB[0].encounter->helper
-                            && !viewA[0].encounter->separated && !viewB[0].encounter->separated
+                            && viewA[0].encounter->separated && viewB[0].encounter->separated
                             && !viewA[0].response.empty() && viewB[0].response == viewA[0].response,
                             "Party dialogue projection did not publish wire v4 encounter ownership and responses to both members");
                         const auto spatial = ServerApp::projectInterestViews(
@@ -10194,8 +10245,8 @@ namespace TES3MP::Native::Testing
                                     return CanonicalDurabilityResult::Committed;
                                 }) == CanonicalDurabilityResult::Committed
                             && state(service)[0].activity && state(service)[1].activity
-                            && state(service)[0].rewardReceipts.size() == 2
-                            && state(service)[1].rewardReceipts.size() == 2,
+                            && state(service)[0].rewardReceipts.size() == 1 && state(service)[0].itemReceipts.size() == 4
+                            && state(service)[1].rewardReceipts.size() == 1 && state(service)[1].itemReceipts.size() == 4,
                             "Party dialogue step did not commit activities and durable reward receipts for both members");
 
                         // 3. Shared escort activity steps once per tick for the party and updates both members.
@@ -10205,8 +10256,8 @@ namespace TES3MP::Native::Testing
                                    proposed.assign(bytes.begin(), bytes.end());
                                    return CanonicalDurabilityResult::Committed;
                                }) == CanonicalDurabilityResult::Committed
-                            && state(service)[0].activity->steps == 1
-                            && state(service)[1].activity->steps == 1
+                            && state(service)[0].activity->steps == 2
+                            && state(service)[1].activity->steps == 2
                             && state(service)[0].relocation == state(service)[1].relocation,
                             "Shared party escort step did not advance once for both members");
 
@@ -10219,7 +10270,7 @@ namespace TES3MP::Native::Testing
                             && native.physicalScope(id<PlayerId>(1)) == 2
                             && native.physicalScope(id<PlayerId>(2)) == 3
                             && state(service)[1].party.separated
-                            && state(service)[1].rewardReceipts.size() == 2,
+                            && state(service)[1].rewardReceipts.size() == 1 && state(service)[1].itemReceipts.size() == 4,
                             "Controller kick in encounter did not separate scopes or preserve rewards");
                         {
                             InventoryHost splitRestart(descriptor, manifest, *establishedRegistry, *crypto, proposed);
@@ -10228,14 +10279,19 @@ namespace TES3MP::Native::Testing
                         }
 
                         // 5. Rejoin as helper shares scope 2 and allows reservation combat access.
-                        require(native.applyPartyEnrollment(91, 501, id<PlayerId>(1), id<PlayerId>(2), true,
+                        require(native.applyPartyEnrollment(91, 501, id<PlayerId>(1), id<PlayerId>(2), false,
                                     [&](auto bytes) {
                                         proposed.assign(bytes.begin(), bytes.end());
                                         return CanonicalDurabilityResult::Committed;
                                     })
                             && native.physicalScope(id<PlayerId>(1)) == 2
                             && native.physicalScope(id<PlayerId>(2)) == 2
-                            && state(service)[1].party.helper
+                            && !state(service)[1].party.separated && !state(service)[1].party.helper
+                            && native.applyPartyEnrollment(92, 502, id<PlayerId>(1), id<PlayerId>(2), true,
+                                    [&](auto bytes) {
+                                        proposed.assign(bytes.begin(), bytes.end());
+                                        return CanonicalDurabilityResult::Committed;
+                                    })
                             && native.sourceOpportunityAllows(1) && native.sourceOpportunityAllows(2),
                             "Live helper enrollment did not share scope 2 or allow reservation access");
                         {
@@ -10369,7 +10425,7 @@ namespace TES3MP::Native::Testing
                         const auto arrivedImage = image(current);
                         const auto campaign = readActorCampaign({reinterpret_cast<const char*>(arrivedImage.data()), arrivedImage.size()});
                         require(campaign.life->generation == originalCampaign.life->generation && campaign.life->deaths.empty()
-                            && std::ranges::equal(campaign.inventory, originalCampaign.inventory), "Activity duplicated lives or public inventory/loot");
+                            && std::ranges::equal(campaign.inventory, (npcBanks ? readActorCampaign({reinterpret_cast<const char*>(saved.data()), saved.size()}) : originalCampaign).inventory), "Activity duplicated lives or public inventory/loot");
                         const auto [personal, inner] = readPersonalScriptCampaign(
                             {reinterpret_cast<const char*>(arrivedImage.data()), arrivedImage.size()});
                         for (const int mismatch : {0, 1, 2})
@@ -10434,14 +10490,20 @@ namespace TES3MP::Native::Testing
                                     << "starting_items 2\n\"common_shirt_01\" 1 8\n\"iron longsword\" 1 16\n"
                                     << "shared_script \"ambient_pulse_83\" globals 1 \"ambient_counter_83\"\n"
                                     << "personal_scripts 3 "
-                                    << "story 951 scripts 1 script \"relay_q19\" running 1 globals 1 \"ambient_counter_83\" "
-                                       "dialogues 2 \"MS_FargothRing\" \"ring\" "
+                                    << "story 951 scripts 1 script \"fargoth_helper\" running 1 globals 1 \"ambient_counter_83\" "
+                                       "dialogues 2 \"MS_FargothRing\" \"fargoth_ring_topic\" "
                                     << "story 952 scripts 1 script \"nucciusScript\" running 1 globals 1 \"ambient_counter_83\" "
                                        "dialogues 2 \"MS_Nuccius\" \"nuccius_topic\" "
                                     << "story 953 scripts 2 script \"TR_m1_T_EldaleSc\" running 1 script \"TR_m0_TelvanniHortDeathSc\" running 0 "
                                        "globals 1 \"ambient_counter_83\" dialogues 2 \"TR_M1_GS_MQ_4\" \"puzzling riddles\"\n";
                             }
-                            InventoryHost multiHost(multiDescriptor, manifest, *establishedRegistry, *crypto, {});
+                            const auto multiManifest = ContentManifest::create(testContentManifestId(),
+                                std::vector{CellSpaceDeclaration{id<CellSpaceId>(7), CellSpaceKind::Interior},
+                                    CellSpaceDeclaration{id<CellSpaceId>(8), CellSpaceKind::Interior},
+                                    CellSpaceDeclaration{id<CellSpaceId>(9), CellSpaceKind::Interior}},
+                                std::vector{CellId::interior(id<CellSpaceId>(7)), CellId::interior(id<CellSpaceId>(8)), CellId::interior(id<CellSpaceId>(9))},
+                                id<AppearanceId>(1), testMovementProfile()).value();
+                            InventoryHost multiHost(multiDescriptor, multiManifest, *registry, *crypto, {});
                             auto& multiService = dynamic_cast<InventoryService&>(multiHost.service());
                             const auto& defs = multiService.characterBinding().mPersonalScripts->definitions();
                             require(defs.size() == 6
@@ -10466,20 +10528,67 @@ namespace TES3MP::Native::Testing
                             auto multiAuthority = std::get<CanonicalServerState>(
                                 createCanonicalServerState(multiPlayers, authority.activeSessions()));
                             multiService.synchronizeCells(multiAuthority);
+                            for (size_t i = 0; i < 2; ++i)
+                            {
+                                auto complete = multiService.prepareCharacterCompletion(
+                                    multiAuthority, id<PlayerId>(i + 1), completed[i], id<ServerTick>(1));
+                                require(complete && complete->commit([](auto) { return CanonicalDurabilityResult::Committed; })
+                                    == CanonicalDurabilityResult::Committed,
+                                    "Multi-cell scripted-NPC character completion failed");
+                                multiService.synchronizeCells(multiAuthority);
+                            }
                             auto scheduledStep = multiService.prepareNativePlayerTick(
                                 multiAuthority, id<ServerTick>(2), 1.f / 30, {}, &world, {}, {});
                             require(scheduledStep
                                 && scheduledStep->commit([](auto) { return CanonicalDurabilityResult::Committed; })
                                     == CanonicalDurabilityResult::Committed,
                                 "Multi-cell scripted-NPC scheduled player tick failed");
-                            const auto multiStories = state(multiService);
+                            const auto multiSavedBefore = image(multiService);
+                            const auto multiStories = multiService.characterBinding().mPersonalScripts->restore(
+                                readActorCampaign({reinterpret_cast<const char*>(multiSavedBefore.data()), multiSavedBefore.size()}).personalScripts);
                             require(multiStories.size() == 6
                                 && number(multiStories[0].members[0], "calls") == 1.f
                                 && number(multiStories[2].runtime, "calls") == 1.f
                                 && number(multiStories[4].runtime, "calls") == 1.f,
                                 "Multi-cell scripted-NPC scheduled banks did not advance per-story NPC scripts");
+                            const auto keleyRing = ESM::RefId::stringRefId("common_ring_01");
+                            const auto shirtId = ESM::RefId::stringRefId("common_shirt_01");
+                            require(!multiService.hasLockedQuestProvenance(id<PlayerId>(1), keleyRing)
+                                && !multiService.hasLockedQuestProvenance(id<PlayerId>(2), keleyRing),
+                                "Unacquired quest item falsely reported locked provenance");
+                            std::vector<std::byte> pickupCandidate;
+                            const auto beforePickup = image(multiService);
+                            require(!multiService.applyQuestItemPickup(951, id<PlayerId>(1), 7001, keleyRing, 1,
+                                        [&](auto bytes) {
+                                            pickupCandidate.assign(bytes.begin(), bytes.end());
+                                            return CanonicalDurabilityResult::Rejected;
+                                        })
+                                && image(multiService) == beforePickup
+                                && !multiService.hasLockedQuestProvenance(id<PlayerId>(1), keleyRing),
+                                "Rejected quest item pickup mutated state or provenance");
+                            require(multiService.applyQuestItemPickup(951, id<PlayerId>(1), 7001, keleyRing, 1,
+                                        [&](auto bytes) {
+                                            pickupCandidate.assign(bytes.begin(), bytes.end());
+                                            return CanonicalDurabilityResult::Committed;
+                                        })
+                                && image(multiService) == pickupCandidate
+                                && multiService.hasLockedQuestProvenance(id<PlayerId>(1), keleyRing)
+                                && !multiService.hasLockedQuestProvenance(id<PlayerId>(1), shirtId)
+                                && !multiService.hasLockedQuestProvenance(id<PlayerId>(2), keleyRing),
+                                "Player 1 quest item pickup did not mint provenance lock and inventory item");
+                            require(!multiService.applyQuestItemPickup(951, id<PlayerId>(1), 7001, keleyRing, 1,
+                                        [](auto) { return CanonicalDurabilityResult::Committed; }),
+                                "Duplicate quest item pickup from the same world/container source was permitted for Player 1");
+                            require(multiService.applyQuestItemPickup(951, id<PlayerId>(2), 7001, keleyRing, 1,
+                                        [&](auto bytes) {
+                                            pickupCandidate.assign(bytes.begin(), bytes.end());
+                                            return CanonicalDurabilityResult::Committed;
+                                        })
+                                && image(multiService) == pickupCandidate
+                                && multiService.hasLockedQuestProvenance(id<PlayerId>(2), keleyRing),
+                                "Non-depleting world/container quest item was not available for Player 2");
                             const auto multiSaved = image(multiService);
-                            InventoryHost multiRestart(multiDescriptor, manifest, *establishedRegistry, *crypto, multiSaved);
+                            InventoryHost multiRestart(multiDescriptor, multiManifest, *establishedRegistry, *crypto, multiSaved);
                             require(image(multiRestart.service()) == multiSaved,
                                 "Multi-cell scripted-NPC campaign failed exact recovery");
                         }

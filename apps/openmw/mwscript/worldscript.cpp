@@ -253,6 +253,7 @@ namespace MWScript
                 Stats::registerHealthOpcodes(extensions);
                 Stats::registerSpellOpcodes(extensions);
                 Ai::registerCombatOpcodes(extensions);
+                Ai::registerActivityOpcodes(extensions);
                 Transformation::registerPositionOpcodes(extensions, false);
                 Container::registerItemOpcodes(extensions);
             }
@@ -284,7 +285,8 @@ namespace MWScript
                          Compiler::Misc::opcodeOnActivateExplicit, Compiler::Misc::opcodeActivateExplicit,
                          Compiler::Stats::opcodeGetDynamicExplicit, Compiler::Stats::opcodeGetDynamicGetRatioExplicit,
                          Compiler::Stats::opcodeOnDeathExplicit, Compiler::Transformation::opcodeGetPosExplicit,
-                         Compiler::Transformation::opcodeGetAngleExplicit})
+                         Compiler::Transformation::opcodeGetAngleExplicit, Compiler::Ai::opcodeGetAiPackageDoneExplicit,
+                         Compiler::Ai::opcodeGetCurrentAiPackageExplicit, Compiler::Dialogue::opcodeForceGreetingExplicit})
                     if (instruction == Compiler::Generator::segment5(op))
                     {
                         require(i >= 2 && (mProgram.mInstructions[i - 2] >> 24) == 0
@@ -384,7 +386,7 @@ namespace MWScript
         else if (mBank) Dialogue::installJournalQueryOpcode(interpreter);
         if (sourceNpcStats) Stats::installDispositionResultOpcode(interpreter);
         if (referenceState) Misc::installDisableOpcodes(interpreter);
-        if (referenceState) Transformation::installPositionOpcodes(interpreter);
+        if (referenceState || !mSource.empty()) Transformation::installPositionOpcodes(interpreter);
         if (referenceState) Ai::installActivityOpcodes(interpreter);
         if (referenceState || !mSource.empty()) Ai::installCombatOpcodes(interpreter);
         if (referenceState || !mSource.empty()) Container::installItemOpcodes(interpreter);

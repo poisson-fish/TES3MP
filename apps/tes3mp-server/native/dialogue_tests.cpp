@@ -2506,6 +2506,130 @@ namespace
             require(enabledFargoth.result.executed && enabledFargoth.state[0].encounterReturned
                 && enabledFargoth.state[0].encounterEnabled,
                 "Safe-return Enable rejected a scripted NPC whose script is bound in the story bank");
+
+            // Cross-cell AI packages (AiFollow, AiEscortCell, AiTravel, AiWander) + package replacement + destination dialogue.
+            ESM::Cell gnaarCell; gnaarCell.blank(); gnaarCell.mName = "Gnaar Mok";
+            gnaarCell.mData.mFlags = ESM::Cell::Interior; gnaarCell.mData.mX = 0; gnaarCell.mData.mY = 0;
+            gnaarCell.updateId(); fixture.content.insert(gnaarCell);
+            ESM::Script crossCellPrimary; crossCellPrimary.blank(); crossCellPrimary.mId = id("ledger_v63");
+            crossCellPrimary.mScriptText = "begin ledger_v63\nlong calls\nlong pkg\nlong done\n"
+                "set calls to calls + 1\n"
+                "set pkg to GetCurrentAIPackage\n"
+                "set done to GetAiPackageDone\n"
+                "if ( GetPCCell \"Gnaar Mok\" == 1 )\n"
+                "if ( GetCurrentAIPackage == 3 )\n"
+                "if ( GetDistance player < 512 )\n"
+                "Journal \"journey_t37\" 30\n"
+                "ForceGreeting\n"
+                "AiWander 0 0 0 60 40 20 0 0 0 0 0 0\n"
+                "endif\n"
+                "endif\n"
+                "endif\n"
+                "if ( done == 1 )\n"
+                "if ( GetJournalIndex \"journey_t37\" == 40 )\n"
+                "AiTravel 16000 -24000 120\n"
+                "Journal \"journey_t37\" 50\n"
+                "endif\n"
+                "endif\nend";
+            const std::vector<ESM::Script> crossBank{crossCellPrimary, eldaleScript};
+            auto crossPrimary = std::make_shared<const SharedWorldScript>(
+                crossCellPrimary, std::vector{global}, "cross-cell-ai", crypto, crossBank, id("fargoth"), true);
+            auto crossMember = std::make_shared<const SharedWorldScript>(
+                eldaleScript, std::vector{global}, "cross-cell-ai", crypto, crossBank, id("fargoth"), true);
+            std::vector<PersonalScripts::Definition> crossDefs;
+            for (uint64_t ch : {11ull, 22ull})
+            {
+                auto dials = records();
+                auto& t = dials[1];
+                t.mInfo.clear();
+                ESM::DialInfo startFollow; startFollow.blank(); startFollow.mId = id("cross_follow_10");
+                startFollow.mActor = id("fargoth");
+                startFollow.mSelects = {condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 0)};
+                startFollow.mResponse = "Follow me across cells.";
+                startFollow.mResultScript = "Journal journey_t37 10\nfargoth->AiFollow player 0 17153 30966 795 0\nGoodbye";
+                t.mInfo.push_back(startFollow);
+
+                ESM::DialInfo replaceEscortCell; replaceEscortCell.blank(); replaceEscortCell.mId = id("cross_escort_cell_40");
+                replaceEscortCell.mActor = id("fargoth");
+                replaceEscortCell.mSelects = {condition(ESM::DialogueCondition::Function_Journal, "journey_t37", 30)};
+                replaceEscortCell.mResponse = "Now escort me to Gnaar Mok.";
+                replaceEscortCell.mResultScript = "Journal journey_t37 40\nfargoth->AiEscortCell player \"Gnaar Mok\" 0 -56000 30000 128\n"
+                    "player->AddItem \"gold_001\" 50\nGoodbye";
+                t.mInfo.push_back(replaceEscortCell);
+
+                crossDefs.push_back({ch, 959, crossPrimary, {{crossMember, true}}, true,
+                    dials, PersonalScripts::EncounterBinding{41, id("fargoth"), ESM::RefId::esm3ExteriorCell(-2, -9)}});
+            }
+            PersonalScripts crossPolicy(78, crossDefs, crypto, true, true, true, true, true, true, true, true, true, true, true);
+            auto crossState = crossPolicy.initial();
+            MWWorld::ManualRef fargothActor(fixture.content, id("fargoth"));
+            resolver.actor = fargothActor.getPtr();
+            const auto runCrossIntent = [&](const PersonalScripts::State& before, uint64_t ch, uint64_t cmd, std::string_view cellName) {
+                const auto& inst = before[ch == 11 ? 0 : 1];
+                resolver.expected = inst.last;
+                ++resolver.expected.invocation;
+                resolver.expected.causalEvent = inst.eventCursor + 1;
+                resolver.expected.sourceReference = 41;
+                resolver.expected.sourceLife = 1;
+                resolver.sourceLife = 1;
+                return crossPolicy.prepareIntent(before, ch, cmd,
+                    {959, 41, 1, inst.dialogueRevision, "passage_k61", -1},
+                    cellName, fixture.content, resolver, 16, nullptr, {}, &speakerItemStats, JournalDate);
+            };
+            auto aFollow = runCrossIntent(crossState, 11, 501, "Seyda Neen");
+            require(aFollow.result.executed && aFollow.state[0].activity
+                && aFollow.state[0].activity->effectivePackageType() == 3
+                && aFollow.state[0].activity->destination == std::array<float, 3>{17153.f, 30966.f, 795.f}
+                && PersonalScripts::physicalScope(aFollow.state, 11) == 2
+                && PersonalScripts::physicalScope(aFollow.state, 22) == 1
+                && crossPolicy.encode(crossPolicy.restore(aFollow.image)) == aFollow.image,
+                "Cross-cell AiFollow + Goodbye dialogue result failed or did not round-trip");
+            crossState = crossPolicy.restore(aFollow.image);
+            crossState[0].relocation->position = {-56000.f, 30000.f, 128.f};
+            crossState[0].activity->actorImage = {'c', 'r', 'o', 's', 's'};
+            crossState[0].activity->tick = 1;
+            crossState[0].activity->steps = 1;
+            const std::array<PersonalScripts::PlayerLocation, 2> crossLocs{{
+                {11, {-56100.f, 30050.f, 128.f}, "Gnaar Mok"},
+                {22, {64.f, -64.f, 1.f}, "Seyda Neen"}}};
+            PersonalScripts::Source crossSource{41, 1, 0, id("fargoth"), true, 0, 0, events, &publicStats, publicPose,
+                &privateStats, false, false, 0, 0, false, 0, scheduledInvs, crossLocs};
+            auto gnaarScheduled = crossPolicy.prepareScheduled(crossState, 2, both, fixture.content, scheduledResolver, &crossSource);
+            require(gnaarScheduled.result.executed
+                && gnaarScheduled.state[0].dialogue.quests.front().mState == 30
+                && gnaarScheduled.state[0].activity
+                && gnaarScheduled.state[0].activity->effectivePackageType() == 0
+                && integer(gnaarScheduled.state[0].runtime, "pkg") == 3
+                && gnaarScheduled.state[1].dialogue.quests.empty()
+                && crossPolicy.encode(crossPolicy.restore(gnaarScheduled.image)) == gnaarScheduled.image,
+                "Scheduled GetPCCell/GetCurrentAIPackage/GetDistance/ForceGreeting/AiWander replacement failed");
+            crossState = crossPolicy.restore(gnaarScheduled.image);
+            // Dialogue with relocated NPC in private scope replaces AiWander with cross-cell AiEscortCell!
+            auto aEscortCell = runCrossIntent(crossState, 11, 502, "Gnaar Mok");
+            require(aEscortCell.result.executed
+                && aEscortCell.state[0].dialogue.quests.front().mState == 40
+                && aEscortCell.state[0].activity
+                && aEscortCell.state[0].activity->effectivePackageType() == 2
+                && aEscortCell.state[0].activity->destinationCell == id("Gnaar Mok")
+                && aEscortCell.state[0].activity->destination == std::array<float, 3>{-56000.f, 30000.f, 128.f}
+                && aEscortCell.state[0].activity->steps == 0
+                && !aEscortCell.state[0].activity->completed
+                && crossPolicy.encode(crossPolicy.restore(aEscortCell.image)) == aEscortCell.image,
+                "Dialogue with relocated NPC in private scope failed to replace package with AiEscortCell");
+            crossState = crossPolicy.restore(aEscortCell.image);
+            crossState[0].activity->steps = 2;
+            crossState[0].activity->tick = 3;
+            crossState[0].activity->completed = true;
+            auto nextLegScheduled = crossPolicy.prepareScheduled(crossState, 4, both, fixture.content, scheduledResolver, &crossSource);
+            require(nextLegScheduled.result.executed
+                && nextLegScheduled.state[0].dialogue.quests.front().mState == 50
+                && integer(nextLegScheduled.state[0].runtime, "done") == 1
+                && nextLegScheduled.state[0].activity
+                && nextLegScheduled.state[0].activity->effectivePackageType() == 1
+                && nextLegScheduled.state[0].activity->destination == std::array<float, 3>{16000.f, -24000.f, 120.f}
+                && !nextLegScheduled.state[0].activity->completed
+                && crossPolicy.encode(crossPolicy.restore(nextLegScheduled.image)) == nextLegScheduled.image,
+                "Scheduled GetAiPackageDone -> cross-cell AiTravel package replacement failed");
         }
         std::cout << "npc banks: unified M5 policy (Disable/Enable/return, relocation/activity/return, wait/life-event/opportunity, provenance items); "
             "private pose/health/timer/activation/item/scheduled-Disable continuation across public death; exact recovery\n";

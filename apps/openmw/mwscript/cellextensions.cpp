@@ -167,6 +167,13 @@ namespace MWScript
                 std::string_view name = runtime.getStringLiteral(runtime[0].mInteger);
                 runtime.pop();
 
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    runtime.push(context.pcCell(name) ? 1 : 0);
+                    return;
+                }
+
                 if (!MWMechanics::getPlayer().isInCell())
                 {
                     runtime.push(0);
@@ -250,11 +257,13 @@ namespace MWScript
         void registerStateOpcodes(Compiler::Extensions& extensions)
         {
             extensions.registerFunction("cellchanged", 'l', "", Compiler::Cell::opcodeCellChanged);
+            extensions.registerFunction("getpccell", 'l', "c", Compiler::Cell::opcodeGetPCCell);
         }
 
         void installStateOpcodes(Interpreter::Interpreter& interpreter)
         {
             interpreter.installSegment5<OpCellChanged>(Compiler::Cell::opcodeCellChanged);
+            interpreter.installSegment5<OpGetPCCell>(Compiler::Cell::opcodeGetPCCell);
         }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)
@@ -265,7 +274,6 @@ namespace MWScript
             interpreter.installSegment5<OpCOC>(Compiler::Cell::opcodeCOC);
             interpreter.installSegment5<OpCOE>(Compiler::Cell::opcodeCOE);
             interpreter.installSegment5<OpGetInterior>(Compiler::Cell::opcodeGetInterior);
-            interpreter.installSegment5<OpGetPCCell>(Compiler::Cell::opcodeGetPCCell);
             interpreter.installSegment5<OpGetWaterLevel>(Compiler::Cell::opcodeGetWaterLevel);
             interpreter.installSegment5<OpSetWaterLevel>(Compiler::Cell::opcodeSetWaterLevel);
             interpreter.installSegment5<OpModWaterLevel>(Compiler::Cell::opcodeModWaterLevel);

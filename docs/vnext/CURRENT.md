@@ -56,23 +56,26 @@ Staged health reads/wait UI: `build/logs/m5-{health-{state-final,host-03},wait-a
 V95 (`native-inventory-95`) unifies V85–95, binds `npc->mScript` into personal/shared banks,
 supports multi-cell/actor `EncounterBinding`, and admits source-bank
 GetJournalIndex/Journal/SetJournalIndex/AddTopic/CellChanged/MenuMode/GetPCSleep/OnActivate/Activate/Disable,
-GetSpell/AddSpell/RemoveSpell, StartCombat/StopCombat/SetFight/Cast, foreign-NPC ModDisposition
-and provenance GetItemCount/AddItem/RemoveItem/Function_Item across deaths/respawns.
+GetSpell/AddSpell/RemoveSpell, StartCombat/StopCombat/SetFight/Cast, foreign-NPC ModDisposition,
+cross-cell AI packages (`AiWander`/`AiTravel`/`AiEscort`/`AiFollow`/`AiEscortCell`/`AiFollowCell`/`GetAIPackageDone`/`GetCurrentAIPackage`/`GetPCCell`/`GetDistance`/`ForceGreeting`/`Goodbye`) with multi-cell escort continuation (e.g., Pemenie),
+and provenance GetItemCount/AddItem/RemoveItem/Function_Item with quest-item drop/transfer locks and non-depleting world/container pickup rights (`prepareQuestItemAcquisition`) across deaths/respawns.
 V96 (`native-inventory-96`) adds persistent opt-in parties/helpers, delegated choices with
-dissent/physical split, per-character costs/rewards (`RewardReceipt`s), helper/party OnDeath
+dissent/physical split, per-character costs/rewards (`RewardReceipt`s), party kill XP/credit sharing (`combatMemberIds`), helper/party OnDeath
 credit/reservations, offline/leader-loss handoff, leave/kick/rejoin, and wire v4 `DialogueEncounterStatus`.
 M5 #5 scopes `MWLua` (`world.mwscript`, `sendEvent`, `LuaEvents`) and `LuaUtil` (`LuaStorage`,
 `ScriptsContainer` timers/callbacks, serialization, `pcall`/`xpcall` waits, `SafePtr` lifetimes)
 with character/story/shared isolation, rollback/retry, and `LUAM`/storage recovery.
 M5 #6 proves unchanged Seyda Neen (`MS_FargothRing`, `MS_Nuccius`/`voduniusScript`,
-`MS_Lookout`/`treestumpScript`, `MV_DeadTaxman`/`processusScript`) and TR *Duel of Riddles*
+`MS_Lookout`/`treestumpScript`, `MV_DeadTaxman`/`processusScript`), *Boots of Blinding Speed* (`EB_Unrequited`/`pemenieScript`), and TR *Duel of Riddles*
 (`TR_M1_GS_MQ_4`, `TR_m1_T_EldaleSc`, `TR_m0_TelvanniHortDeathSc`) across A/B with
 concurrent dialogue, failed-write rollback, waiting/reserved restart and attributed `OnDeath`.
 Native: `build/logs/m5-{activity-host,departure-host,activity-state}-final.log`,
 `build/logs/m5-npc-bank-{state,script}.log`, `build/logs/m5-{npc-state,dialogue-stock,quest-audit,multi-cell-build}.log`,
-`build/logs/m5-dialogue-{npc-banks,parties,stock}.log`, `build/logs/m5-parties-{adapter,dialogue,all-dialogue}.log`,
+`build/logs/m5-dialogue-{activities,npc-banks,parties,stock}.log`, `build/logs/m5-parties-{adapter,dialogue,all-dialogue}.log`,
+`build/logs/m5-closeout-story-{activities,npc-banks,parties}.log`,
 `build/logs/m5-{lua-build,script-context-lua-{context,rollback,stock}}.log`,
-`build/logs/m5-{seyda,tr}-quest-preflight.log`, `build/logs/m5-seyda-content-preflight-final.log`.
+`build/logs/m5-{world-script-quest-audit,seyda-quest-preflight,tr-quest-preflight,seyda-content-preflight-final}.log`.
+Rendered: `build/m5-quest-banks-{desktop,restart}-02/result.json`,
+`build/logs/m5-quest-banks-{fixture,desktop,restart}-02.log`.
 
-**Next:** capture two-desktop rendered/acceptance evidence for M5 unchanged Seyda Neen/TR quests
-before closing M5. Package replacement/cross-cell AI remain closed.
+**Next:** M5 closeout complete; proceed to M5 operator sign-off and M6 ([PLAN.md](PLAN.md)).

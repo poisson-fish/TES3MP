@@ -200,6 +200,13 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    MWWorld::Ptr ptr = R()(runtime);
+                    context.forceGreeting(ptr);
+                    return;
+                }
                 requireStockDialogue(runtime);
                 MWWorld::Ptr ptr = R()(runtime);
 
@@ -232,6 +239,12 @@ namespace MWScript
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
+                auto& context = static_cast<InterpreterContext&>(runtime.getContext());
+                if (context.getExecutionContext())
+                {
+                    context.goodbye();
+                    return;
+                }
                 requireStockDialogue(runtime);
                 MWBase::Environment::get().getDialogueManager()->goodbye();
             }
@@ -372,6 +385,8 @@ namespace MWScript
             extensions.registerInstruction("journal", "cl", Compiler::Dialogue::opcodeJournal);
             extensions.registerInstruction("setjournalindex", "cl", Compiler::Dialogue::opcodeSetJournalIndex);
             extensions.registerInstruction("addtopic", "S", Compiler::Dialogue::opcodeAddTopic);
+            extensions.registerInstruction(
+                "forcegreeting", "x", Compiler::Dialogue::opcodeForceGreeting, Compiler::Dialogue::opcodeForceGreetingExplicit);
         }
 
         void installJournalQueryOpcode(Interpreter::Interpreter& interpreter)
@@ -385,6 +400,8 @@ namespace MWScript
             interpreter.installSegment5<OpSetJournalIndex>(Compiler::Dialogue::opcodeSetJournalIndex);
             installJournalQueryOpcode(interpreter);
             interpreter.installSegment5<OpAddTopic>(Compiler::Dialogue::opcodeAddTopic);
+            interpreter.installSegment5<OpForceGreeting<ImplicitRef>>(Compiler::Dialogue::opcodeForceGreeting);
+            interpreter.installSegment5<OpForceGreeting<ExplicitRef>>(Compiler::Dialogue::opcodeForceGreetingExplicit);
         }
 
         void installJournalOpcodes(Interpreter::Interpreter& interpreter)
@@ -395,6 +412,7 @@ namespace MWScript
             installJournalQueryOpcode(interpreter);
             interpreter.installSegment5<OpAddTopic>(Compiler::Dialogue::opcodeAddTopic);
             interpreter.installSegment3<OpChoice>(Compiler::Dialogue::opcodeChoice);
+            interpreter.installSegment5<OpGoodbye>(Compiler::Dialogue::opcodeGoodbye);
         }
 
         void installOpcodes(Interpreter::Interpreter& interpreter)
@@ -403,7 +421,6 @@ namespace MWScript
             interpreter.installSegment5<OpFillJournal>(Compiler::Dialogue::opcodeFillJournal);
             interpreter.installSegment5<OpForceGreeting<ImplicitRef>>(Compiler::Dialogue::opcodeForceGreeting);
             interpreter.installSegment5<OpForceGreeting<ExplicitRef>>(Compiler::Dialogue::opcodeForceGreetingExplicit);
-            interpreter.installSegment5<OpGoodbye>(Compiler::Dialogue::opcodeGoodbye);
             interpreter.installSegment5<OpGetReputation<ImplicitRef>>(Compiler::Dialogue::opcodeGetReputation);
             interpreter.installSegment5<OpSetReputation<ImplicitRef>>(Compiler::Dialogue::opcodeSetReputation);
             interpreter.installSegment5<OpModReputation<ImplicitRef>>(Compiler::Dialogue::opcodeModReputation);
