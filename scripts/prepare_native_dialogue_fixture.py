@@ -22,10 +22,11 @@ parser.add_argument('--enable-source', action='store_true', help='Fresh V88 stoc
 parser.add_argument('--relocate-source', action='store_true', help='Fresh V89 inert relocation; --return-path selects V90 dormant destination return')
 parser.add_argument('--life-events', action='store_true', help='Fresh V92 scheduled source health/OnDeath banks and wait UI')
 parser.add_argument('--fair-opportunities', action='store_true', help='Fresh V93 next-life reservation and recovery proof')
+parser.add_argument('--quest-banks', action='store_true', help='Fresh V96 Seyda Neen and Tamriel Rebuilt quest banks')
 for name in ('base-content', 'stock-config', 'profiles', 'content', 'runtime', 'binary', 'settings'):
     parser.add_argument('--' + name, type=lambda p: Path(p).resolve(), required=True)
 args = parser.parse_args()
-args.life_events |= args.fair_opportunities
+args.life_events |= args.fair_opportunities or args.quest_banks
 if args.life_events and (args.return_path or args.enable_source or args.relocate_source):
     raise ValueError('Life-event proof requires the shared single-source scope')
 if args.relocate_source and args.enable_source:
@@ -101,6 +102,89 @@ blob += script(shared, f'begin {shared}\nend {shared}\n')
 stories = []
 for number, direction in (((91, 'north'),) if args.life_events else ((91, 'north'), (92, 'south'))):
     bank, topic, quest = f'ledger_{number}', f'{direction}_passage_{number}', f'{direction}_journey_{number}'
+    if args.quest_banks:
+        credit = f'credit_{number}'
+        blob += record(b'GLOB', string(b'NAME', credit) + sub(b'FNAM', b'l') + sub(b'FLTV', struct.pack('<f', 0)))
+        for rname, rlabel in (
+            ('ring_keley', 'Engraved Ring of Healing'),
+            ('ring_nuccius', 'Cursed Ring of Vodunius Nuccius'),
+            ('extravagant_ring_01', 'Extravagant Ring of Processus Vitellius'),
+        ):
+            blob += record(b'CLOT', string(b'NAME', rname) + string(b'MODL', 'c\\C_Ring_Extravagant_1.nif')
+                + string(b'FNAM', rlabel) + sub(b'CTDT', struct.pack('<ifHH', 8, .1, 30, 0))
+                + string(b'ITEX', 'c\\Tx_ring_extravagant_1.tga'))
+        blob += script(bank, f'begin {bank}\nlong calls\nlong playerGold\nlong npcGold\nshort seydaStage\nshort trStage\n'
+            f'set calls to calls + 1\n'
+            f'if ( calls == 1 )\n'
+            f'AddItem "gold_001" 50\n'
+            f'endif\n'
+            f'set playerGold to player->GetItemCount "gold_001"\n'
+            f'if ( OnDeath == 1 )\nset {credit} to {credit} + 1\nendif\n'
+            f'set npcGold to GetItemCount "gold_001"\n'
+            f'set seydaStage to GetJournalIndex MS_Nuccius\nset trStage to GetJournalIndex TR_M1_GS_MQ_4\nend {bank}\n')
+        blob += script('fargothScript', 'begin fargothScript\nshort ringReturned\n'
+            'if ( GetJournalIndex MS_FargothRing >= 100 )\nset ringReturned to 1\nendif\nend fargothScript\n')
+        blob += script('TR_m1_T_EldaleSc', 'begin TR_m1_T_EldaleSc\nshort TR_Map\nshort riddlesSolved\n'
+            'set TR_Map to 1\nif ( GetJournalIndex TR_M1_GS_MQ_4 >= 50 )\nset riddlesSolved to 1\nendif\n'
+            'end TR_m1_T_EldaleSc\n')
+        blob += record(b'DIAL', string(b'NAME', 'seyda_neen_quests') + sub(b'DATA', b'\0'))
+        seyda_infos = [
+            ('seyda_taxman_200', "You found Processus Vitellius's tax record! Take 200 gold as your reward.",
+             'set calls to calls + 1\nJournal MV_DeadTaxman 200\nAddTopic "puzzling riddles"\n'
+             'if ( player->GetItemCount "sc_paper plain" >= 1 )\n'
+             'player->RemoveItem "sc_paper plain" 1\nplayer->RemoveItem "extravagant_ring_01" 1\n'
+             'player->AddItem "gold_001" 200\nRemoveItem "gold_001" 20\nendif',
+             [('4JX0MS_Nuccius', 100), ('4JX0MV_DeadTaxman', 0), ('1500', 4), ('5IX3sc_paper plain', 1)]),
+            ('seyda_nuccius_100', 'Take this cursed ring for 30 gold, and give me your advice so I can leave Seyda Neen!',
+             'set calls to calls + 1\nJournal MS_Nuccius 100\nplayer->AddItem "ring_nuccius" 1\n'
+             'player->RemoveItem "gold_001" 30\nChoice "Report Processus Vitellius\'s tax record" 4',
+             [('4JX0MS_FargothRing', 100), ('4JX0MS_Nuccius', 0), ('1500', 3)]),
+            ('seyda_fargoth_100', 'You found it! Thank you! Talk to Arrille, and check on Vodunius Nuccius.',
+             'set calls to calls + 1\nJournal MS_FargothRing 100\n"arrille"->ModDisposition 40\nModDisposition 50\n'
+             'player->RemoveItem "ring_keley" 1\nAddItem "ring_keley" 1\nChoice "Buy Vodunius Nuccius\'s ring (30 gold)" 3',
+             [('4JX0MS_FargothRing', 0), ('1500', 2), ('5IX3ring_keley', 1)]),
+            ('seyda_fargoth_0', 'Have you found my ring of healing? Please give it back!',
+             'set calls to calls + 1\nplayer->AddItem "ring_keley" 1\nplayer->AddItem "gold_001" 30\n'
+             'player->AddItem "sc_paper plain" 1\nplayer->AddItem "extravagant_ring_01" 1\n'
+             'Choice "No" 1 "Yes, here is your ring" 2',
+             [('4JX0MS_FargothRing', 0)]),
+        ]
+        for idx, (iname, itext, ires, isel) in enumerate(seyda_infos):
+            blob += info(iname, seyda_infos[idx-1][0] if idx else '', seyda_infos[idx+1][0] if idx+1 < len(seyda_infos) else '',
+                0, itext, ires, isel)
+        blob += record(b'DIAL', string(b'NAME', 'puzzling riddles') + sub(b'DATA', b'\0'))
+        tr_infos = [
+            ('tr_riddle_50', 'Time devours all things! You have won the Duel of Riddles in Port Telvannis!',
+             'set calls to calls + 1\nJournal TR_M1_GS_MQ_4 50\nModDisposition 15',
+             [('4JX0TR_M1_GS_MQ_4', 20), ('1500', 8)]),
+            ('tr_riddle_20', 'A Fish! Third riddle: This thing all things devours: birds, beasts, trees, flowers.',
+             'set calls to calls + 1\nJournal TR_M1_GS_MQ_4 20\nModDisposition 15\nChoice "Time" 8 "Rust" 9',
+             [('4JX0TR_M1_GS_MQ_4', 10), ('1500', 4)]),
+            ('tr_riddle_10', 'An Anchor! Second riddle: Alive without breath, cold as death; never thirsty, ever drinking.',
+             'set calls to calls + 1\nJournal TR_M1_GS_MQ_4 10\nModDisposition 15\nChoice "A Fish" 4 "Ice" 5',
+             [('4JX0TR_M1_GS_MQ_4', 0), ('1500', 1)]),
+            ('tr_riddle_0', 'Welcome to the Duel of Riddles! First riddle: To use me, you throw me away; when done, you bring me back.',
+             'set calls to calls + 1\nChoice "An Anchor" 1 "A Net" 2',
+             [('4JX0TR_M1_GS_MQ_4', 0)]),
+        ]
+        for idx, (iname, itext, ires, isel) in enumerate(tr_infos):
+            blob += info(iname, tr_infos[idx-1][0] if idx else '', tr_infos[idx+1][0] if idx+1 < len(tr_infos) else '',
+                0, itext, ires, isel)
+        blob += record(b'DIAL', string(b'NAME', 'TR_M1_GS_MQ_4') + sub(b'DATA', b'\4'))
+        for idx, (stage, jtext) in enumerate((
+            (10, 'Solved the first riddle (An Anchor) in the Duel of Riddles.'),
+            (20, 'Solved the second riddle (A Fish) in the Duel of Riddles.'),
+            (50, 'Won the Duel of Riddles in Port Telvannis by answering Time.'),
+        )):
+            payload = string(b'INAM', f'tr_journal_{stage}') + string(b'PNAM', f'tr_journal_{(10,20,50)[idx-1]}' if idx else '')
+            payload += string(b'NNAM', f'tr_journal_{(10,20,50)[idx+1]}' if idx < 2 else '')
+            payload += sub(b'DATA', struct.pack('<iibbbb', 4, stage, -1, -1, -1, 0)) + string(b'NAME', jtext)
+            if stage == 50: payload += sub(b'QSTF', b'\1')
+            blob += record(b'INFO', payload)
+        stories += [f'story {number} scripts 4 script "{bank}" running 1 script "fargothScript" running 1 '
+            f'script "voduniusScript" running 1 script "TR_m1_T_EldaleSc" running 1 globals 1 "{credit}" '
+            f'dialogues 6 "seyda_neen_quests" "puzzling riddles" "MS_FargothRing" "MS_Nuccius" "MV_DeadTaxman" "TR_M1_GS_MQ_4"']
+        continue
     if args.life_events:
         relay, credit = f'relay_{number}', f'credit_{number}'
         blob += record(b'GLOB', string(b'NAME', credit) + sub(b'FNAM', b'l') + sub(b'FLTV', struct.pack('<f', 0)))
@@ -154,7 +238,7 @@ subprocess.run([str(binary / 'tes3mp_native_bootstrap.exe'), str(config), str(ru
     *(['npc_door_actor'] * 2 if args.encounter else ['npc_hit_female', 'npc_hit_beast']), '1', '60:-100:1', str(args.settings),
     'player-physics', 'shared_script', shared, 'globals', '0'], check=True, cwd=binary)
 native = (runtime / 'native.txt').read_text().replace('native-inventory-80',
-    'native-inventory-93' if args.fair_opportunities else 'native-inventory-92' if args.life_events else 'native-inventory-90' if args.relocate_source and args.return_path else 'native-inventory-89' if args.relocate_source else 'native-inventory-88' if args.enable_source else 'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
+    'native-inventory-96' if args.quest_banks else 'native-inventory-93' if args.fair_opportunities else 'native-inventory-92' if args.life_events else 'native-inventory-90' if args.relocate_source and args.return_path else 'native-inventory-89' if args.relocate_source else 'native-inventory-88' if args.enable_source else 'native-inventory-87' if args.return_path else 'native-inventory-86' if args.encounter else 'native-inventory-85')
 if args.life_events:
     native = native.replace('respawn 27000', 'respawn 900')
     native += 'starting_items 1\n"iron longsword" 1 16\n'
@@ -182,5 +266,5 @@ for i, role in enumerate(('Alice', 'Bob')):
     (user / 'openmw.cfg').write_text((config / 'openmw.cfg').read_text()+'\n'+(runtime / 'client-content.cfg').read_text())
 (runtime / 'players.txt').write_text('\n'.join(rows)+'\n', newline='\n')
 shutil.copyfile(args.profiles, runtime / 'profiles.json')
-print('Prepared fresh ' + ('V93 reserved life' if args.fair_opportunities else 'V92 life events' if args.life_events else 'V90 relocation return' if args.relocate_source and args.return_path else 'V89 relocation encounter' if args.relocate_source else 'V88 Enable encounter' if args.enable_source else 'V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
-      + ': ' + ('stock health/OnDeath and durable waits' if args.life_events else 'disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))
+print('Prepared fresh ' + ('V96 quest banks' if args.quest_banks else 'V93 reserved life' if args.fair_opportunities else 'V92 life events' if args.life_events else 'V90 relocation return' if args.relocate_source and args.return_path else 'V89 relocation encounter' if args.relocate_source else 'V88 Enable encounter' if args.enable_source else 'V87 return encounter' if args.return_path else 'V86 Disable encounter' if args.encounter else 'V85 dialogue fixture')
+      + ': ' + ('Seyda Neen and TR Duel of Riddles quests' if args.quest_banks else 'stock health/OnDeath and durable waits' if args.life_events else 'disposition >=55/<55' if args.disposition else 'Strength >=40/<40; Destruction >=20/<20'))
